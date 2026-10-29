@@ -11,11 +11,11 @@ java {
 }
 
 android {
-    namespace = "com.busonroad"
+    namespace = "com.trackr"
     compileSdk = 37
 
     defaultConfig {
-        applicationId = "com.busonroad"
+        applicationId = "com.trackr"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
