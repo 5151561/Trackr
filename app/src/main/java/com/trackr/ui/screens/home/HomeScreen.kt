@@ -1282,19 +1282,6 @@ private fun CityPickerBottomSheet(
                                             )
                                         }
                                     }
-                                    if (city.supportSubway) {
-                                        Surface(
-                                            shape = RoundedCornerShape(4.dp),
-                                            color = MaterialTheme.colorScheme.secondaryContainer
-                                        ) {
-                                            Text(
-                                                text = "地铁",
-                                                fontSize = 10.sp,
-                                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                            )
-                                        }
-                                    }
                                     if (city.mygolbsCityCode != null) {
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
@@ -1589,19 +1576,6 @@ private fun CityPickerBottomSheet(
                                                         text = "定位",
                                                         fontSize = 10.sp,
                                                         color = MaterialTheme.colorScheme.onTertiaryContainer,
-                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                    )
-                                                }
-                                            }
-                                            if (city.supportSubway) {
-                                                Surface(
-                                                    shape = RoundedCornerShape(4.dp),
-                                                    color = MaterialTheme.colorScheme.secondaryContainer
-                                                ) {
-                                                    Text(
-                                                        text = "地铁",
-                                                        fontSize = 10.sp,
-                                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
                                                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                                     )
                                                 }

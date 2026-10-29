@@ -321,15 +321,20 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             lineMap.getOrPut(key) { ArrayList() }.add(dir)
         }
 
-        val lineSummaries = lineMap.map { (key, directions) ->
-            val first = directions.firstOrNull { it.direction == 0 } ?: directions.first()
-            BusLineSummary(
-                name = lineNames[key] ?: first.name,
-                lineNo = first.lineNo,
-                isSubway = lineSubwayMap[key] == true,
-                directions = directions,
-                source = DataSourceType.CHELAILE
-            )
+        val lineSummaries = lineMap.mapNotNull { (key, directions) ->
+            if (lineSubwayMap[key] == true) {
+                // 过滤纯地铁线路，因第三方接口无实时在途列车数据
+                null
+            } else {
+                val first = directions.firstOrNull { it.direction == 0 } ?: directions.first()
+                BusLineSummary(
+                    name = lineNames[key] ?: first.name,
+                    lineNo = first.lineNo,
+                    isSubway = false,
+                    directions = directions,
+                    source = DataSourceType.CHELAILE
+                )
+            }
         }
 
         // 站点列表

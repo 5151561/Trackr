@@ -424,6 +424,9 @@ class TransitRepository(
                 }
             }
 
+            // 过滤纯地铁线路（第三方源无在途实时列车追踪数据）
+            mergedLines.removeAll { it.isSubway }
+
             mergedLines.sortWith { a, b ->
                 RouteProjectionMath.compareLineNames(a.name, b.name)
             }

@@ -3,7 +3,7 @@
 # Trackr · BusOnRoad
 
 <p align="center">
-  <strong>Android 实时公交与地铁到站追踪应用</strong>
+  <strong>Android 实时公交到站追踪应用</strong>
 </p>
 
 <p align="center">
@@ -37,7 +37,7 @@
 
 ## 项目简介
 
-Trackr (BusOnRoad) 是一个 Android 实时公交与地铁到站查询应用。通过接入公共交通接口，展示车辆当前站序、预计到达时间与实时位置。
+Trackr (BusOnRoad) 是一个 Android 实时公交到站查询应用。通过接入公共交通接口，展示车辆当前站序、预计到达时间与实时位置。
 
 ---
 
