@@ -9,6 +9,7 @@ import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.LineOperatingState
 import com.trackr.domain.model.NearbyStop
+import com.trackr.domain.model.isPureSubwayStation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -20,6 +21,33 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class TransitUnitTest {
+
+    @Test
+    fun testPureSubwayStationFilter_preservesGroundBusStopsAndFiltersMetro() {
+        // 1. 同名地面公交站：必须保留（返回 false）
+        val groundStopChelaile = NearbyStop(stopId = "1", name = "湖滨中路", isSubway = false)
+        val groundStopMygolbs = NearbyStop(stopId = "2", name = "湖滨中路站", isSubway = false)
+        val groundStopWithMetroSuffix = NearbyStop(stopId = "3", name = "高新园地铁站", isSubway = false)
+        val groundStopNamedMetroEntrance = NearbyStop(stopId = "4", name = "人民广场地铁站公交站", isSubway = false)
+
+        org.junit.Assert.assertFalse(groundStopChelaile.isPureSubwayStation)
+        org.junit.Assert.assertFalse(groundStopMygolbs.isPureSubwayStation)
+        org.junit.Assert.assertFalse(groundStopWithMetroSuffix.isPureSubwayStation)
+        org.junit.Assert.assertFalse(groundStopNamedMetroEntrance.isPureSubwayStation)
+
+        // 2. 纯地铁站点：必须被判定为 true 予以过滤
+        val metroChelaileM = NearbyStop(stopId = "10", name = "湖滨中路站（M）", isSubway = false)
+        val metroChelaileHalfM = NearbyStop(stopId = "11", name = "湖滨中路站(M)", isSubway = false)
+        val metroMygolbs = NearbyStop(stopId = "12", name = "湖滨中路（地铁站）", isSubway = false)
+        val metroMygolbsHalf = NearbyStop(stopId = "13", name = "湖滨中路(地铁站)", isSubway = false)
+        val metroFlagged = NearbyStop(stopId = "14", name = "任意地铁站", isSubway = true)
+
+        org.junit.Assert.assertTrue(metroChelaileM.isPureSubwayStation)
+        org.junit.Assert.assertTrue(metroChelaileHalfM.isPureSubwayStation)
+        org.junit.Assert.assertTrue(metroMygolbs.isPureSubwayStation)
+        org.junit.Assert.assertTrue(metroMygolbsHalf.isPureSubwayStation)
+        org.junit.Assert.assertTrue(metroFlagged.isPureSubwayStation)
+    }
 
     @Test
     fun testComputeSegmentProgress_whenArrived_returnsOne() {

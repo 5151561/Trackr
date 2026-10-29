@@ -181,6 +181,9 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
                     .ifBlank { item.optString("lastStation") }
                 val price = item.optString("comments")
                 val routeBean = item.optJSONObject("routeBean")
+                val isSubway = routeBean?.optString("routeType") == "3" || lineName.contains("地铁")
+                if (isSubway) continue // 过滤纯地铁线路
+
                 val firstTime = routeBean?.optString("suTime").orEmpty()
                 val lastTime = routeBean?.optString("euTime").orEmpty()
                 val dirInt = if (upperOrDown == "1") 0 else 1
@@ -275,6 +278,9 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
                 val item = dataArr.optJSONObject(i) ?: continue
                 val stationName = item.optString("stationName").trim()
                 if (stationName.isBlank() || !seenStops.add(stationName)) continue
+                val isSubway = stationName.contains("（地铁站）") ||
+                        stationName.contains("(地铁站)")
+                if (isSubway) continue // 过滤纯地铁站（保留名称以地铁口命名的地面公交站）
 
                 val lat = item.optDouble("station_lat", 0.0)
                 val lng = item.optDouble("station_lon", 0.0)
@@ -332,6 +338,9 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
                 val neartime = item.optString("neartime")
                 val stationOrder = item.optInt("stationOrder", 0)
                 val routeBean = item.optJSONObject("routeBean")
+                val isSubway = routeBean?.optString("routeType") == "3" || lineName.contains("地铁")
+                if (isSubway) continue // 过滤纯地铁线路
+
                 val firstTime = routeBean?.optString("suTime").orEmpty()
                 val lastTime = routeBean?.optString("euTime").orEmpty()
 

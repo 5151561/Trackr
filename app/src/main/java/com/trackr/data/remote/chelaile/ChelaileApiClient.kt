@@ -88,11 +88,11 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             TransitCity(cityId = "047", cityName = "昆明", pinyin = "KunMing", supportSubway = true, isHot = true, province = "云南"),
             TransitCity(cityId = "021", cityName = "合肥", pinyin = "HeFei", supportSubway = true, isHot = true, province = "安徽"),
             TransitCity(cityId = "024", cityName = "无锡", pinyin = "WuXi", supportSubway = true, isHot = true, province = "江苏"),
-            TransitCity(cityId = "035", cityName = "厦门", pinyin = "XiaMen", supportSubway = true, isHot = true, province = "福建"),
+            TransitCity(cityId = "036", cityName = "厦门", pinyin = "XiaMen", supportSubway = true, isHot = true, province = "福建"),
             TransitCity(cityId = "018", cityName = "福州", pinyin = "FuZhou", supportSubway = true, isHot = true, province = "福建"),
             TransitCity(cityId = "045", cityName = "济南", pinyin = "JiNan", supportSubway = true, isHot = true, province = "山东"),
             TransitCity(cityId = "053", cityName = "南宁", pinyin = "NanNing", supportSubway = true, isHot = true, province = "广西"),
-            TransitCity(cityId = "046", cityName = "沈阳", pinyin = "ShenYang", supportSubway = true, isHot = true, province = "辽宁"),
+            TransitCity(cityId = "035", cityName = "沈阳", pinyin = "ShenYang", supportSubway = true, isHot = true, province = "辽宁"),
             TransitCity(cityId = "016", cityName = "大连", pinyin = "DaLian", supportSubway = true, isHot = false, province = "辽宁"),
             TransitCity(cityId = "033", cityName = "哈尔滨", pinyin = "HaErBin", supportSubway = true, isHot = false, province = "黑龙江"),
             TransitCity(cityId = "044", cityName = "长春", pinyin = "ChangChun", supportSubway = true, isHot = false, province = "吉林"),
@@ -337,11 +337,20 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             }
         }
 
-        // 站点列表
+        // 站点列表（过滤纯地铁站点）
         val stationsArr = resultObj.optJSONArray("stations") ?: JSONArray()
         val stopList = ArrayList<NearbyStop>()
         for (i in 0 until stationsArr.length()) {
             val s = stationsArr.getJSONObject(i)
+            val isSubway = s.optInt("subwayV2", 0) == 1 || s.optInt("isSubway", 0) == 1
+            val sn = s.optString("sn").trim()
+            val isPureSubway = isSubway ||
+                    sn.endsWith("（M）", ignoreCase = true) ||
+                    sn.endsWith("(M)", ignoreCase = true) ||
+                    sn.contains("（地铁站）") ||
+                    sn.contains("(地铁站)")
+            if (isPureSubway) continue // 纯地铁站点，不加入公交站点列表
+
             val stLat = s.optDouble("lat", 0.0)
             val stLng = s.optDouble("lng", 0.0)
             val serverDist = if (s.has("distance")) s.optInt("distance") else null
@@ -361,7 +370,7 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
                     wgsLng = stLng,
                     physicalStId = s.optString("physicalStId").takeIf { it.isNotBlank() },
                     namesakeStId = s.optString("namesakeStId").takeIf { it.isNotBlank() },
-                    isSubway = s.optInt("subwayV2", 0) == 1
+                    isSubway = false
                 )
             )
         }
@@ -396,9 +405,18 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
         val nearStsArr = data.optJSONArray("nearSts") ?: JSONArray()
         val result = ArrayList<NearbyStop>()
 
-        val count = minOf(nearStsArr.length(), limit)
-        for (i in 0 until count) {
+        for (i in 0 until nearStsArr.length()) {
+            if (result.size >= limit) break
             val s = nearStsArr.getJSONObject(i)
+            val isSubway = s.optInt("isSubway", 0) == 1 || s.optInt("subwayV2", 0) == 1
+            val sn = s.optString("sn").trim()
+            val isPureSubway = isSubway ||
+                    sn.endsWith("（M）", ignoreCase = true) ||
+                    sn.endsWith("(M)", ignoreCase = true) ||
+                    sn.contains("（地铁站）") ||
+                    sn.contains("(地铁站)")
+            if (isPureSubway) continue // 纯地铁站点，不作为附近公交站点展示
+
             val dist = if (s.has("distance")) s.optInt("distance") else null
 
             // 途经线路

@@ -197,68 +197,7 @@ class HomeViewModel(
      * 刷新定位并加载附近站点
      */
     fun refreshLocationAndNearby() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLocating = true, locationError = null) }
-            val gpsLocation = fetchGpsLocation()
-
-            if (gpsLocation != null) {
-                val lat = gpsLocation.latitude
-                val lng = gpsLocation.longitude
-                repository.updateUserLocation(lat, lng)
-
-                // 尝试反向根据坐标解析匹配城市
-                val resolvedCity = try {
-                    repository.resolveCityByLocation(lat, lng).getOrNull()
-                } catch (_: Exception) {
-                    null
-                }
-
-                val targetCity = resolvedCity ?: _uiState.value.currentCity
-                if (resolvedCity != null) {
-                    repository.selectCity(resolvedCity)
-                    _uiState.update {
-                        it.copy(
-                            currentCity = resolvedCity,
-                            locatedCity = resolvedCity,
-                            selectedProvince = resolvedCity.province.ifBlank {
-                                ProvinceCityCatalog.inferProvince(resolvedCity.cityName)
-                            },
-                            currentLat = lat,
-                            currentLng = lng,
-                            isLocating = false,
-                            locationError = null
-                        )
-                    }
-                } else {
-                    _uiState.update {
-                        it.copy(
-                            currentLat = lat,
-                            currentLng = lng,
-                            isLocating = false,
-                            locationError = null
-                        )
-                    }
-                }
-
-                loadNearbyStops(lat, lng, cityOverride = targetCity)
-                refreshFavoritesRealtime()
-            } else {
-                val currentCity = _uiState.value.currentCity
-                val fallback = ProvinceCityCatalog.getCityCenterCoordinates(currentCity.cityName)
-                val lat = fallback.first
-                val lng = fallback.second
-                _uiState.update {
-                    it.copy(
-                        currentLat = lat,
-                        currentLng = lng,
-                        isLocating = false,
-                        locationError = "定位不可用，已切换至当前城市中心"
-                    )
-                }
-                loadNearbyStops(lat, lng, cityOverride = currentCity)
-                refreshFavoritesRealtime()
-            }
-        }
+        refresh()
     }
 
     private fun hasLocationPermission(): Boolean {
@@ -274,7 +213,7 @@ class HomeViewModel(
         return hasFine || hasCoarse
     }
 
-    private suspend fun fetchGpsLocation(): Location? {
+    private suspend fun fetchGpsLocation(forceFresh: Boolean = false): Location? {
         if (!hasLocationPermission()) return null
         val lm = locationManager ?: return null
 
@@ -288,12 +227,13 @@ class HomeViewModel(
         var bestFresh: Location? = null
         var bestStale: Location? = null
         val now = System.currentTimeMillis()
+        val freshThreshold = if (forceFresh) 10_000L else 60_000L // 强制刷新时仅复用10秒内极新鲜的定位，超时则向硬件重新请求实时 fix
 
         for (provider in candidateProviders) {
             try {
                 if (lm.isProviderEnabled(provider)) {
                     val loc = lm.getLastKnownLocation(provider) ?: continue
-                    if (now - loc.time < 10 * 60 * 1000L) {
+                    if (now - loc.time < freshThreshold) {
                         if (bestFresh == null || (loc.hasAccuracy() && loc.accuracy < (bestFresh.accuracy.takeIf { bestFresh.hasAccuracy() } ?: Float.MAX_VALUE))) {
                             bestFresh = loc
                         }
@@ -402,23 +342,87 @@ class HomeViewModel(
     }
 
     /**
-     * 手动触发整体刷新
+     * 手动触发整体刷新（带上重新定位、刷新附近公交与收藏线路实时到站）
      */
     fun refresh() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true) }
-            val state = _uiState.value
-            val nearbyJob = launch {
-                val result = repository.getNearbyStops(state.currentCity, state.currentLat, state.currentLng, limit = 12)
-                _uiState.update { it.copy(nearbyStops = result.getOrNull().orEmpty()) }
-            }
+            _uiState.update { it.copy(isRefreshing = true, isLocating = true, locationError = null) }
+
             val favJob = launch {
                 val favResult = repository.refreshFavoritesRealtime()
                 _uiState.update { it.copy(favoritesRealtime = favResult.getOrNull().orEmpty()) }
             }
-            nearbyJob.join()
+
+            val gpsLocation = fetchGpsLocation(forceFresh = true)
+
+            val nearbyJob = launch {
+                val (lat, lng, targetCity) = if (gpsLocation != null) {
+                    val lat = gpsLocation.latitude
+                    val lng = gpsLocation.longitude
+                    repository.updateUserLocation(lat, lng)
+
+                    // 尝试反向根据坐标解析匹配城市
+                    val resolvedCity = try {
+                        repository.resolveCityByLocation(lat, lng).getOrNull()
+                    } catch (_: Exception) {
+                        null
+                    }
+
+                    val city = resolvedCity ?: _uiState.value.currentCity
+                    if (resolvedCity != null) {
+                        repository.selectCity(resolvedCity)
+                        _uiState.update {
+                            it.copy(
+                                currentCity = resolvedCity,
+                                locatedCity = resolvedCity,
+                                selectedProvince = resolvedCity.province.ifBlank {
+                                    ProvinceCityCatalog.inferProvince(resolvedCity.cityName)
+                                },
+                                currentLat = lat,
+                                currentLng = lng,
+                                isLocating = false,
+                                locationError = null
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                currentLat = lat,
+                                currentLng = lng,
+                                isLocating = false,
+                                locationError = null
+                            )
+                        }
+                    }
+                    Triple(lat, lng, city)
+                } else {
+                    val currentCity = _uiState.value.currentCity
+                    val state = _uiState.value
+                    val lat = if (state.currentLat > 0.0) state.currentLat else ProvinceCityCatalog.getCityCenterCoordinates(currentCity.cityName).first
+                    val lng = if (state.currentLng > 0.0) state.currentLng else ProvinceCityCatalog.getCityCenterCoordinates(currentCity.cityName).second
+                    _uiState.update {
+                        it.copy(
+                            currentLat = lat,
+                            currentLng = lng,
+                            isLocating = false,
+                            locationError = "定位不可用，已保留当前位置"
+                        )
+                    }
+                    Triple(lat, lng, currentCity)
+                }
+
+                val nearbyResult = repository.getNearbyStops(targetCity, lat, lng, limit = 12)
+                _uiState.update {
+                    it.copy(
+                        nearbyStops = nearbyResult.getOrNull().orEmpty(),
+                        isLoadingNearby = false
+                    )
+                }
+            }
+
             favJob.join()
-            _uiState.update { it.copy(isRefreshing = false) }
+            nearbyJob.join()
+            _uiState.update { it.copy(isRefreshing = false, isLocating = false, isLoadingNearby = false) }
         }
     }
 
@@ -427,7 +431,7 @@ class HomeViewModel(
             while (isActive) {
                 delay(15_000L)
                 val state = _uiState.value
-                if (!state.isRefreshing && !state.isLoadingNearby) {
+                if (!state.isRefreshing && !state.isLoadingNearby && !state.isLocating) {
                     val nearbyResult = repository.getNearbyStops(state.currentCity, state.currentLat, state.currentLng, limit = 12)
                     val favResult = repository.refreshFavoritesRealtime()
                     _uiState.update {

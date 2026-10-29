@@ -193,7 +193,7 @@ fun HomeScreen(
             item {
                 NearbyStopsHeader(
                     cityName = state.currentCity.cityName,
-                    isLoading = state.isLoadingNearby,
+                    isLoading = state.isLoadingNearby || state.isRefreshing || state.isLocating,
                     onRefresh = { viewModel.refresh() }
                 )
             }
@@ -842,11 +842,19 @@ private fun NearbyStopsHeader(
             modifier = Modifier.clip(CircleShape),
             shape = CircleShape
         ) {
-            Icon(
-                imageVector = Icons.Default.Refresh,
-                contentDescription = "刷新附近站点",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "刷新附近站点与定位",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     }
 }
@@ -897,7 +905,7 @@ private fun NearbyStopCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    if (stop.isSubway || stop.subwayLineNames.isNotEmpty()) {
+                    if (stop.subwayLineNames.isNotEmpty()) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
                             shape = RoundedCornerShape(4.dp),
@@ -915,7 +923,7 @@ private fun NearbyStopCard(
                                 )
                                 Spacer(modifier = Modifier.width(2.dp))
                                 Text(
-                                    text = stop.subwayLineNames.firstOrNull() ?: "地铁",
+                                    text = stop.subwayLineNames.first(),
                                     fontSize = 10.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onTertiaryContainer

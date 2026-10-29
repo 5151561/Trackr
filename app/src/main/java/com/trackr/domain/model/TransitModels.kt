@@ -170,6 +170,26 @@ data class NearbyStop(
 )
 
 /**
+ * 判断是否为纯地铁站点（仅用于剔除无法提供地面实时公交追踪的独立地铁站，绝不误伤同名地面公交站）。
+ *
+ * 识别规则：
+ * 1. 结构化标记：[NearbyStop.isSubway] 为 true。
+ * 2. 车来了地铁站标记：站点名称以 "（M）" 或 "(M)" 结尾（如 "湖滨中路站（M）"）。
+ * 3. 掌上公交地铁站标记：站点名称包含 "（地铁站）" 或 "(地铁站)"（如 "湖滨中路（地铁站）"）。
+ *
+ * 注意：不使用模糊的 "地铁" 匹配或 "endsWith(\"地铁站\")"，以防误伤名称以地铁站命名的普通地面公交站（如 "高新园地铁站" 公交停靠站）。
+ */
+val NearbyStop.isPureSubwayStation: Boolean
+    get() {
+        if (isSubway) return true
+        val trimmed = name.trim()
+        return trimmed.endsWith("（M）", ignoreCase = true) ||
+                trimmed.endsWith("(M)", ignoreCase = true) ||
+                trimmed.contains("（地铁站）") ||
+                trimmed.contains("(地铁站)")
+    }
+
+/**
  * 混合搜索结果
  */
 @Serializable

@@ -246,4 +246,100 @@ class HomeViewModelTest {
         assertEquals("线路25", viewModel.uiState.value.searchHistory.first())
         assertEquals("线路6", viewModel.uiState.value.searchHistory.last())
     }
+
+    @Test
+    fun testRefresh_triggersRelocationAndRefreshesData() = runTest {
+        val shadowApp = org.robolectric.Shadows.shadowOf(app)
+        shadowApp.grantPermissions(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        val lm = app.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+        val shadowLm = org.robolectric.Shadows.shadowOf(lm)
+        shadowLm.setProviderEnabled(android.location.LocationManager.GPS_PROVIDER, true)
+        val testLocation = android.location.Location(android.location.LocationManager.GPS_PROVIDER).apply {
+            latitude = 30.2741
+            longitude = 120.1551
+            time = System.currentTimeMillis()
+            accuracy = 3.0f
+        }
+        shadowLm.setLastKnownLocation(android.location.LocationManager.GPS_PROVIDER, testLocation)
+
+        val dummyStop = com.trackr.domain.model.NearbyStop(
+            stopId = "stop_hz_1",
+            name = "武林广场",
+            distanceMeters = 100,
+            lines = emptyList()
+        )
+        fakeRepository.nearbyStopsResult = Result.success(listOf(dummyStop))
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.refresh()
+        testScheduler.runCurrent()
+
+        assertEquals(false, viewModel.uiState.value.isRefreshing)
+        assertEquals(false, viewModel.uiState.value.isLocating)
+        assertEquals(1, viewModel.uiState.value.nearbyStops.size)
+        assertEquals("武林广场", viewModel.uiState.value.nearbyStops.first().name)
+        // 验证用户定位坐标被同步更新到 repository
+        assertEquals(30.2741, fakeRepository.userLocation.value?.first ?: 0.0, 0.0001)
+        assertEquals(120.1551, fakeRepository.userLocation.value?.second ?: 0.0, 0.0001)
+    }
+
+    @Test
+    fun testRefreshLocationAndNearby_delegatesToRefresh() = runTest {
+        val dummyStop = com.trackr.domain.model.NearbyStop(
+            stopId = "stop_sh_1",
+            name = "人民广场",
+            distanceMeters = 50,
+            lines = emptyList()
+        )
+        fakeRepository.nearbyStopsResult = Result.success(listOf(dummyStop))
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.refreshLocationAndNearby()
+        testScheduler.runCurrent()
+
+        assertEquals(false, viewModel.uiState.value.isRefreshing)
+        assertEquals(false, viewModel.uiState.value.isLocating)
+        assertEquals(1, viewModel.uiState.value.nearbyStops.size)
+        assertEquals("人民广场", viewModel.uiState.value.nearbyStops.first().name)
+    }
+
+    @Test
+    fun testRefresh_whenCacheIsStale_fallbackToBestStale() = runTest {
+        val shadowApp = org.robolectric.Shadows.shadowOf(app)
+        shadowApp.grantPermissions(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        val lm = app.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+        val shadowLm = org.robolectric.Shadows.shadowOf(lm)
+        shadowLm.setProviderEnabled(android.location.LocationManager.GPS_PROVIDER, true)
+        // 模拟 1 分钟前的旧位置（超过 forceFresh 的 10 秒阈值）
+        val staleLocation = android.location.Location(android.location.LocationManager.GPS_PROVIDER).apply {
+            latitude = 31.2304
+            longitude = 121.4737
+            time = System.currentTimeMillis() - 60_000L
+            accuracy = 10.0f
+        }
+        shadowLm.setLastKnownLocation(android.location.LocationManager.GPS_PROVIDER, staleLocation)
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.refresh()
+        // 推进时间让 realTimeFix 超时 (4500ms)
+        testScheduler.advanceTimeBy(5000L)
+        testScheduler.runCurrent()
+
+        assertEquals(false, viewModel.uiState.value.isRefreshing)
+        assertEquals(false, viewModel.uiState.value.isLocating)
+        assertEquals(31.2304, fakeRepository.userLocation.value?.first ?: 0.0, 0.0001)
+        assertEquals(121.4737, fakeRepository.userLocation.value?.second ?: 0.0, 0.0001)
+    }
 }

@@ -20,6 +20,8 @@ import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.domain.model.TransitSearchResult
+import com.trackr.domain.model.isPureSubwayStation
+import com.trackr.domain.model.isPureSubwayStation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -240,7 +242,7 @@ class TransitRepository(
             wgsLat = wgsLat,
             wgsLng = wgsLng,
             limit = limit
-        )
+        ).filter { !it.isPureSubwayStation }
     }
 
     override suspend fun getStopDetail(
@@ -425,7 +427,7 @@ class TransitRepository(
             }
 
             // 过滤纯地铁线路（第三方源无在途实时列车追踪数据）
-            mergedLines.removeAll { it.isSubway }
+            mergedLines.removeAll { it.isSubway || it.name.contains("地铁") }
 
             mergedLines.sortWith { a, b ->
                 RouteProjectionMath.compareLineNames(a.name, b.name)
@@ -449,6 +451,9 @@ class TransitRepository(
                     }
                 }
             }
+
+            // 过滤纯地铁站点（仅保留地面公交站点）
+            mergedStops.removeAll { it.isPureSubwayStation }
 
             TransitSearchResult(
                 keyword = keyword,
