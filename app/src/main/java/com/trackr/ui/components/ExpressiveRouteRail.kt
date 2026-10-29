@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -30,9 +29,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -546,22 +542,12 @@ private fun VerticalRouteRail(
     onSelectBus: (LiveBus) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val listState = rememberLazyListState()
-
-    // 自动将选中站点滚入中心
-    LaunchedEffect(selectedStop?.order, stops.size) {
-        if (selectedStop != null) {
-            val index = (selectedStop.order - 1).coerceIn(0, stops.size - 1)
-            listState.animateScrollToItem(index, scrollOffset = -200)
-        }
-    }
-
-    LazyColumn(
-        state = listState,
-        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-        modifier = modifier.fillMaxSize()
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
     ) {
-        itemsIndexed(stops, key = { _, stop -> stop.stopId + "_" + stop.order }) { index, stop ->
+        stops.forEachIndexed { index, stop ->
             val isSelected = stop.order == selectedStop?.order
             val isPassed = stop.order < (selectedStop?.order ?: 1)
             val isFirst = index == 0
