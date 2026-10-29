@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -206,11 +207,11 @@ fun SearchScreen(
                             icon = Icons.Default.DirectionsBus
                         )
                     }
-                    items(
+                    itemsIndexed(
                         items = result.lines,
-                        key = { "${it.source.name}_${it.name}_${it.lineNo}" },
-                        contentType = { "search_line_item" }
-                    ) { lineSummary ->
+                        key = { index, it -> "${it.source.name}_${it.name}_${it.lineNo}_$index" },
+                        contentType = { _, _ -> "search_line_item" }
+                    ) { _, lineSummary ->
                         SearchLineItemCard(
                             cityId = state.currentCity.cityId,
                             summary = lineSummary,
@@ -237,11 +238,11 @@ fun SearchScreen(
                             icon = Icons.Default.Place
                         )
                     }
-                    items(
+                    itemsIndexed(
                         items = result.stops,
-                        key = { it.stopId },
-                        contentType = { "search_stop_item" }
-                    ) { stop ->
+                        key = { index, it -> "${it.stopId.ifBlank { it.name }}_$index" },
+                        contentType = { _, _ -> "search_stop_item" }
+                    ) { _, stop ->
                         SearchStopItemCard(
                             stop = stop,
                             onCardClick = {

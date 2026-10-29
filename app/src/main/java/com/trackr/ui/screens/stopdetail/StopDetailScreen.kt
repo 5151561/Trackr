@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -310,29 +311,37 @@ fun StopDetailScreen(
 
                     // 3. 途经线路列表
                     if (currentStop != null && currentStop.lines.isNotEmpty()) {
-                        items(
+                        itemsIndexed(
                             items = currentStop.lines,
-                            key = { "${it.line.lineId}_${it.targetOrder}" },
-                            contentType = { "stop_line_status" }
-                        ) { lineStatus ->
+                            key = { index, item ->
+                                val stopKey = currentStop.stopId.ifBlank { "stop_${state.selectedStopIndex}" }
+                                val lineKey = item.line.lineId.ifBlank { item.line.name }
+                                "${stopKey}_${lineKey}_${item.targetOrder}_${item.line.direction}_$index"
+                            },
+                            contentType = { _, _ -> "stop_line_status" }
+                        ) { _, lineStatus ->
                             val favId = "${viewModel.cityId}_${lineStatus.line.lineId}_${lineStatus.targetOrder}"
-                            val isFavorited = state.favoriteIds.contains(favId)
+                            val isFavorited = lineStatus.line.lineId.isNotBlank() && state.favoriteIds.contains(favId)
 
                             StopLineDetailCard(
                                 lineStatus = lineStatus,
                                 isFavorited = isFavorited,
                                 onFavoriteClick = {
-                                    viewModel.toggleFavorite(currentStop, lineStatus)
+                                    if (lineStatus.line.lineId.isNotBlank()) {
+                                        viewModel.toggleFavorite(currentStop, lineStatus)
+                                    }
                                 },
                                 onClick = {
-                                    onNavigateToLineDetail(
-                                        viewModel.cityId,
-                                        lineStatus.line.lineId,
-                                        lineStatus.targetOrder,
-                                        currentStop.stopId,
-                                        lineStatus.line.source,
-                                        lineStatus.line.name
-                                    )
+                                    if (lineStatus.line.lineId.isNotBlank()) {
+                                        onNavigateToLineDetail(
+                                            viewModel.cityId,
+                                            lineStatus.line.lineId,
+                                            lineStatus.targetOrder,
+                                            currentStop.stopId,
+                                            lineStatus.line.source,
+                                            lineStatus.line.name
+                                        )
+                                    }
                                 }
                             )
                         }
