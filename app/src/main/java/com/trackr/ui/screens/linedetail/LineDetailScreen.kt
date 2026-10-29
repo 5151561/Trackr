@@ -72,17 +72,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -111,9 +111,9 @@ fun LineDetailScreen(
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val repository = TrackrApp.instance.repository
-    val activeTracking by repository.activeTrackingSession.collectAsState()
+    val activeTracking by repository.activeTrackingSession.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val busColors = MaterialTheme.busColors
 
@@ -1191,7 +1191,7 @@ private fun BottomFloatingToolbar(
                     Icon(
                         imageVector = Icons.Rounded.SwapHoriz,
                         contentDescription = "换向",
-                        modifier = Modifier.rotate(flipRotation),
+                        modifier = Modifier.graphicsLayer { rotationZ = flipRotation },
                         tint = if (hasReverseDirection) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                     )
                 }

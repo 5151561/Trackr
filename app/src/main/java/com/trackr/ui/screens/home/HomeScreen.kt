@@ -61,7 +61,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -70,10 +69,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.DataSourceType
@@ -91,7 +92,7 @@ fun HomeScreen(
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit,
     onNavigateToSearch: () -> Unit
 ) {
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -194,7 +195,11 @@ fun HomeScreen(
                     EmptyNearbyView(onRetry = { viewModel.refreshLocationAndNearby() })
                 }
             } else {
-                items(state.nearbyStops, key = { it.stopId }) { stop ->
+                items(
+                    items = state.nearbyStops,
+                    key = { it.stopId },
+                    contentType = { "nearby_stop" }
+                ) { stop ->
                     NearbyStopCard(
                         stop = stop,
                         cityId = state.currentCity.cityId,
@@ -390,8 +395,9 @@ private fun ActiveTrackingBanner(
                 Box(
                     modifier = Modifier
                         .size(24.dp)
+                        .graphicsLayer { alpha = alphaAnim }
                         .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = alphaAnim)),
+                        .background(MaterialTheme.colorScheme.primary),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -615,7 +621,11 @@ private fun FavoritesSection(
                 contentPadding = PaddingValues(horizontal = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                items(favorites, key = { it.id }) { fav ->
+                items(
+                    items = favorites,
+                    key = { it.id },
+                    contentType = { "favorite_stop" }
+                ) { fav ->
                     val realtimeStop = favoritesRealtime[fav.id]
                     FavoriteCard(
                         favorite = fav,
@@ -1096,7 +1106,11 @@ private fun CityPickerBottomSheet(
                     contentPadding = PaddingValues(vertical = 6.dp),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    items(matchingCities, key = { it.cityId }) { city ->
+                    items(
+                        items = matchingCities,
+                        key = { it.cityId },
+                        contentType = { "matching_city" }
+                    ) { city ->
                         val prov = city.province.ifBlank { ProvinceCityCatalog.inferProvince(city.cityName) }
                         val isCurrent = city.cityId == currentCity.cityId
                         Surface(
@@ -1276,7 +1290,11 @@ private fun CityPickerBottomSheet(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(bottom = 6.dp)
                 ) {
-                    items(hotCities, key = { "hot_${it.cityId}" }) { city ->
+                    items(
+                        items = hotCities,
+                        key = { "hot_${it.cityId}" },
+                        contentType = { "hot_city" }
+                    ) { city ->
                         FilterChip(
                             selected = city.cityId == currentCity.cityId,
                             onClick = { onSelectCity(city) },
@@ -1326,7 +1344,11 @@ private fun CityPickerBottomSheet(
                             modifier = Modifier.fillMaxSize(),
                             contentPadding = PaddingValues(vertical = 4.dp)
                         ) {
-                            items(availableProvinces, key = { it }) { prov ->
+                            items(
+                                items = availableProvinces,
+                                key = { it },
+                                contentType = { "available_province" }
+                            ) { prov ->
                                 val isSelected = prov == activeProvince
                                 val count = provinceMap[prov]?.size ?: 0
                                 Surface(
@@ -1410,7 +1432,11 @@ private fun CityPickerBottomSheet(
                             contentPadding = PaddingValues(bottom = 8.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)
                         ) {
-                            items(provinceCities, key = { it.cityId }) { city ->
+                            items(
+                                items = provinceCities,
+                                key = { it.cityId },
+                                contentType = { "province_city" }
+                            ) { city ->
                                 val isCurrent = city.cityId == currentCity.cityId
                                 Surface(
                                     modifier = Modifier

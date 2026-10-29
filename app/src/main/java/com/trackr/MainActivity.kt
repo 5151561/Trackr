@@ -14,13 +14,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -83,7 +83,7 @@ fun TrackrNavApp(
     val homeViewModel: HomeViewModel = viewModel()
 
     // 自动同步收藏到桌面快捷方式 (App Shortcuts)
-    val favorites by TrackrApp.instance.repository.favorites.collectAsState()
+    val favorites by TrackrApp.instance.repository.favorites.collectAsStateWithLifecycle()
     LaunchedEffect(favorites) {
         BusStopWidgetProvider.updateDynamicShortcuts(context, favorites)
     }

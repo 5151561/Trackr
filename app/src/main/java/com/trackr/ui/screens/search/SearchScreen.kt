@@ -51,7 +51,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -64,6 +63,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusLineSummary
@@ -78,7 +78,7 @@ fun SearchScreen(
     onNavigateBack: () -> Unit,
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit
 ) {
-    val state by viewModel.uiState.collectAsState()
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
     val focusRequester = remember { FocusRequester() }
 
     LaunchedEffect(Unit) {
@@ -204,7 +204,11 @@ fun SearchScreen(
                             icon = Icons.Default.DirectionsBus
                         )
                     }
-                    items(result.lines, key = { "${it.source.name}_${it.name}_${it.lineNo}" }) { lineSummary ->
+                    items(
+                        items = result.lines,
+                        key = { "${it.source.name}_${it.name}_${it.lineNo}" },
+                        contentType = { "search_line_item" }
+                    ) { lineSummary ->
                         SearchLineItemCard(
                             cityId = state.currentCity.cityId,
                             summary = lineSummary,
@@ -231,7 +235,11 @@ fun SearchScreen(
                             icon = Icons.Default.Place
                         )
                     }
-                    items(result.stops, key = { it.stopId }) { stop ->
+                    items(
+                        items = result.stops,
+                        key = { it.stopId },
+                        contentType = { "search_stop_item" }
+                    ) { stop ->
                         SearchStopItemCard(
                             stop = stop,
                             onLineClick = { lineStatus ->

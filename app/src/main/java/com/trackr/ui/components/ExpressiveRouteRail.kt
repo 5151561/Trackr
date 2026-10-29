@@ -48,7 +48,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -204,9 +204,6 @@ private fun HorizontalRouteRail(
                         label = "bus_chip_${bus.busId}"
                     )
 
-                    // 转换为相对左侧起点的 X 偏移像素（中心对齐每列 56.dp 的中心：28.dp）
-                    val xOffsetDp = columnWidth * animatedPos + (columnWidth / 2)
-
                     BusChip(
                         bus = bus,
                         isSelected = isSelectedBus,
@@ -214,8 +211,10 @@ private fun HorizontalRouteRail(
                         modifier = Modifier
                             .align(Alignment.CenterStart)
                             .offset {
+                                // 转换为相对左侧起点的 X 偏移像素（中心对齐每列 56.dp 的中心：28.dp），延迟到 Layout 阶段读取
+                                val xOffsetDp = columnWidth * animatedPos + (columnWidth / 2)
                                 IntOffset(
-                                    x = with(density) { (xOffsetDp - 26.dp).toPx() }.roundToInt(),
+                                    x = (xOffsetDp - 26.dp).roundToPx(),
                                     y = 0
                                 )
                             }
@@ -421,11 +420,14 @@ private fun StationNode(
         contentAlignment = Alignment.Center
     ) {
         if (isSelected) {
-            // 外层呼吸光晕
+            // 外层呼吸光晕（通过 graphicsLayer 延迟到 Draw 阶段）
             Box(
                 modifier = Modifier
                     .size(22.dp)
-                    .scale(pulseScale)
+                    .graphicsLayer {
+                        scaleX = pulseScale
+                        scaleY = pulseScale
+                    }
                     .background(
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f),
                         shape = CircleShape
