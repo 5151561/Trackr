@@ -107,9 +107,7 @@ fun HomeScreen(
             HomeTopBar(
                 city = state.currentCity,
                 engineMode = state.engineMode,
-                isLocating = state.isLocating,
                 onCityClick = { viewModel.setCityPickerOpen(true) },
-                onRefreshClick = { viewModel.refreshLocationAndNearby() },
                 onSelectEngineMode = { mode -> viewModel.setEngineMode(mode) }
             )
         }
@@ -265,9 +263,7 @@ fun HomeScreen(
 private fun HomeTopBar(
     city: TransitCity,
     engineMode: EngineMode,
-    isLocating: Boolean,
     onCityClick: () -> Unit,
-    onRefreshClick: () -> Unit,
     onSelectEngineMode: (EngineMode) -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -285,153 +281,116 @@ private fun HomeTopBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "车在路上",
-                        style = MaterialTheme.typography.headlineMedium.copy(
-                            fontWeight = FontWeight.ExtraBold,
-                            letterSpacing = (-0.5).sp
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-
-                    // 引擎切换胶囊开关
-                    Box {
-                        val (containerColor, contentColor) = when (engineMode) {
-                            EngineMode.ALL -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.primary
-                            EngineMode.MYGOLBS -> Color(0xFFFFF3E0) to Color(0xFFE65100)
-                            EngineMode.CHELAILE -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
-                        }
-
-                        Surface(
-                            onClick = { menuExpanded = true },
-                            shape = RoundedCornerShape(12.dp),
-                            color = containerColor,
-                            shadowElevation = 0.5.dp
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = engineMode.shortLabel,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = contentColor
-                                )
-                                Spacer(modifier = Modifier.width(2.dp))
-                                Icon(
-                                    imageVector = Icons.Default.SwapHoriz,
-                                    contentDescription = "切换引擎模式",
-                                    tint = contentColor,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                            }
-                        }
-
-                        DropdownMenu(
-                            expanded = menuExpanded,
-                            onDismissRequest = { menuExpanded = false }
-                        ) {
-                            EngineMode.values().forEach { mode ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween
-                                        ) {
-                                            Text(
-                                                text = mode.displayName,
-                                                fontWeight = if (mode == engineMode) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (mode == engineMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                            )
-                                            if (mode == engineMode) {
-                                                Spacer(modifier = Modifier.width(8.dp))
-                                                Text(
-                                                    text = "✓",
-                                                    color = MaterialTheme.colorScheme.primary,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        }
-                                    },
-                                    onClick = {
-                                        menuExpanded = false
-                                        onSelectEngineMode(mode)
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-                Text(
-                    text = when (engineMode) {
-                        EngineMode.ALL -> "全国公交实时精准追踪 · 车来了 & 掌上公交双引擎"
-                        EngineMode.MYGOLBS -> "全国公交实时精准追踪 · 掌上公交直连引擎"
-                        EngineMode.CHELAILE -> "全国公交实时精准追踪 · 车来了直连引擎"
-                    },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // 城市选择胶囊按钮
-                Surface(
-                    onClick = onCityClick,
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Place,
-                            contentDescription = "城市",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = city.cityName,
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = "选择城市",
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
+                Text(
+                    text = "车在路上",
+                    style = MaterialTheme.typography.headlineMedium.copy(
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = (-0.5).sp
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
                 Spacer(modifier = Modifier.width(6.dp))
 
-                // 定位/刷新按钮
-                IconButton(
-                    onClick = onRefreshClick,
-                    enabled = !isLocating,
-                    modifier = Modifier.clip(CircleShape),
-                    shape = CircleShape
-                ) {
-                    if (isLocating) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(20.dp),
-                            strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.MyLocation,
-                            contentDescription = "定位",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
+                // 引擎切换胶囊开关
+                Box {
+                    val (containerColor, contentColor) = when (engineMode) {
+                        EngineMode.ALL -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.primary
+                        EngineMode.MYGOLBS -> Color(0xFFFFF3E0) to Color(0xFFE65100)
+                        EngineMode.CHELAILE -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
                     }
+
+                    Surface(
+                        onClick = { menuExpanded = true },
+                        shape = RoundedCornerShape(12.dp),
+                        color = containerColor,
+                        shadowElevation = 0.5.dp
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = engineMode.shortLabel,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = contentColor
+                            )
+                            Spacer(modifier = Modifier.width(2.dp))
+                            Icon(
+                                imageVector = Icons.Default.SwapHoriz,
+                                contentDescription = "切换引擎模式",
+                                tint = contentColor,
+                                modifier = Modifier.size(13.dp)
+                            )
+                        }
+                    }
+
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false }
+                    ) {
+                        EngineMode.values().forEach { mode ->
+                            DropdownMenuItem(
+                                text = {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(
+                                            text = mode.displayName,
+                                            fontWeight = if (mode == engineMode) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (mode == engineMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                        )
+                                        if (mode == engineMode) {
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "✓",
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                },
+                                onClick = {
+                                    menuExpanded = false
+                                    onSelectEngineMode(mode)
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 城市选择胶囊按钮
+            Surface(
+                onClick = onCityClick,
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Place,
+                        contentDescription = "城市",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = city.cityName,
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = "选择城市",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             }
         }
