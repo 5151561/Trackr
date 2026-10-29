@@ -104,3 +104,9 @@ Trackr (BusOnRoad) 是一个 Android 实时公交与地铁到站查询应用。�
 ## 许可证
 
 本项目采用 [MIT License](LICENSE)。
+
+---
+
+## 友情链接
+[LINUX DO ](https://linux.do/)—— 真诚分享、友好讨论的技术社区，本项目的交流与反馈也发布于此
+
