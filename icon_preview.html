@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>「追客」D-2A 向上凸起拱形弧度精修</title>
+  <style>
+    :root {
+      --bg: #F8F9FA;
+      --card-bg: #FFFFFF;
+      --border: #E8EAED;
+      --text: #202124;
+      --subtext: #5F6368;
+    }
+    body {
+      margin: 0;
+      padding: 40px 24px;
+      font-family: "Google Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 36px;
+    }
+    h1 {
+      font-size: 2.1rem;
+      font-weight: 700;
+      margin: 0 0 10px 0;
+      color: #202124;
+      letter-spacing: -0.5px;
+    }
+    .subtitle {
+      color: var(--subtext);
+      font-size: 1.05rem;
+    }
+    .toolbar {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 36px;
+    }
+    .btn {
+      padding: 8px 18px;
+      border-radius: 9999px;
+      border: 1px solid var(--border);
+      background: var(--card-bg);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      box-shadow: 0 1px 2px rgba(60,64,67,0.1);
+      transition: all 0.2s ease;
+    }
+    .btn:hover, .btn.active {
+      background: #E8F0FE;
+      color: #1A73E8;
+      border-color: #1A73E8;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 28px;
+      margin-bottom: 40px;
+    }
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 26px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      box-shadow: 0 1px 3px rgba(60,64,67,0.08), 0 4px 8px rgba(60,64,67,0.04);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(60,64,67,0.12);
+    }
+    .icon-wrapper {
+      width: 175px;
+      height: 175px;
+      margin: 16px 0 24px 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: #FFFFFF;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.08), 0 0 1px rgba(0,0,0,0.15);
+      transition: border-radius 0.3s ease;
+    }
+    .icon-wrapper.squircle {
+      border-radius: 44px;
+    }
+    .icon-wrapper.circle {
+      border-radius: 50%;
+    }
+    .icon-wrapper.rounded {
+      border-radius: 28px;
+    }
+    .icon-wrapper svg {
+      width: 100%;
+      height: 100%;
+      border-radius: inherit;
+    }
+    .card h3 {
+      font-size: 1.25rem;
+      margin: 0 0 8px 0;
+      color: #202124;
+    }
+    .card .tag {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 0.75rem;
+      font-weight: 500;
+      margin-bottom: 12px;
+      background: #E8F0FE;
+      color: #1A73E8;
+    }
+    .card p {
+      font-size: 0.88rem;
+      color: var(--subtext);
+      line-height: 1.5;
+      margin: 0;
+    }
+    .mockup-section {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 30px;
+      box-shadow: 0 1px 3px rgba(60,64,67,0.08);
+    }
+    .mockup-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      margin-bottom: 20px;
+      color: #3C4043;
+      text-align: center;
+    }
+    .phone-dock {
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+      padding: 24px;
+      background: #EEF2F6;
+      border-radius: 20px;
+    }
+    .dock-app {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+    }
+    .dock-app .mini-icon {
+      width: 60px;
+      height: 60px;
+      background: #FFFFFF;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .dock-app .app-name {
+      font-size: 0.75rem;
+      color: #3C4043;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>「追客」D-2A 向上凸起弧度（拱桥/跃升感）</h1>
+      <div class="subtitle">完全懂你！告别原先下凹的挂绳感 · 虚线改为向左上方挺拔凸起的「彩虹拱形 / 腾飞抛物线」</div>
+    </header>
+
+    <div class="toolbar">
+      <button class="btn active" onclick="setShape('squircle')">圆角矩形 (Squircle)</button>
+      <button class="btn" onclick="setShape('circle')">原生纯圆 (Pixel 风格)</button>
+      <button class="btn" onclick="setShape('rounded')">微圆角 (iOS/MIUI)</button>
+    </div>
+
+    <div class="grid">
+      <!-- 拱形 1：饱满挺拔拱起 (推荐) -->
+      <div class="card">
+        <span class="tag">活力跃升 · 强烈推荐 ★★★★★</span>
+        <h3>弧度 1：优雅上凸拱桥 (The Upward Arc)</h3>
+        <div class="icon-wrapper squircle" id="iconArch1">
+          <svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <filter id="shadow1" x="-25%" y="-25%" width="160%" height="160%">
+                <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#000000" flood-opacity="0.13" />
+              </filter>
+            </defs>
+            <rect width="1024" height="1024" fill="#FFFFFF"/>
+            <!-- 向上凸起的贝塞尔虚线 (控制点在左上 440, 310，凸起饱满) -->
+            <path d="M 240 740 Q 440 310 850 240" 
+                  stroke="#DADCE0" 
+                  stroke-width="44" 
+                  stroke-dasharray="46 36" 
+                  stroke-linecap="round"/>
+            <!-- 四球全部骑在向上隆起的新弧线上 -->
+            <circle cx="240" cy="740" r="142" fill="#4285F4" filter="url(#shadow1)"/> <!-- 蓝：起点端 -->
+            <circle cx="410" cy="495" r="108" fill="#EA4335" filter="url(#shadow1)"/> <!-- 红：上升冲刺 -->
+            <circle cx="595" cy="340" r="82" fill="#FBBC05" filter="url(#shadow1)"/>  <!-- 黄：波峰高点 -->
+            <circle cx="765" cy="265" r="62" fill="#34A853" filter="url(#shadow1)"/>  <!-- 绿：终点到站 -->
+          </svg>
+        </div>
+        <p>控制点大幅向左上方提拉！整道轨迹像一座昂扬向上的彩虹拱桥，波珠从蓝球蓄力出发，向上隆起并跃向绿球，充满朝气和速度感。</p>
+      </div>
+
+      <!-- 拱形 2：更加鲜明的彩虹大抛物线 -->
+      <div class="card">
+        <span class="tag">动势更强 · 大弧度</span>
+        <h3>弧度 2：高耸跃飞大拱弧 (Dynamic Crest)</h3>
+        <div class="icon-wrapper squircle" id="iconArch2">
+          <svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <filter id="shadow2" x="-25%" y="-25%" width="160%" height="160%">
+                <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#000000" flood-opacity="0.13" />
+              </filter>
+            </defs>
+            <rect width="1024" height="1024" fill="#FFFFFF"/>
+            <!-- 更强烈的向上隆起，控制点在 390, 230 -->
+            <path d="M 240 740 Q 380 230 850 250" 
+                  stroke="#DADCE0" 
+                  stroke-width="44" 
+                  stroke-dasharray="46 36" 
+                  stroke-linecap="round"/>
+            <!-- 四球坐标适配更大凸起 -->
+            <circle cx="240" cy="740" r="142" fill="#4285F4" filter="url(#shadow2)"/>
+            <circle cx="380" cy="460" r="108" fill="#EA4335" filter="url(#shadow2)"/>
+            <circle cx="575" cy="305" r="82" fill="#FBBC05" filter="url(#shadow2)"/>
+            <circle cx="760" cy="255" r="62" fill="#34A853" filter="url(#shadow2)"/>
+          </svg>
+        </div>
+        <p>上凸弧度更加高挑，红球和黄球被托举得更高，有强烈的“腾飞跨越”感，整个构图完全摆脱平缓，极具视觉冲击力。</p>
+      </div>
+    </div>
+
+    <!-- 手机桌面 Dock 实景模拟 -->
+    <div class="mockup-section">
+      <div class="mockup-title">📱 模拟 Pixel 桌面 Dock 栏尺寸（实机微缩效果）</div>
+      <div class="phone-dock">
+        <div class="dock-app">
+          <div class="mini-icon">
+            <svg viewBox="0 0 1024 1024" id="miniArch1"></svg>
+          </div>
+          <span class="app-name">追客 (弧度 1 优雅拱)</span>
+        </div>
+        <div class="dock-app">
+          <div class="mini-icon">
+            <svg viewBox="0 0 1024 1024" id="miniArch2"></svg>
+          </div>
+          <span class="app-name">追客 (弧度 2 挑高拱)</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function setShape(shape) {
+      document.querySelectorAll('.icon-wrapper').forEach(el => {
+        el.className = 'icon-wrapper ' + shape;
+      });
+      document.querySelectorAll('.mini-icon').forEach(el => {
+        if(shape === 'circle') el.style.borderRadius = '50%';
+        else if(shape === 'squircle') el.style.borderRadius = '16px';
+        else el.style.borderRadius = '10px';
+      });
+      document.querySelectorAll('.btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+    }
+
+    window.onload = function() {
+      ['Arch1', 'Arch2'].forEach(id => {
+        const sourceSvg = document.querySelector('#icon' + id + ' svg');
+        const mini = document.querySelector('#mini' + id);
+        mini.innerHTML = sourceSvg.innerHTML;
+      });
+    }
+  </script>
+</body>
+</html>

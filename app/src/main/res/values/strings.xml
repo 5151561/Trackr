@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Trackr</string>
+    <string name="app_name">追客</string>
     <string name="widget_name">实时公交候车卡</string>
     <string name="widget_desc">在桌面实时查看常用公交站下一班车剩余站数与预计到站时间</string>
 </resources>
