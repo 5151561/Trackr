@@ -8,6 +8,8 @@ import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.LineOperatingState
 import com.trackr.domain.model.LiveBus
+import com.trackr.domain.model.NearbyStop
+import com.trackr.domain.model.NearbyStopLineStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
@@ -16,6 +18,7 @@ import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 掌上公交（Mygolbs）全国实时公交直连 API 客户端
@@ -31,12 +34,44 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
         private val PRICE_REGEX = Regex("""票价[:：]\s*([^\s，,]+)""")
 
         private val DEFAULT_CITIES = mapOf(
+            "北京市" to "110000",
+            "上海市" to "310000",
+            "广州市" to "440100",
+            "深圳市" to "440300",
+            "成都市" to "510100",
+            "重庆市" to "500000",
+            "武汉市" to "420100",
+            "南京市" to "320100",
+            "福州市" to "350100",
+            "贵阳市" to "520100",
             "玉林市" to "450900",
             "北流市" to "450981",
             "南宁市" to "450100",
             "柳州市" to "450200",
             "桂林市" to "450300"
         )
+
+        /**
+         * 将任意城市名规范化为掌上公交接收的带行政区划名称（如“福州” -> “福州市”）
+         */
+        fun normalizeCityName(cityName: String, knownCityNames: Set<String> = DEFAULT_CITIES.keys): String {
+            val trimmed = cityName.trim()
+            if (trimmed.isEmpty()) return ""
+            if (knownCityNames.contains(trimmed)) return trimmed
+            val withShi = if (!trimmed.endsWith("市") && !trimmed.endsWith("县") && !trimmed.endsWith("区")) "${trimmed}市" else trimmed
+            if (knownCityNames.contains(withShi)) return withShi
+            val found = knownCityNames.firstOrNull { it.startsWith(trimmed) || trimmed.startsWith(it.removeSuffix("市")) }
+            if (found != null) return found
+            return withShi
+        }
+    }
+
+    private val cachedCityNames = ConcurrentHashMap.newKeySet<String>().apply {
+        addAll(DEFAULT_CITIES.keys)
+    }
+
+    fun normalizeCityName(cityName: String): String {
+        return normalizeCityName(cityName, cachedCityNames)
     }
 
     private suspend fun callApi(params: Map<String, String>): JSONObject = withContext(Dispatchers.IO) {
@@ -80,13 +115,16 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
             if (dataArr != null) {
                 for (i in 0 until dataArr.length()) {
                     val item = dataArr.optJSONObject(i) ?: continue
-                    val name = item.optString("cityName")
+                    val name = item.optString("cityname")
+                        .ifBlank { item.optString("cityName") }
                         .ifBlank { item.optString("CITYNAME") }
                     val code = item.optString("cityCode")
                         .ifBlank { item.optString("CITYCODE") }
                         .ifBlank { item.optString("code") }
-                    if (name.isNotBlank() && code.isNotBlank()) {
+                        .ifBlank { "0" }
+                    if (name.isNotBlank()) {
                         result[name] = code
+                        cachedCityNames.add(name)
                     }
                 }
             }
@@ -100,68 +138,100 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
      * 按关键字搜索线路（CMD=114 / CMD=102）
      * 为每条匹配线路生成正向与反向两个方向（lineId 为 mg:${cityCode}:${cityName}:${lineName}:1 与 :2）
      */
-    suspend fun searchLines(cityCode: String, cityName: String, keyword: String): List<BusLineSummary> = withContext(Dispatchers.IO) {
+    suspend fun searchLines(cityCode: String = "", cityName: String, keyword: String): List<BusLineSummary> = withContext(Dispatchers.IO) {
+        val normalizedCity = normalizeCityName(cityName)
         val results = ArrayList<BusLineSummary>()
         try {
             val json = try {
                 callApi(
                     mapOf(
                         "CMD" to "114",
-                        "CITYCODE" to cityCode,
-                        "CITYNAME" to cityName,
-                        "LINENAME" to keyword
+                        "CITYNAME" to normalizedCity,
+                        "KEYWORD" to keyword,
+                        "CITYKEY" to ""
                     )
                 )
             } catch (_: Exception) {
                 callApi(
                     mapOf(
                         "CMD" to "102",
-                        "CITYCODE" to cityCode,
-                        "CITYNAME" to cityName,
-                        "LINENAME" to keyword
+                        "CITYNAME" to normalizedCity,
+                        "KEYWORD" to keyword,
+                        "CITYKEY" to ""
                     )
                 )
             }
 
-            val dataArr = json.optJSONArray("data") ?: json.optJSONArray("list") ?: JSONArray()
-            val seenLines = HashSet<String>()
+            val dataArr = json.optJSONArray("buslines")
+                ?: json.optJSONArray("data")
+                ?: json.optJSONArray("list")
+                ?: JSONArray()
+            val lineMap = LinkedHashMap<String, MutableList<BusLineDirection>>()
             for (i in 0 until dataArr.length()) {
                 val item = dataArr.optJSONObject(i) ?: continue
                 val lineName = item.optString("lineName").ifBlank { item.optString("LINENAME") }
-                if (lineName.isBlank() || !seenLines.add(lineName)) continue
+                if (lineName.isBlank()) continue
 
-                val startStation = item.optString("startStation").ifBlank { item.optString("firstStation") }
-                val endStation = item.optString("endStation").ifBlank { item.optString("lastStation") }
+                val upperOrDown = item.optString("upperOrDown").ifBlank { "1" }
+                val startStation = item.optString("from")
+                    .ifBlank { item.optString("startStation") }
+                    .ifBlank { item.optString("firstStation") }
+                val endStation = item.optString("to")
+                    .ifBlank { item.optString("endStation") }
+                    .ifBlank { item.optString("lastStation") }
+                val price = item.optString("comments")
+                val routeBean = item.optJSONObject("routeBean")
+                val firstTime = routeBean?.optString("suTime").orEmpty()
+                val lastTime = routeBean?.optString("euTime").orEmpty()
+                val dirInt = if (upperOrDown == "1") 0 else 1
 
-                val dir1 = BusLineDirection(
-                    lineId = "mg:$cityCode:$cityName:$lineName:1",
+                val dir = BusLineDirection(
+                    lineId = "mg:$cityCode:$normalizedCity:$lineName:$upperOrDown",
                     name = lineName,
                     lineNo = lineName,
-                    direction = 0,
+                    direction = dirInt,
                     startStop = startStation,
                     endStop = endStation,
+                    firstTime = firstTime,
+                    lastTime = lastTime,
+                    price = price,
                     source = DataSourceType.MYGOLBS,
                     mygolbsCityCode = cityCode,
-                    mygolbsCityName = cityName
+                    mygolbsCityName = normalizedCity
                 )
-                val dir2 = BusLineDirection(
-                    lineId = "mg:$cityCode:$cityName:$lineName:2",
-                    name = lineName,
-                    lineNo = lineName,
-                    direction = 1,
-                    startStop = endStation,
-                    endStop = startStation,
-                    source = DataSourceType.MYGOLBS,
-                    mygolbsCityCode = cityCode,
-                    mygolbsCityName = cityName
-                )
+
+                lineMap.getOrPut(lineName) { mutableListOf() }.add(dir)
+            }
+
+            for ((lineName, dirs) in lineMap) {
+                val effectiveDirs = if (dirs.size == 1) {
+                    val d1 = dirs[0]
+                    val revUpperOrDown = if (d1.direction == 0) "2" else "1"
+                    val revDir = BusLineDirection(
+                        lineId = "mg:$cityCode:$normalizedCity:$lineName:$revUpperOrDown",
+                        name = lineName,
+                        lineNo = lineName,
+                        direction = if (d1.direction == 0) 1 else 0,
+                        startStop = d1.endStop,
+                        endStop = d1.startStop,
+                        firstTime = d1.firstTime,
+                        lastTime = d1.lastTime,
+                        price = d1.price,
+                        source = DataSourceType.MYGOLBS,
+                        mygolbsCityCode = cityCode,
+                        mygolbsCityName = normalizedCity
+                    )
+                    listOf(d1, revDir)
+                } else {
+                    dirs.sortedBy { it.direction }
+                }
 
                 results.add(
                     BusLineSummary(
                         name = lineName,
                         lineNo = lineName,
                         isSubway = false,
-                        directions = listOf(dir1, dir2),
+                        directions = effectiveDirs,
                         source = DataSourceType.MYGOLBS
                     )
                 )
@@ -170,6 +240,150 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
             // 搜索失败返回空列表
         }
         results
+    }
+
+    /**
+     * 按关键字搜索公交站点（CMD=110 / CMD=102）
+     */
+    suspend fun searchStops(cityName: String, keyword: String): List<NearbyStop> = withContext(Dispatchers.IO) {
+        val normalizedCity = normalizeCityName(cityName)
+        val results = ArrayList<NearbyStop>()
+        try {
+            val json = try {
+                callApi(
+                    mapOf(
+                        "CMD" to "110",
+                        "CITYNAME" to normalizedCity,
+                        "KEYWORD" to keyword,
+                        "CITYKEY" to ""
+                    )
+                )
+            } catch (_: Exception) {
+                callApi(
+                    mapOf(
+                        "CMD" to "102",
+                        "CITYNAME" to normalizedCity,
+                        "KEYWORD" to keyword,
+                        "CITYKEY" to ""
+                    )
+                )
+            }
+
+            val dataArr = json.optJSONArray("busstations") ?: JSONArray()
+            val seenStops = HashSet<String>()
+            for (i in 0 until dataArr.length()) {
+                val item = dataArr.optJSONObject(i) ?: continue
+                val stationName = item.optString("stationName").trim()
+                if (stationName.isBlank() || !seenStops.add(stationName)) continue
+
+                val lat = item.optDouble("station_lat", 0.0)
+                val lng = item.optDouble("station_lon", 0.0)
+                val stopId = "mg:$normalizedCity:$stationName"
+
+                results.add(
+                    NearbyStop(
+                        stopId = stopId,
+                        name = stationName,
+                        wgsLat = lat,
+                        wgsLng = lng,
+                        physicalStId = stopId,
+                        namesakeStId = stopId,
+                        source = DataSourceType.MYGOLBS
+                    )
+                )
+            }
+        } catch (_: Exception) {
+            // 搜索失败返回空列表
+        }
+        results
+    }
+
+    /**
+     * 根据站点名获取停靠该站点的所有线路及实时状态（CMD=105）
+     */
+    suspend fun getStopLines(cityName: String, stationName: String): NearbyStop = withContext(Dispatchers.IO) {
+        val normalizedCity = normalizeCityName(cityName)
+        val cleanStation = stationName.trim()
+        val stopId = "mg:$normalizedCity:$cleanStation"
+        try {
+            val json = callApi(
+                mapOf(
+                    "CMD" to "105",
+                    "CITYNAME" to normalizedCity,
+                    "STATIONNAME" to cleanStation,
+                    "MYLAT" to "",
+                    "MYLNG" to "",
+                    "CITYKEY" to ""
+                )
+            )
+
+            val dataArr = json.optJSONArray("data") ?: JSONArray()
+            val lineStatuses = ArrayList<NearbyStopLineStatus>()
+            for (i in 0 until dataArr.length()) {
+                val item = dataArr.optJSONObject(i) ?: continue
+                val lineName = item.optString("lineName").ifBlank { item.optString("routeName") }
+                if (lineName.isBlank()) continue
+
+                val upperOrDown = item.optString("upperOrDown").ifBlank { "1" }
+                val from = item.optString("from")
+                val to = item.optString("to")
+                val comments = item.optString("comments")
+                val neartext = item.optString("neartext")
+                val neartime = item.optString("neartime")
+                val stationOrder = item.optInt("stationOrder", 0)
+                val routeBean = item.optJSONObject("routeBean")
+                val firstTime = routeBean?.optString("suTime").orEmpty()
+                val lastTime = routeBean?.optString("euTime").orEmpty()
+
+                val lineDir = BusLineDirection(
+                    lineId = "mg:0:$normalizedCity:$lineName:$upperOrDown",
+                    name = lineName,
+                    lineNo = lineName,
+                    direction = if (upperOrDown == "1") 0 else 1,
+                    startStop = from,
+                    endStop = to,
+                    firstTime = firstTime,
+                    lastTime = lastTime,
+                    price = comments,
+                    source = DataSourceType.MYGOLBS,
+                    mygolbsCityName = normalizedCity
+                )
+
+                val statusText = when {
+                    neartext.isNotBlank() -> neartext
+                    neartime.isNotBlank() -> "预计 $neartime 到达"
+                    else -> "正在运营中"
+                }
+
+                lineStatuses.add(
+                    NearbyStopLineStatus(
+                        line = lineDir,
+                        targetOrder = stationOrder,
+                        targetStopId = stopId,
+                        targetStopName = cleanStation,
+                        statusText = statusText,
+                        preArrivalTime = neartime.takeIf { it.isNotBlank() }
+                    )
+                )
+            }
+
+            NearbyStop(
+                stopId = stopId,
+                name = cleanStation,
+                physicalStId = stopId,
+                namesakeStId = stopId,
+                lines = lineStatuses,
+                source = DataSourceType.MYGOLBS
+            )
+        } catch (_: Exception) {
+            NearbyStop(
+                stopId = stopId,
+                name = cleanStation,
+                physicalStId = stopId,
+                namesakeStId = stopId,
+                source = DataSourceType.MYGOLBS
+            )
+        }
     }
 
     /**
@@ -182,7 +396,7 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
             throw IllegalArgumentException("Invalid Mygolbs lineId: $lineId. Expected format: mg:cityCode:cityName:lineName:dir")
         }
         val cityCode = parts[0]
-        val cityName = parts[1]
+        val cityName = normalizeCityName(parts[1])
         val lineName = parts[2]
         val dirStr = parts[3]
         val dirInt = dirStr.toIntOrNull() ?: 1
@@ -194,7 +408,8 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
                 "CITYNAME" to cityName,
                 "CITYCODE" to cityCode,
                 "LINENAME" to lineName,
-                "DIRECTION" to dirStr
+                "DIRECTION" to dirStr,
+                "CITYKEY" to ""
             )
         )
 
@@ -203,8 +418,10 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
         val price = priceMatch?.groupValues?.getOrNull(1) ?: ""
 
         val firstLastArr = routeJson.optJSONArray("firstLast")
-        val firstTime = firstLastArr?.optJSONObject(0)?.optString("first") ?: ""
-        val lastTime = firstLastArr?.optJSONObject(0)?.optString("last") ?: ""
+        val firstTime = firstLastArr?.optJSONObject(0)?.optString("first")
+            ?: routeJson.optString("beginTime")
+        val lastTime = firstLastArr?.optJSONObject(0)?.optString("last")
+            ?: routeJson.optString("endTime")
 
         val dataArr = routeJson.optJSONArray("data") ?: JSONArray()
         val stopsList = ArrayList<BusStop>()
@@ -246,7 +463,8 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
                 "CITYCODE" to cityCode,
                 "LINENAME" to lineName,
                 "DIRECTION" to dirStr,
-                "STATIONORDER" to effectiveTargetOrder.toString()
+                "STATIONORDER" to effectiveTargetOrder.toString(),
+                "CITYKEY" to ""
             )
         )
 

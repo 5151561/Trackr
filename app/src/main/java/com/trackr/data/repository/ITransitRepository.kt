@@ -3,6 +3,7 @@ package com.trackr.data.repository
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.DataSourceType
+import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.LineTimetable
 import com.trackr.domain.model.NearbyStop
@@ -16,10 +17,12 @@ import kotlinx.coroutines.flow.StateFlow
  */
 interface ITransitRepository {
     val selectedCity: StateFlow<TransitCity>
+    val engineMode: StateFlow<EngineMode>
     val favorites: StateFlow<List<FavoriteStationLine>>
     val activeTrackingSession: StateFlow<TrackingSessionState>
     val userLocation: StateFlow<Pair<Double, Double>?>
 
+    fun setEngineMode(mode: EngineMode)
     fun updateUserLocation(lat: Double, lng: Double)
     suspend fun selectCity(city: TransitCity)
     suspend fun getSupportedCities(forceRefresh: Boolean = false): Result<List<TransitCity>>

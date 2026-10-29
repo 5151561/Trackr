@@ -251,6 +251,22 @@ class TransitUnitTest {
         assertEquals("", RouteProjectionMath.formatDistanceText(0))
     }
 
+    @Test
+    fun testEngineMode_propertiesAndCycles() {
+        assertEquals("双引擎", com.trackr.domain.model.EngineMode.ALL.shortLabel)
+        assertEquals("掌上公交", com.trackr.domain.model.EngineMode.MYGOLBS.shortLabel)
+        assertEquals("车来了", com.trackr.domain.model.EngineMode.CHELAILE.shortLabel)
+    }
+
+    @Test
+    fun testMygolbsNormalizeCityName() {
+        assertEquals("北京市", com.trackr.data.remote.mygolbs.MygolbsApiClient.normalizeCityName("北京"))
+        assertEquals("福州市", com.trackr.data.remote.mygolbs.MygolbsApiClient.normalizeCityName("福州"))
+        assertEquals("玉林市", com.trackr.data.remote.mygolbs.MygolbsApiClient.normalizeCityName("玉林"))
+        assertEquals("玉林市", com.trackr.data.remote.mygolbs.MygolbsApiClient.normalizeCityName("玉林市"))
+        assertEquals("长宁县", com.trackr.data.remote.mygolbs.MygolbsApiClient.normalizeCityName("长宁县"))
+    }
+
     @org.junit.Ignore("Online network probe test - skipped in automated unit testing")
     @Test
     fun testInspectStopDetailOnline() {

@@ -14,6 +14,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.trackr.TrackrApp
 import com.trackr.data.repository.ITransitRepository
+import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.ProvinceCityCatalog
@@ -52,7 +53,8 @@ data class HomeUiState(
     val searchQuery: String = "",
     val searchResult: TransitSearchResult? = null,
     val isSearching: Boolean = false,
-    val isRefreshing: Boolean = false
+    val isRefreshing: Boolean = false,
+    val engineMode: EngineMode = EngineMode.ALL
 ) {
     val filteredCities: List<TransitCity>
         get() {
@@ -132,6 +134,17 @@ class HomeViewModel(
         viewModelScope.launch {
             repository.activeTrackingSession.collect { session ->
                 _uiState.update { it.copy(activeTracking = session) }
+            }
+        }
+
+        // 观察当前引擎运行模式
+        viewModelScope.launch {
+            repository.engineMode.collect { mode ->
+                _uiState.update { it.copy(engineMode = mode) }
+                val currentQuery = _uiState.value.searchQuery
+                if (currentQuery.isNotBlank()) {
+                    updateSearchQuery(currentQuery)
+                }
             }
         }
 
@@ -502,6 +515,19 @@ class HomeViewModel(
         viewModelScope.launch {
             repository.removeFavorite(id)
         }
+    }
+
+    fun setEngineMode(mode: EngineMode) {
+        repository.setEngineMode(mode)
+    }
+
+    fun toggleEngineMode() {
+        val nextMode = when (_uiState.value.engineMode) {
+            EngineMode.ALL -> EngineMode.MYGOLBS
+            EngineMode.MYGOLBS -> EngineMode.CHELAILE
+            EngineMode.CHELAILE -> EngineMode.ALL
+        }
+        setEngineMode(nextMode)
     }
 
     fun stopTracking() {

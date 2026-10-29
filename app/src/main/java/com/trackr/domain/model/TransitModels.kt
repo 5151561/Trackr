@@ -12,6 +12,16 @@ enum class DataSourceType(val displayName: String) {
 }
 
 /**
+ * 引擎运行模式：双引擎融合 / 仅车来了 / 仅掌上公交
+ */
+@Serializable
+enum class EngineMode(val displayName: String, val shortLabel: String) {
+    ALL("双引擎融合", "双引擎"),
+    CHELAILE("车来了", "车来了"),
+    MYGOLBS("掌上公交", "掌上公交")
+}
+
+/**
  * 城市实体（聚合车来了 cityId 与掌上公交 cityCode）
  */
 @Serializable
@@ -155,7 +165,8 @@ data class NearbyStop(
     val namesakeStId: String? = null,
     val isSubway: Boolean = false,
     val lines: List<NearbyStopLineStatus> = emptyList(),
-    val subwayLineNames: List<String> = emptyList()
+    val subwayLineNames: List<String> = emptyList(),
+    val source: DataSourceType = DataSourceType.CHELAILE
 )
 
 /**

@@ -484,6 +484,19 @@ private fun SearchStopItemCard(
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = if (stop.source == DataSourceType.MYGOLBS) Color(0xFFFFF3E0) else Color(0xFFE8F5E9)
+                    ) {
+                        Text(
+                            text = stop.source.displayName,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = if (stop.source == DataSourceType.MYGOLBS) Color(0xFFE65100) else Color(0xFF2E7D32),
+                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                        )
+                    }
                     if (stop.subwayLineNames.isNotEmpty()) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(

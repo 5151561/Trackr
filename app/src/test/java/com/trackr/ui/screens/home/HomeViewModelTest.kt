@@ -153,4 +153,24 @@ class HomeViewModelTest {
         assertEquals(1, viewModel.uiState.value.favorites.size)
         assertEquals("人民广场", viewModel.uiState.value.favorites.first().targetStopName)
     }
+
+    @Test
+    fun testEngineModeSwitching() = runTest {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        assertEquals(com.trackr.domain.model.EngineMode.ALL, viewModel.uiState.value.engineMode)
+
+        viewModel.toggleEngineMode()
+        testScheduler.runCurrent()
+        assertEquals(com.trackr.domain.model.EngineMode.MYGOLBS, viewModel.uiState.value.engineMode)
+
+        viewModel.toggleEngineMode()
+        testScheduler.runCurrent()
+        assertEquals(com.trackr.domain.model.EngineMode.CHELAILE, viewModel.uiState.value.engineMode)
+
+        viewModel.setEngineMode(com.trackr.domain.model.EngineMode.ALL)
+        testScheduler.runCurrent()
+        assertEquals(com.trackr.domain.model.EngineMode.ALL, viewModel.uiState.value.engineMode)
+    }
 }

@@ -10,6 +10,7 @@ import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusLineSummary
 import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.DataSourceType
+import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.LineTimetable
 import com.trackr.domain.model.NearbyStop
@@ -51,6 +52,9 @@ class TransitRepository(
     private val _selectedCity = MutableStateFlow(loadInitialCity())
     override val selectedCity: StateFlow<TransitCity> = _selectedCity.asStateFlow()
 
+    private val _engineMode = MutableStateFlow(loadInitialEngineMode())
+    override val engineMode: StateFlow<EngineMode> = _engineMode.asStateFlow()
+
     private val _favorites = MutableStateFlow(loadInitialFavorites())
     override val favorites: StateFlow<List<FavoriteStationLine>> = _favorites.asStateFlow()
 
@@ -90,6 +94,16 @@ class TransitRepository(
             } catch (_: Exception) {}
         }
         return emptyList()
+    }
+
+    private fun loadInitialEngineMode(): EngineMode {
+        val modeStr = prefs.getString("engine_mode", EngineMode.ALL.name)
+        return runCatching { EngineMode.valueOf(modeStr ?: EngineMode.ALL.name) }.getOrDefault(EngineMode.ALL)
+    }
+
+    override fun setEngineMode(mode: EngineMode) {
+        _engineMode.value = mode
+        prefs.edit().putString("engine_mode", mode.name).apply()
     }
 
     private fun saveFavorites(favs: List<FavoriteStationLine>) {
@@ -213,6 +227,20 @@ class TransitRepository(
         userLat: Double?,
         userLng: Double?
     ): Result<List<NearbyStop>> = runCatching {
+        val isMygolbsStop = stopId?.startsWith("mg:") == true ||
+                physicalStId?.startsWith("mg:") == true ||
+                namesakeStId?.startsWith("mg:") == true ||
+                _engineMode.value == EngineMode.MYGOLBS
+        if (isMygolbsStop) {
+            val cleanName = (stopName ?: stopId?.removePrefix("mg:")?.split(":")?.lastOrNull() ?: "")
+                .removeSuffix(" (掌上公交)")
+                .trim()
+            if (cleanName.isNotBlank()) {
+                val mgStop = mygolbsClient.getStopLines(city.cityName, cleanName)
+                return@runCatching listOf(mgStop)
+            }
+        }
+
         val resolvedUserLat = userLat ?: _userLocation.value?.first
         val resolvedUserLng = userLng ?: _userLocation.value?.second
 
@@ -277,6 +305,13 @@ class TransitRepository(
             } else {
                 matched
             }
+        } else if (!stopName.isNullOrBlank() && _engineMode.value != EngineMode.CHELAILE) {
+            val mgStop = runCatching { mygolbsClient.getStopLines(city.cityName, stopName.trim()) }.getOrNull()
+            if (mgStop != null && mgStop.lines.isNotEmpty()) {
+                listOf(mgStop)
+            } else {
+                emptyList()
+            }
         } else {
             emptyList()
         }
@@ -290,51 +325,105 @@ class TransitRepository(
     ): Result<TransitSearchResult> = runCatching {
         val resolvedUserLat = userLat ?: _userLocation.value?.first
         val resolvedUserLng = userLng ?: _userLocation.value?.second
+        val mode = _engineMode.value
 
         coroutineScope {
+            val needChelaile = (mode == EngineMode.ALL || mode == EngineMode.CHELAILE)
+            val needMygolbs = (mode == EngineMode.ALL || mode == EngineMode.MYGOLBS)
+
             val chelaileDeferred = async {
-                runCatching {
-                    chelaileClient.search(
-                        cityId = city.cityId,
-                        keyword = keyword,
-                        userLat = resolvedUserLat,
-                        userLng = resolvedUserLng
-                    )
-                }.getOrDefault(TransitSearchResult(keyword))
+                if (needChelaile) {
+                    runCatching {
+                        chelaileClient.search(
+                            cityId = city.cityId,
+                            keyword = keyword,
+                            userLat = resolvedUserLat,
+                            userLng = resolvedUserLng
+                        )
+                    }.getOrDefault(TransitSearchResult(keyword))
+                } else {
+                    TransitSearchResult(keyword)
+                }
             }
 
-            val mygolbsCode = city.mygolbsCityCode ?: if (city.cityName.contains("玉林")) "450900" else null
-            val mygolbsDeferred = async {
-                if (mygolbsCode != null) {
-                    runCatching { mygolbsClient.searchLines(mygolbsCode, city.cityName, keyword) }
-                        .getOrDefault(emptyList())
+            val mygolbsLinesDeferred = async {
+                if (needMygolbs) {
+                    runCatching {
+                        mygolbsClient.searchLines(
+                            cityCode = city.mygolbsCityCode.orEmpty(),
+                            cityName = city.cityName,
+                            keyword = keyword
+                        )
+                    }.getOrDefault(emptyList())
+                } else {
+                    emptyList()
+                }
+            }
+
+            val mygolbsStopsDeferred = async {
+                if (needMygolbs) {
+                    runCatching {
+                        mygolbsClient.searchStops(
+                            cityName = city.cityName,
+                            keyword = keyword
+                        )
+                    }.getOrDefault(emptyList())
                 } else {
                     emptyList()
                 }
             }
 
             val chelaileRes = chelaileDeferred.await()
-            val mygolbsRes = mygolbsDeferred.await()
+            val mygolbsLines = mygolbsLinesDeferred.await()
+            val mygolbsStops = mygolbsStopsDeferred.await()
 
-            // 合并去重逻辑：车来了已有的同名线路保持车来了优先，掌上公交补充未覆盖线路
-            val mergedLines = ArrayList<BusLineSummary>(chelaileRes.lines)
-            val existingNames = chelaileRes.lines.map { it.name.trim() }.toSet()
-
-            for (mgLine in mygolbsRes) {
-                if (!existingNames.contains(mgLine.name.trim())) {
-                    mergedLines.add(mgLine)
+            // 合并线路
+            val mergedLines = ArrayList<BusLineSummary>()
+            if (mode == EngineMode.MYGOLBS) {
+                mergedLines.addAll(mygolbsLines)
+            } else if (mode == EngineMode.CHELAILE) {
+                mergedLines.addAll(chelaileRes.lines)
+            } else {
+                // 双引擎模式：车来了线路 + 掌上公交线路
+                mergedLines.addAll(chelaileRes.lines)
+                val existingNames = chelaileRes.lines.map { it.name.trim() }.toSet()
+                for (mgLine in mygolbsLines) {
+                    if (!existingNames.contains(mgLine.name.trim())) {
+                        mergedLines.add(mgLine)
+                    } else {
+                        // 同名线路并存添加标有来源标识的掌上公交版本，供用户对比选择
+                        mergedLines.add(mgLine.copy(name = "${mgLine.name} [掌上公交]"))
+                    }
                 }
             }
 
-            // 按纯数字升序、汉字在后的规则智能排序
             mergedLines.sortWith { a, b ->
                 RouteProjectionMath.compareLineNames(a.name, b.name)
+            }
+
+            // 合并车站
+            val mergedStops = ArrayList<NearbyStop>()
+            if (mode == EngineMode.MYGOLBS) {
+                mergedStops.addAll(mygolbsStops)
+            } else if (mode == EngineMode.CHELAILE) {
+                mergedStops.addAll(chelaileRes.stops)
+            } else {
+                // 双引擎模式：车来了站点 + 掌上公交站点
+                mergedStops.addAll(chelaileRes.stops)
+                val existingStopNames = chelaileRes.stops.map { it.name.trim() }.toSet()
+                for (mgStop in mygolbsStops) {
+                    if (!existingStopNames.contains(mgStop.name.trim())) {
+                        mergedStops.add(mgStop)
+                    } else {
+                        mergedStops.add(mgStop.copy(name = "${mgStop.name} (掌上公交)"))
+                    }
+                }
             }
 
             TransitSearchResult(
                 keyword = keyword,
                 lines = mergedLines,
-                stops = chelaileRes.stops
+                stops = mergedStops
             )
         }
     }

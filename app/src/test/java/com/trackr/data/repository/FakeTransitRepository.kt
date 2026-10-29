@@ -3,6 +3,7 @@ package com.trackr.data.repository
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.DataSourceType
+import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.LineTimetable
 import com.trackr.domain.model.NearbyStop
@@ -24,6 +25,13 @@ class FakeTransitRepository(
 
     private val _selectedCity = MutableStateFlow(initialCity)
     override val selectedCity: StateFlow<TransitCity> = _selectedCity.asStateFlow()
+
+    private val _engineMode = MutableStateFlow(EngineMode.ALL)
+    override val engineMode: StateFlow<EngineMode> = _engineMode.asStateFlow()
+
+    override fun setEngineMode(mode: EngineMode) {
+        _engineMode.value = mode
+    }
 
     private val _favorites = MutableStateFlow(initialFavorites)
     override val favorites: StateFlow<List<FavoriteStationLine>> = _favorites.asStateFlow()

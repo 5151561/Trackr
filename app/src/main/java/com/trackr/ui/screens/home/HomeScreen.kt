@@ -46,9 +46,12 @@ import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Subway
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -80,6 +83,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.DataSourceType
+import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.NearbyStopLineStatus
@@ -102,9 +106,11 @@ fun HomeScreen(
         topBar = {
             HomeTopBar(
                 city = state.currentCity,
+                engineMode = state.engineMode,
                 isLocating = state.isLocating,
                 onCityClick = { viewModel.setCityPickerOpen(true) },
-                onRefreshClick = { viewModel.refreshLocationAndNearby() }
+                onRefreshClick = { viewModel.refreshLocationAndNearby() },
+                onSelectEngineMode = { mode -> viewModel.setEngineMode(mode) }
             )
         }
     ) { paddingValues ->
@@ -253,15 +259,19 @@ fun HomeScreen(
 }
 
 /**
- * 顶部导航与大标题栏
+ * 顶部导航与大标题栏（包含数据引擎切换开关与城市选择）
  */
 @Composable
 private fun HomeTopBar(
     city: TransitCity,
+    engineMode: EngineMode,
     isLocating: Boolean,
     onCityClick: () -> Unit,
-    onRefreshClick: () -> Unit
+    onRefreshClick: () -> Unit,
+    onSelectEngineMode: (EngineMode) -> Unit
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
@@ -286,21 +296,83 @@ private fun HomeTopBar(
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.primaryContainer
-                    ) {
-                        Text(
-                            text = "双引擎",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
+
+                    // 引擎切换胶囊开关
+                    Box {
+                        val (containerColor, contentColor) = when (engineMode) {
+                            EngineMode.ALL -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.primary
+                            EngineMode.MYGOLBS -> Color(0xFFFFF3E0) to Color(0xFFE65100)
+                            EngineMode.CHELAILE -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
+                        }
+
+                        Surface(
+                            onClick = { menuExpanded = true },
+                            shape = RoundedCornerShape(12.dp),
+                            color = containerColor,
+                            shadowElevation = 0.5.dp
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = engineMode.shortLabel,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = contentColor
+                                )
+                                Spacer(modifier = Modifier.width(2.dp))
+                                Icon(
+                                    imageVector = Icons.Default.SwapHoriz,
+                                    contentDescription = "切换引擎模式",
+                                    tint = contentColor,
+                                    modifier = Modifier.size(13.dp)
+                                )
+                            }
+                        }
+
+                        DropdownMenu(
+                            expanded = menuExpanded,
+                            onDismissRequest = { menuExpanded = false }
+                        ) {
+                            EngineMode.values().forEach { mode ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.SpaceBetween
+                                        ) {
+                                            Text(
+                                                text = mode.displayName,
+                                                fontWeight = if (mode == engineMode) FontWeight.Bold else FontWeight.Normal,
+                                                color = if (mode == engineMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                            )
+                                            if (mode == engineMode) {
+                                                Spacer(modifier = Modifier.width(8.dp))
+                                                Text(
+                                                    text = "✓",
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                        }
+                                    },
+                                    onClick = {
+                                        menuExpanded = false
+                                        onSelectEngineMode(mode)
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
                 Text(
-                    text = "全国公交实时精准追踪 · 车来了 & 掌上公交",
+                    text = when (engineMode) {
+                        EngineMode.ALL -> "全国公交实时精准追踪 · 车来了 & 掌上公交双引擎"
+                        EngineMode.MYGOLBS -> "全国公交实时精准追踪 · 掌上公交直连引擎"
+                        EngineMode.CHELAILE -> "全国公交实时精准追踪 · 车来了直连引擎"
+                    },
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
