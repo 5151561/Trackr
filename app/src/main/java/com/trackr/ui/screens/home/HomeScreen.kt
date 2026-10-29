@@ -293,9 +293,9 @@ private fun HomeTopBar(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // 城市选择胶囊按钮
                 Surface(
+                    onClick = onCityClick,
                     shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.clickable { onCityClick() }
+                    color = MaterialTheme.colorScheme.surfaceVariant
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -327,7 +327,9 @@ private fun HomeTopBar(
                 // 定位/刷新按钮
                 IconButton(
                     onClick = onRefreshClick,
-                    enabled = !isLocating
+                    enabled = !isLocating,
+                    modifier = Modifier.clip(CircleShape),
+                    shape = CircleShape
                 ) {
                     if (isLocating) {
                         CircularProgressIndicator(
@@ -369,10 +371,10 @@ private fun ActiveTrackingBanner(
     )
 
     Card(
+        onClick = onCardClick,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .clickable { onCardClick() },
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer
@@ -443,7 +445,11 @@ private fun ActiveTrackingBanner(
                 )
             }
 
-            IconButton(onClick = onStopTracking) {
+            IconButton(
+                onClick = onStopTracking,
+                modifier = Modifier.clip(CircleShape),
+                shape = CircleShape
+            ) {
                 Icon(
                     imageVector = Icons.Default.Close,
                     contentDescription = "结束追踪",
@@ -463,10 +469,10 @@ private fun SearchEntryBar(
     onClick: () -> Unit
 ) {
     Surface(
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
-            .clickable { onClick() },
+            .padding(horizontal = 16.dp, vertical = 6.dp),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
         tonalElevation = 2.dp
@@ -618,7 +624,7 @@ private fun FavoritesSection(
             }
         } else {
             LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 items(
@@ -648,14 +654,16 @@ private fun FavoriteCard(
     onClick: () -> Unit
 ) {
     ElevatedCard(
-        modifier = Modifier
-            .width(220.dp)
-            .clickable { onClick() },
+        onClick = onClick,
+        modifier = Modifier.width(220.dp),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.elevatedCardColors(
             containerColor = MaterialTheme.colorScheme.surface
         ),
-        elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.elevatedCardElevation(
+            defaultElevation = 2.dp,
+            pressedElevation = 2.dp
+        )
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -769,7 +777,12 @@ private fun NearbyStopsHeader(
             )
         }
 
-        IconButton(onClick = onRefresh, enabled = !isLoading) {
+        IconButton(
+            onClick = onRefresh,
+            enabled = !isLoading,
+            modifier = Modifier.clip(CircleShape),
+            shape = CircleShape
+        ) {
             Icon(
                 imageVector = Icons.Default.Refresh,
                 contentDescription = "刷新附近站点",
