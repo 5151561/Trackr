@@ -19,8 +19,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -62,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.LiveBus
+import com.trackr.ui.theme.BusSemanticColors
 import com.trackr.ui.theme.busChipSpringSpec
 import com.trackr.ui.theme.busColors
 import com.trackr.ui.theme.expressiveSpringSpec
@@ -544,6 +548,9 @@ private fun VerticalRouteRail(
     onSelectBus: (LiveBus) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val currentSelectedOrder = selectedStop?.order ?: 1
+    val busColors = MaterialTheme.busColors
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -551,7 +558,7 @@ private fun VerticalRouteRail(
     ) {
         stops.forEachIndexed { index, stop ->
             val isSelected = stop.order == selectedStop?.order
-            val isPassed = stop.order < (selectedStop?.order ?: 1)
+            val isPassed = stop.order < currentSelectedOrder
             val isFirst = index == 0
             val isLast = index == stops.size - 1
 
@@ -560,18 +567,57 @@ private fun VerticalRouteRail(
                 buses.filter { it.order == stop.order }
             }
 
+            // 计算该站点上方和下方轨道的连贯颜色，保证相邻站点接缝处颜色严格一致
+            val topTrackColor = if (index > 0) {
+                val prevStop = stops[index - 1]
+                getRouteSegmentColor(prevStop.order, stop.order, currentSelectedOrder, busColors)
+            } else {
+                busColors.routeTrackActive
+            }
+
+            val bottomTrackColor = if (index < stops.size - 1) {
+                val nextStop = stops[index + 1]
+                getRouteSegmentColor(stop.order, nextStop.order, currentSelectedOrder, busColors)
+            } else {
+                busColors.routeTrackActive
+            }
+
             VerticalTimelineRow(
                 stop = stop,
                 isSelected = isSelected,
                 isPassed = isPassed,
                 isFirst = isFirst,
                 isLast = isLast,
+                topTrackColor = topTrackColor,
+                bottomTrackColor = bottomTrackColor,
                 stationBuses = stationBuses,
                 selectedBusId = selectedBusId,
                 onSelectStop = { onSelectStop(stop) },
                 onSelectBus = onSelectBus
             )
         }
+    }
+}
+
+/**
+ * 计算两个连续站点之间的轨道颜色：
+ * 保证整段轨道在相邻 Station 之间颜色统一，不会在中间出现截断或突变
+ */
+private fun getRouteSegmentColor(
+    fromOrder: Int,
+    toOrder: Int,
+    currentSelectedOrder: Int,
+    busColors: BusSemanticColors
+): Color {
+    // 初始状态（选中第一站或默认全览），整条轨道均为连续的活跃翡翠绿
+    if (currentSelectedOrder <= 1) {
+        return busColors.routeTrackActive
+    }
+    // 已彻底开过的区间（到站序号早于当前候车站）渲染为已过站灰色，到达候车站及后续为活跃绿
+    return if (toOrder < currentSelectedOrder) {
+        busColors.busPassedGray
+    } else {
+        busColors.routeTrackActive
     }
 }
 
@@ -585,6 +631,8 @@ private fun VerticalTimelineRow(
     isPassed: Boolean,
     isFirst: Boolean,
     isLast: Boolean,
+    topTrackColor: Color,
+    bottomTrackColor: Color,
     stationBuses: List<LiveBus>,
     selectedBusId: String?,
     onSelectStop: () -> Unit,
@@ -596,10 +644,10 @@ private fun VerticalTimelineRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(rowBg)
+            .height(IntrinsicSize.Min)
+            .background(rowBg, shape = RoundedCornerShape(8.dp))
             .clickable { onSelectStop() }
-            .padding(vertical = 4.dp, horizontal = 8.dp),
+            .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // 1. 站序号
@@ -611,30 +659,31 @@ private fun VerticalTimelineRow(
             modifier = Modifier.width(26.dp)
         )
 
-        // 2. 纵向轴线与节点
+        // 2. 纵向轴线与节点 (Canvas 占满整行高度，上下出界 1px 消除浮点裁切误差，实现 100% 连续无断点)
         Box(
             modifier = Modifier
                 .width(28.dp)
-                .height(44.dp),
+                .fillMaxHeight(),
             contentAlignment = Alignment.Center
         ) {
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val centerX = size.width / 2f
-                val trackColor = if (isPassed) busColors.busPassedGray else busColors.routeTrackActive
+                val centerY = size.height / 2f
+                val overlap = 1f // 1px 防微细浮点裂隙
 
                 if (!isFirst) {
                     drawLine(
-                        color = trackColor,
-                        start = Offset(centerX, 0f),
-                        end = Offset(centerX, size.height / 2f),
+                        color = topTrackColor,
+                        start = Offset(centerX, -overlap),
+                        end = Offset(centerX, centerY),
                         strokeWidth = 3.dp.toPx()
                     )
                 }
                 if (!isLast) {
                     drawLine(
-                        color = if (isPassed) busColors.busPassedGray else busColors.routeTrackInactive,
-                        start = Offset(centerX, size.height / 2f),
-                        end = Offset(centerX, size.height),
+                        color = bottomTrackColor,
+                        start = Offset(centerX, centerY),
+                        end = Offset(centerX, size.height + overlap),
                         strokeWidth = 3.dp.toPx()
                     )
                 }
@@ -651,7 +700,13 @@ private fun VerticalTimelineRow(
         Spacer(modifier = Modifier.width(8.dp))
 
         // 3. 站名与备注
-        Column(modifier = Modifier.weight(1f)) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .defaultMinSize(minHeight = 44.dp)
+                .padding(vertical = 10.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = stop.name,
