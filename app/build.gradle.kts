@@ -60,6 +60,7 @@ android {
 
     buildTypes {
         debug {
+            applicationIdSuffix = ".d"
             enableUnitTestCoverage = true
         }
         release {
