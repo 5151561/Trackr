@@ -7,6 +7,7 @@ import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.TransitCity
+import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.ui.components.RouteRailLayoutMode
 import com.trackr.util.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -153,5 +154,37 @@ class LineDetailViewModelTest {
 
         assertFalse(viewModel.uiState.value.isFavorite)
         assertTrue(fakeRepository.favorites.value.isEmpty())
+    }
+
+    @Test
+    fun testTransitCodeSheet_openAndDismiss() = runTest {
+        val viewModel = createViewModel()
+        assertFalse(viewModel.uiState.value.isTransitCodeSheetOpen)
+
+        viewModel.openTransitCodeSheet()
+        assertTrue(viewModel.uiState.value.isTransitCodeSheetOpen)
+
+        viewModel.dismissTransitCodeSheet()
+        assertFalse(viewModel.uiState.value.isTransitCodeSheetOpen)
+    }
+
+    @Test
+    fun testTransitCodeProvider_updatesRepositoryAndState() = runTest {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        assertEquals(TransitCodeProvider.ASK_ALWAYS, viewModel.uiState.value.preferredTransitCodeProvider)
+
+        viewModel.setPreferredTransitCodeProvider(TransitCodeProvider.ALIPAY)
+        testScheduler.runCurrent()
+
+        assertEquals(TransitCodeProvider.ALIPAY, viewModel.uiState.value.preferredTransitCodeProvider)
+        assertEquals(TransitCodeProvider.ALIPAY, fakeRepository.preferredTransitCodeProvider.value)
+
+        viewModel.setPreferredTransitCodeProvider(TransitCodeProvider.UNIONPAY)
+        testScheduler.runCurrent()
+
+        assertEquals(TransitCodeProvider.UNIONPAY, viewModel.uiState.value.preferredTransitCodeProvider)
+        assertEquals(TransitCodeProvider.UNIONPAY, fakeRepository.preferredTransitCodeProvider.value)
     }
 }

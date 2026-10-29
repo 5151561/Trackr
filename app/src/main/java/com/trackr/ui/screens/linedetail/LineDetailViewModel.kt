@@ -13,6 +13,7 @@ import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.LineTimetable
 import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.TransitCity
+import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.ui.components.RouteRailLayoutMode
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -50,7 +51,9 @@ data class LineDetailUiState(
     val isFavorite: Boolean = false,
     val alertThresholdStops: Int = 2,
     val layoutMode: RouteRailLayoutMode = RouteRailLayoutMode.Horizontal,
-    val flipRotationDegrees: Float = 0f
+    val flipRotationDegrees: Float = 0f,
+    val preferredTransitCodeProvider: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
+    val isTransitCodeSheetOpen: Boolean = false
 )
 
 /**
@@ -81,6 +84,13 @@ class LineDetailViewModel(
         viewModelScope.launch {
             repository.favorites.collectLatest { favList ->
                 checkFavoriteState(favList)
+            }
+        }
+
+        // 监听乘车码偏好
+        viewModelScope.launch {
+            repository.preferredTransitCodeProvider.collectLatest { provider ->
+                _uiState.update { it.copy(preferredTransitCodeProvider = provider) }
             }
         }
 
@@ -413,6 +423,29 @@ class LineDetailViewModel(
                     RouteRailLayoutMode.Horizontal
                 }
             )
+        }
+    }
+
+    /**
+     * 打开乘车码选择弹窗
+     */
+    fun openTransitCodeSheet() {
+        _uiState.update { it.copy(isTransitCodeSheetOpen = true) }
+    }
+
+    /**
+     * 关闭乘车码选择弹窗
+     */
+    fun dismissTransitCodeSheet() {
+        _uiState.update { it.copy(isTransitCodeSheetOpen = false) }
+    }
+
+    /**
+     * 设置乘车码默认渠道
+     */
+    fun setPreferredTransitCodeProvider(provider: TransitCodeProvider) {
+        viewModelScope.launch {
+            repository.setPreferredTransitCodeProvider(provider)
         }
     }
 

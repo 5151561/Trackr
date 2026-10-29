@@ -7,9 +7,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.rounded.DirectionsBus
 import androidx.compose.material.icons.rounded.NearMe
 import androidx.compose.material.icons.rounded.NotificationsActive
 import androidx.compose.material.icons.rounded.NotificationsOff
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Speed
@@ -80,7 +83,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.style.TextAlign
@@ -94,12 +99,15 @@ import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.LineTimetable
 import com.trackr.domain.model.LiveBus
+import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.service.BusTrackingService
 import com.trackr.ui.components.ExpressiveRouteRail
 import com.trackr.ui.components.RouteRailLayoutMode
+import com.trackr.ui.components.TransitCodeBottomSheet
 import com.trackr.ui.theme.busColors
 import com.trackr.ui.theme.expressiveRotateSpringSpec
 import com.trackr.ui.theme.expressiveSpringSpec
+import com.trackr.util.TransitCodeHelper
 
 /**
  * 线路详情页面（Material Design 3 Expressive 规范）
@@ -142,6 +150,14 @@ fun LineDetailScreen(
                 onToggleFavorite = { viewModel.toggleFavoriteStop() },
                 onSwitchDirection = { viewModel.switchOppositeDirection() },
                 onOpenTimetable = { viewModel.loadTimetable() },
+                onOpenTransitCode = {
+                    when (uiState.preferredTransitCodeProvider) {
+                        TransitCodeProvider.ALIPAY -> TransitCodeHelper.openAlipayTransitCode(context)
+                        TransitCodeProvider.UNIONPAY -> TransitCodeHelper.openUnionPayTransitCode(context)
+                        TransitCodeProvider.ASK_ALWAYS -> viewModel.openTransitCodeSheet()
+                    }
+                },
+                onLongClickTransitCode = { viewModel.openTransitCodeSheet() },
                 onRefreshNow = { viewModel.refreshNow() }
             )
         }
@@ -372,6 +388,20 @@ fun LineDetailScreen(
             timetable = uiState.timetable!!,
             line = lineDetail?.line,
             onDismiss = { viewModel.dismissTimetable() }
+        )
+    }
+
+    // 5. 乘车码选择 BottomSheet 弹窗
+    if (uiState.isTransitCodeSheetOpen) {
+        TransitCodeBottomSheet(
+            onDismiss = { viewModel.dismissTransitCodeSheet() },
+            onSelectProvider = { provider, saveAsDefault ->
+                viewModel.dismissTransitCodeSheet()
+                if (saveAsDefault) {
+                    viewModel.setPreferredTransitCodeProvider(provider)
+                }
+                TransitCodeHelper.openTransitCode(context, provider)
+            }
         )
     }
 }
@@ -1141,6 +1171,7 @@ private fun BusFollowCard(
 /**
  * 底部 M3E 悬浮胶囊工具栏
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BottomFloatingToolbar(
     isFavorite: Boolean,
@@ -1151,8 +1182,12 @@ private fun BottomFloatingToolbar(
     onToggleFavorite: () -> Unit,
     onSwitchDirection: () -> Unit,
     onOpenTimetable: () -> Unit,
+    onOpenTransitCode: () -> Unit,
+    onLongClickTransitCode: () -> Unit,
     onRefreshNow: () -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
+
     Box(
         modifier = Modifier
             .fillMaxWidth()
@@ -1205,7 +1240,28 @@ private fun BottomFloatingToolbar(
                     )
                 }
 
-                // 4. 立即刷新（带倒计时或旋转进度）
+                // 4. 一键乘车码（单击秒开 / 长按呼出弹窗切换平台）
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .combinedClickable(
+                            onClick = onOpenTransitCode,
+                            onLongClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onLongClickTransitCode()
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.QrCode2,
+                        contentDescription = "乘车码（长按切换平台）",
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                // 5. 立即刷新（带倒计时或旋转进度）
                 IconButton(onClick = onRefreshNow) {
                     if (isRefreshing) {
                         CircularProgressIndicator(

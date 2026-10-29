@@ -27,15 +27,21 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DirectionsBus
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Subway
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -43,6 +49,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.InputChip
+import androidx.compose.material3.InputChipDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -50,10 +58,13 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,6 +72,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -125,6 +137,14 @@ fun SearchScreen(
                         },
                         singleLine = true,
                         shape = RoundedCornerShape(24.dp),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                        keyboardActions = KeyboardActions(
+                            onSearch = {
+                                if (state.searchQuery.isNotBlank()) {
+                                    viewModel.addSearchHistory(state.searchQuery.trim())
+                                }
+                            }
+                        ),
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Default.Search,
@@ -171,7 +191,17 @@ fun SearchScreen(
             ) {
                 SearchSuggestionsView(
                     cityName = state.currentCity.cityName,
-                    onSelectQuery = { viewModel.updateSearchQuery(it) }
+                    searchHistory = state.searchHistory,
+                    onSelectQuery = { query ->
+                        viewModel.updateSearchQuery(query)
+                        viewModel.addSearchHistory(query)
+                    },
+                    onDeleteHistoryItem = { query ->
+                        viewModel.removeSearchHistory(query)
+                    },
+                    onClearHistory = {
+                        viewModel.clearSearchHistory()
+                    }
                 )
             }
         } else if (!state.isSearching && result != null && result.lines.isEmpty() && result.stops.isEmpty()) {
@@ -216,6 +246,9 @@ fun SearchScreen(
                             cityId = state.currentCity.cityId,
                             summary = lineSummary,
                             onDirectionClick = { dir ->
+                                if (state.searchQuery.isNotBlank()) {
+                                    viewModel.addSearchHistory(state.searchQuery.trim())
+                                }
                                 onNavigateToLineDetail(
                                     state.currentCity.cityId,
                                     dir.lineId,
@@ -246,6 +279,9 @@ fun SearchScreen(
                         SearchStopItemCard(
                             stop = stop,
                             onCardClick = {
+                                if (state.searchQuery.isNotBlank()) {
+                                    viewModel.addSearchHistory(state.searchQuery.trim())
+                                }
                                 onNavigateToStopDetail(
                                     state.currentCity.cityId,
                                     stop.stopId,
@@ -257,6 +293,9 @@ fun SearchScreen(
                                 )
                             },
                             onLineClick = { lineStatus ->
+                                if (state.searchQuery.isNotBlank()) {
+                                    viewModel.addSearchHistory(state.searchQuery.trim())
+                                }
                                 onNavigateToLineDetail(
                                     state.currentCity.cityId,
                                     lineStatus.line.lineId,
@@ -595,19 +634,132 @@ private fun SearchStopItemCard(
 }
 
 /**
- * 搜索输入为空时的推荐词与提示
+ * 搜索输入为空时的推荐词与提示（含搜索历史）
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SearchSuggestionsView(
     cityName: String,
-    onSelectQuery: (String) -> Unit
+    searchHistory: List<String>,
+    onSelectQuery: (String) -> Unit,
+    onDeleteHistoryItem: (String) -> Unit,
+    onClearHistory: () -> Unit
 ) {
+    var showClearDialog by remember { mutableStateOf(false) }
+
+    if (showClearDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearDialog = false },
+            title = {
+                Text(
+                    text = "清空搜索历史",
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                )
+            },
+            text = {
+                Text(
+                    text = "确定要清空全部搜索历史记录吗？",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearDialog = false
+                        onClearHistory()
+                    }
+                ) {
+                    Text(text = "清空", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDialog = false }) {
+                    Text(text = "取消")
+                }
+            }
+        )
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp)
     ) {
+        // 1. 搜索历史（有历史记录时展示）
+        if (searchHistory.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.History,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "搜索历史",
+                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+
+                IconButton(
+                    onClick = { showClearDialog = true },
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DeleteOutline,
+                        contentDescription = "清空搜索历史",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                searchHistory.forEach { item ->
+                    InputChip(
+                        selected = false,
+                        onClick = { onSelectQuery(item) },
+                        label = {
+                            Text(
+                                text = item,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
+                        trailingIcon = {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "删除历史",
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable { onDeleteHistoryItem(item) },
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        colors = InputChipDefaults.inputChipColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            labelColor = MaterialTheme.colorScheme.onSurface
+                        ),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+        }
+
+        // 2. 常用搜索推荐
         Text(
             text = "常用搜索推荐",
             style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),

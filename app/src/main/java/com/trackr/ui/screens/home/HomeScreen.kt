@@ -47,6 +47,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Subway
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -75,6 +76,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -90,6 +92,7 @@ import com.trackr.domain.model.NearbyStopLineStatus
 import com.trackr.domain.model.ProvinceCityCatalog
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
+import com.trackr.util.TransitCodeHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,6 +102,7 @@ fun HomeScreen(
     onNavigateToStopDetail: ((cityId: String, stopId: String, stopName: String, physicalStId: String, namesakeStId: String, lat: Double, lng: Double) -> Unit)? = null,
     onNavigateToSearch: () -> Unit
 ) {
+    val context = LocalContext.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -146,6 +150,14 @@ fun HomeScreen(
                 SearchEntryBar(
                     cityName = state.currentCity.cityName,
                     onClick = onNavigateToSearch
+                )
+            }
+
+            // 3. 一键唤醒乘车码双胶囊卡片
+            item {
+                TransitCodeQuickCard(
+                    onOpenAlipay = { TransitCodeHelper.openAlipayTransitCode(context) },
+                    onOpenUnionPay = { TransitCodeHelper.openUnionPayTransitCode(context) }
                 )
             }
 
@@ -1620,3 +1632,109 @@ private fun CityPickerBottomSheet(
         }
     }
 }
+
+/**
+ * 首页一键唤醒乘车码快捷双胶囊卡片
+ */
+@Composable
+private fun TransitCodeQuickCard(
+    onOpenAlipay: () -> Unit,
+    onOpenUnionPay: () -> Unit
+) {
+    val alipayColor = Color(0xFF1677FF)
+    val unionpayColor = Color(0xFFE60012)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        // 支付宝乘车码胶囊卡片
+        Surface(
+            onClick = onOpenAlipay,
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(16.dp),
+            color = alipayColor.copy(alpha = 0.08f),
+            tonalElevation = 1.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = alipayColor,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.QrCode2,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.padding(5.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "支付宝乘车码",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "一键秒开",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+
+        // 云闪付乘车码胶囊卡片
+        Surface(
+            onClick = onOpenUnionPay,
+            modifier = Modifier.weight(1f),
+            shape = RoundedCornerShape(16.dp),
+            color = unionpayColor.copy(alpha = 0.08f),
+            tonalElevation = 1.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = unionpayColor,
+                    modifier = Modifier.size(28.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.QrCode2,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.padding(5.dp)
+                    )
+                }
+                Spacer(modifier = Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "云闪付乘车码",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+                    Text(
+                        text = "银联优惠直达",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = unionpayColor
+                    )
+                }
+            }
+        }
+    }
+}
+

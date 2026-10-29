@@ -30,6 +30,7 @@ import androidx.navigation3.runtime.rememberNavBackStack
 import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.trackr.domain.model.DataSourceType
+import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.ui.navigation.ScreenKey
 import com.trackr.ui.screens.home.HomeScreen
 import com.trackr.ui.screens.home.HomeViewModel
@@ -39,6 +40,7 @@ import com.trackr.ui.screens.search.SearchScreen
 import com.trackr.ui.screens.stopdetail.StopDetailScreen
 import com.trackr.ui.screens.stopdetail.StopDetailViewModel
 import com.trackr.ui.theme.TrackrTheme
+import com.trackr.util.TransitCodeHelper
 import com.trackr.widget.BusStopWidgetProvider
 
 class MainActivity : ComponentActivity() {
@@ -53,6 +55,7 @@ class MainActivity : ComponentActivity() {
         }
 
         currentIntent = intent
+        handleTransitCodeIntent(intent)
 
         setContent {
             TrackrTheme {
@@ -82,6 +85,15 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         currentIntent = intent
+        handleTransitCodeIntent(intent)
+    }
+
+    private fun handleTransitCodeIntent(intent: Intent?) {
+        if (intent?.action == "com.trackr.action.OPEN_TRANSIT_CODE") {
+            val providerStr = intent.getStringExtra("extra_provider")
+            val provider = if (providerStr == "alipay") TransitCodeProvider.ALIPAY else TransitCodeProvider.UNIONPAY
+            TransitCodeHelper.openTransitCode(this, provider)
+        }
     }
 }
 

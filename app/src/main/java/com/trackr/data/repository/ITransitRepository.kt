@@ -9,6 +9,7 @@ import com.trackr.domain.model.LineTimetable
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
+import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.domain.model.TransitSearchResult
 import kotlinx.coroutines.flow.StateFlow
 
@@ -21,6 +22,8 @@ interface ITransitRepository {
     val favorites: StateFlow<List<FavoriteStationLine>>
     val activeTrackingSession: StateFlow<TrackingSessionState>
     val userLocation: StateFlow<Pair<Double, Double>?>
+    val searchHistory: StateFlow<List<String>>
+    val preferredTransitCodeProvider: StateFlow<TransitCodeProvider>
 
     fun setEngineMode(mode: EngineMode)
     fun updateUserLocation(lat: Double, lng: Double)
@@ -76,6 +79,12 @@ interface ITransitRepository {
 
     suspend fun toggleFavorite(item: FavoriteStationLine): Boolean
     suspend fun removeFavorite(id: String)
+
+    suspend fun addSearchHistory(query: String)
+    suspend fun removeSearchHistory(query: String)
+    suspend fun clearSearchHistory()
+
+    suspend fun setPreferredTransitCodeProvider(provider: TransitCodeProvider)
 
     fun updateTrackingSession(state: TrackingSessionState)
 }

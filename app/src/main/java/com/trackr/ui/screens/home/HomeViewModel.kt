@@ -53,6 +53,7 @@ data class HomeUiState(
     val searchQuery: String = "",
     val searchResult: TransitSearchResult? = null,
     val isSearching: Boolean = false,
+    val searchHistory: List<String> = emptyList(),
     val isRefreshing: Boolean = false,
     val engineMode: EngineMode = EngineMode.ALL
 ) {
@@ -134,6 +135,13 @@ class HomeViewModel(
         viewModelScope.launch {
             repository.activeTrackingSession.collect { session ->
                 _uiState.update { it.copy(activeTracking = session) }
+            }
+        }
+
+        // 观察搜索历史
+        viewModelScope.launch {
+            repository.searchHistory.collect { history ->
+                _uiState.update { it.copy(searchHistory = history) }
             }
         }
 
@@ -501,6 +509,25 @@ class HomeViewModel(
                     searchResult = res.getOrNull()
                 )
             }
+        }
+    }
+
+    fun addSearchHistory(query: String) {
+        if (query.isBlank()) return
+        viewModelScope.launch {
+            repository.addSearchHistory(query.trim())
+        }
+    }
+
+    fun removeSearchHistory(query: String) {
+        viewModelScope.launch {
+            repository.removeSearchHistory(query)
+        }
+    }
+
+    fun clearSearchHistory() {
+        viewModelScope.launch {
+            repository.clearSearchHistory()
         }
     }
 

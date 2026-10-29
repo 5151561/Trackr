@@ -3,4 +3,15 @@
     <string name="app_name">Trackr</string>
     <string name="widget_name">Transit Stop Widget</string>
     <string name="widget_desc">Track upcoming bus arrivals and remaining stops right on your home screen</string>
+    <string name="shortcut_alipay_transit_code_short">Alipay Code</string>
+    <string name="shortcut_alipay_transit_code_long">Open Alipay Transit Code</string>
+    <string name="shortcut_unionpay_transit_code_short">UnionPay Code</string>
+    <string name="shortcut_unionpay_transit_code_long">Open UnionPay Transit Code</string>
+    <string name="transit_code_title">Transit Code</string>
+    <string name="transit_code_quick_access">Transit Code</string>
+    <string name="alipay_transit_code">Alipay Transit Code</string>
+    <string name="unionpay_transit_code">UnionPay Transit Code</string>
+    <string name="alipay_transit_code_desc">System-level instant launch</string>
+    <string name="unionpay_transit_code_desc">Launch UnionPay Transit Code with bank discounts</string>
+    <string name="transit_code_set_default">Remember preference for direct launch</string>
 </resources>

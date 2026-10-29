@@ -10,6 +10,26 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
+    <queries>
+        <!-- 支付宝 -->
+        <package android:name="com.eg.android.AlipayGphone" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="alipays" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="alipayqr" />
+        </intent>
+
+        <!-- 云闪付 -->
+        <package android:name="com.unionpay" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="upwallet" />
+        </intent>
+    </queries>
+
     <application
         android:name=".TrackrApp"
         android:allowBackup="true"
@@ -29,6 +49,9 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <service

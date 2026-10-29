@@ -18,6 +18,7 @@ import com.trackr.domain.model.NearbyStopLineStatus
 import com.trackr.domain.model.ProvinceCityCatalog
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
+import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.domain.model.TransitSearchResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -58,6 +59,12 @@ class TransitRepository(
     private val _favorites = MutableStateFlow(loadInitialFavorites())
     override val favorites: StateFlow<List<FavoriteStationLine>> = _favorites.asStateFlow()
 
+    private val _searchHistory = MutableStateFlow(loadInitialSearchHistory())
+    override val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
+
+    private val _preferredTransitCodeProvider = MutableStateFlow(loadInitialTransitCodeProvider())
+    override val preferredTransitCodeProvider: StateFlow<TransitCodeProvider> = _preferredTransitCodeProvider.asStateFlow()
+
     private val _activeTrackingSession = MutableStateFlow(TrackingSessionState())
     override val activeTrackingSession: StateFlow<TrackingSessionState> = _activeTrackingSession.asStateFlow()
 
@@ -96,6 +103,21 @@ class TransitRepository(
         return emptyList()
     }
 
+    private fun loadInitialSearchHistory(): List<String> {
+        val historyJson = prefs.getString("search_history_json", null)
+        if (!historyJson.isNullOrBlank()) {
+            try {
+                return json.decodeFromString<List<String>>(historyJson)
+            } catch (_: Exception) {}
+        }
+        return emptyList()
+    }
+
+    private fun loadInitialTransitCodeProvider(): TransitCodeProvider {
+        val providerId = prefs.getString("preferred_transit_code_provider", TransitCodeProvider.ASK_ALWAYS.id)
+        return TransitCodeProvider.fromId(providerId)
+    }
+
     private fun loadInitialEngineMode(): EngineMode {
         val modeStr = prefs.getString("engine_mode", EngineMode.ALL.name)
         return runCatching { EngineMode.valueOf(modeStr ?: EngineMode.ALL.name) }.getOrDefault(EngineMode.ALL)
@@ -109,6 +131,11 @@ class TransitRepository(
     private fun saveFavorites(favs: List<FavoriteStationLine>) {
         val str = json.encodeToString(favs)
         prefs.edit().putString("favorites_json", str).apply()
+    }
+
+    private fun saveSearchHistory(history: List<String>) {
+        val str = json.encodeToString(history)
+        prefs.edit().putString("search_history_json", str).apply()
     }
 
     override suspend fun selectCity(city: TransitCity) {
@@ -568,7 +595,50 @@ class TransitRepository(
         }
     }
 
+    override suspend fun addSearchHistory(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return
+        val current = _searchHistory.value.toMutableList()
+        current.removeAll { it.equals(trimmed, ignoreCase = true) }
+        current.add(0, trimmed)
+        val limited = if (current.size > MAX_SEARCH_HISTORY) current.take(MAX_SEARCH_HISTORY) else current
+        _searchHistory.value = limited
+        withContext(Dispatchers.IO) {
+            saveSearchHistory(limited)
+        }
+    }
+
+    override suspend fun removeSearchHistory(query: String) {
+        val trimmed = query.trim()
+        val current = _searchHistory.value.toMutableList()
+        val removed = current.removeAll { it.equals(trimmed, ignoreCase = true) }
+        if (removed) {
+            _searchHistory.value = current
+            withContext(Dispatchers.IO) {
+                saveSearchHistory(current)
+            }
+        }
+    }
+
+    override suspend fun clearSearchHistory() {
+        _searchHistory.value = emptyList()
+        withContext(Dispatchers.IO) {
+            prefs.edit().remove("search_history_json").apply()
+        }
+    }
+
+    override suspend fun setPreferredTransitCodeProvider(provider: TransitCodeProvider) {
+        _preferredTransitCodeProvider.value = provider
+        withContext(Dispatchers.IO) {
+            prefs.edit().putString("preferred_transit_code_provider", provider.id).apply()
+        }
+    }
+
     override fun updateTrackingSession(state: TrackingSessionState) {
         _activeTrackingSession.value = state
+    }
+
+    companion object {
+        const val MAX_SEARCH_HISTORY = 20
     }
 }

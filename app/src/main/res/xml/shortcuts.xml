@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="shortcut_alipay_transit_code"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_alipay"
+        android:shortcutShortLabel="@string/shortcut_alipay_transit_code_short"
+        android:shortcutLongLabel="@string/shortcut_alipay_transit_code_long">
+        <intent
+            android:action="com.trackr.action.OPEN_TRANSIT_CODE"
+            android:targetPackage="com.trackr"
+            android:targetClass="com.trackr.MainActivity">
+            <extra
+                android:name="extra_provider"
+                android:value="alipay" />
+        </intent>
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+    <shortcut
+        android:shortcutId="shortcut_unionpay_transit_code"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_unionpay"
+        android:shortcutShortLabel="@string/shortcut_unionpay_transit_code_short"
+        android:shortcutLongLabel="@string/shortcut_unionpay_transit_code_long">
+        <intent
+            android:action="com.trackr.action.OPEN_TRANSIT_CODE"
+            android:targetPackage="com.trackr"
+            android:targetClass="com.trackr.MainActivity">
+            <extra
+                android:name="extra_provider"
+                android:value="unionpay" />
+        </intent>
+        <categories android:name="android.shortcut.conversation" />
+    </shortcut>
+</shortcuts>

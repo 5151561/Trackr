@@ -3,4 +3,15 @@
     <string name="app_name">追客</string>
     <string name="widget_name">实时公交候车卡</string>
     <string name="widget_desc">在桌面实时查看常用公交站下一班车剩余站数与预计到站时间</string>
+    <string name="shortcut_alipay_transit_code_short">支付宝乘车码</string>
+    <string name="shortcut_alipay_transit_code_long">打开支付宝乘车码</string>
+    <string name="shortcut_unionpay_transit_code_short">云闪付乘车码</string>
+    <string name="shortcut_unionpay_transit_code_long">打开云闪付乘车码</string>
+    <string name="transit_code_title">乘车码</string>
+    <string name="transit_code_quick_access">出行乘车码</string>
+    <string name="alipay_transit_code">支付宝乘车码</string>
+    <string name="unionpay_transit_code">云闪付乘车码</string>
+    <string name="alipay_transit_code_desc">系统级一键秒开，推荐优先使用</string>
+    <string name="unionpay_transit_code_desc">唤醒云闪付乘车码，享受银联乘车优惠</string>
+    <string name="transit_code_set_default">记住选择，下次直接唤醒</string>
 </resources>

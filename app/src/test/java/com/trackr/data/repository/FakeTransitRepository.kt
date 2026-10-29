@@ -9,6 +9,7 @@ import com.trackr.domain.model.LineTimetable
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
+import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.domain.model.TransitSearchResult
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -20,7 +21,9 @@ import kotlinx.coroutines.flow.update
  */
 class FakeTransitRepository(
     initialCity: TransitCity = TransitCity(cityId = "034", cityName = "上海", pinyin = "shanghai", isHot = true),
-    initialFavorites: List<FavoriteStationLine> = emptyList()
+    initialFavorites: List<FavoriteStationLine> = emptyList(),
+    initialSearchHistory: List<String> = emptyList(),
+    initialTransitCodeProvider: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS
 ) : ITransitRepository {
 
     private val _selectedCity = MutableStateFlow(initialCity)
@@ -35,6 +38,12 @@ class FakeTransitRepository(
 
     private val _favorites = MutableStateFlow(initialFavorites)
     override val favorites: StateFlow<List<FavoriteStationLine>> = _favorites.asStateFlow()
+
+    private val _searchHistory = MutableStateFlow(initialSearchHistory)
+    override val searchHistory: StateFlow<List<String>> = _searchHistory.asStateFlow()
+
+    private val _preferredTransitCodeProvider = MutableStateFlow(initialTransitCodeProvider)
+    override val preferredTransitCodeProvider: StateFlow<TransitCodeProvider> = _preferredTransitCodeProvider.asStateFlow()
 
     private val _activeTrackingSession = MutableStateFlow(TrackingSessionState())
     override val activeTrackingSession: StateFlow<TrackingSessionState> = _activeTrackingSession.asStateFlow()
@@ -152,6 +161,29 @@ class FakeTransitRepository(
 
     override suspend fun removeFavorite(id: String) {
         _favorites.update { list -> list.filterNot { it.id == id } }
+    }
+
+    override suspend fun addSearchHistory(query: String) {
+        val trimmed = query.trim()
+        if (trimmed.isBlank()) return
+        _searchHistory.update { list ->
+            val updated = list.filterNot { it.equals(trimmed, ignoreCase = true) }.toMutableList()
+            updated.add(0, trimmed)
+            if (updated.size > 20) updated.take(20) else updated
+        }
+    }
+
+    override suspend fun removeSearchHistory(query: String) {
+        val trimmed = query.trim()
+        _searchHistory.update { list -> list.filterNot { it.equals(trimmed, ignoreCase = true) } }
+    }
+
+    override suspend fun clearSearchHistory() {
+        _searchHistory.value = emptyList()
+    }
+
+    override suspend fun setPreferredTransitCodeProvider(provider: TransitCodeProvider) {
+        _preferredTransitCodeProvider.value = provider
     }
 
     override fun updateTrackingSession(state: TrackingSessionState) {

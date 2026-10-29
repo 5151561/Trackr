@@ -173,4 +173,77 @@ class HomeViewModelTest {
         testScheduler.runCurrent()
         assertEquals(com.trackr.domain.model.EngineMode.ALL, viewModel.uiState.value.engineMode)
     }
+
+    @Test
+    fun testSearchHistory_addDeduplicateAndOrder() = runTest {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        assertEquals(0, viewModel.uiState.value.searchHistory.size)
+
+        viewModel.addSearchHistory("71路")
+        testScheduler.runCurrent()
+        assertEquals(listOf("71路"), viewModel.uiState.value.searchHistory)
+
+        viewModel.addSearchHistory("人民广场")
+        testScheduler.runCurrent()
+        assertEquals(listOf("人民广场", "71路"), viewModel.uiState.value.searchHistory)
+
+        // Adding existing item re-orders it to front
+        viewModel.addSearchHistory("71路")
+        testScheduler.runCurrent()
+        assertEquals(listOf("71路", "人民广场"), viewModel.uiState.value.searchHistory)
+
+        // Blank string is ignored
+        viewModel.addSearchHistory("   ")
+        testScheduler.runCurrent()
+        assertEquals(listOf("71路", "人民广场"), viewModel.uiState.value.searchHistory)
+    }
+
+    @Test
+    fun testSearchHistory_removeItem() = runTest {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.addSearchHistory("71路")
+        viewModel.addSearchHistory("2号线")
+        testScheduler.runCurrent()
+
+        assertEquals(listOf("2号线", "71路"), viewModel.uiState.value.searchHistory)
+
+        viewModel.removeSearchHistory("2号线")
+        testScheduler.runCurrent()
+
+        assertEquals(listOf("71路"), viewModel.uiState.value.searchHistory)
+    }
+
+    @Test
+    fun testSearchHistory_clearAll() = runTest {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.addSearchHistory("1路")
+        viewModel.addSearchHistory("2路")
+        testScheduler.runCurrent()
+        assertEquals(2, viewModel.uiState.value.searchHistory.size)
+
+        viewModel.clearSearchHistory()
+        testScheduler.runCurrent()
+        assertEquals(0, viewModel.uiState.value.searchHistory.size)
+    }
+
+    @Test
+    fun testSearchHistory_maxCapacityLimit() = runTest {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        for (i in 1..25) {
+            viewModel.addSearchHistory("线路$i")
+        }
+        testScheduler.runCurrent()
+
+        assertEquals(20, viewModel.uiState.value.searchHistory.size)
+        assertEquals("线路25", viewModel.uiState.value.searchHistory.first())
+        assertEquals("线路6", viewModel.uiState.value.searchHistory.last())
+    }
 }
