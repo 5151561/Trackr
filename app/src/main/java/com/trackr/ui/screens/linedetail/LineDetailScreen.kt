@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,11 +23,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.consumeWindowInsets
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -79,11 +83,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1111,73 +1117,193 @@ private fun BusFollowContent(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
+                val scrollState = rememberScrollState()
+
+                // 当选中的车辆位置发生变化时，平滑滚动使当前车辆所在站点居中可见
+                LaunchedEffect(followedBus.order) {
+                    val currentIndex = (followedBus.order - 1).coerceAtLeast(0)
+                    val scrollOffset = ((currentIndex - 2).coerceAtLeast(0) * 110)
+                    scrollState.animateScrollTo(scrollOffset)
+                }
+
                 // 纵向行程节点流（展示已过站、当前接近站、未到站）
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(240.dp)
-                        .verticalScroll(rememberScrollState())
+                        .verticalScroll(scrollState)
                 ) {
-                    lineDetail.stops.forEach { stop ->
+                    lineDetail.stops.forEachIndexed { index, stop ->
                         val isPassed = stop.order < followedBus.order
                         val isCurrent = stop.order == followedBus.order
+                        val isFirst = index == 0
+                        val isLast = index == lineDetail.stops.size - 1
+                        val isNextStop = stop.order == followedBus.order + 1
+
+                        // 计算相邻站点轨道的严格连贯颜色，保证接缝处颜色严格一致无突变
+                        val topTrackColor = if (stop.order <= followedBus.order) {
+                            busColors.busPassedGray.copy(alpha = 0.35f)
+                        } else {
+                            busColors.routeTrackActive
+                        }
+                        val bottomTrackColor = if (stop.order < followedBus.order) {
+                            busColors.busPassedGray.copy(alpha = 0.35f)
+                        } else {
+                            busColors.routeTrackActive
+                        }
 
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 4.dp),
+                                .height(IntrinsicSize.Min),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            // 节点圆点
+                            // 1. 左侧时间轴轨道与节点 (Canvas 占满整行高度，上下出界 1.5px 消除浮点裁切误差，实现 100% 连续无断点)
                             Box(
                                 modifier = Modifier
-                                    .size(16.dp)
-                                    .background(
-                                        color = when {
-                                            isCurrent -> busColors.busArrivingAmber
-                                            isPassed -> busColors.busPassedGray
-                                            else -> busColors.routeTrackInactive
-                                        },
-                                        shape = CircleShape
-                                    ),
+                                    .width(28.dp)
+                                    .fillMaxHeight(),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (isCurrent) {
-                                    Icon(
-                                        imageVector = Icons.Rounded.DirectionsBus,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(10.dp)
-                                    )
+                                Canvas(modifier = Modifier.fillMaxSize()) {
+                                    val centerX = size.width / 2f
+                                    val centerY = size.height / 2f
+                                    val overlap = 1.5f // 消除浮点缝隙
+                                    val strokeWidthPx = 3.dp.toPx()
+
+                                    // 上半段轨道连线
+                                    if (!isFirst) {
+                                        drawLine(
+                                            color = topTrackColor,
+                                            start = Offset(centerX, -overlap),
+                                            end = Offset(centerX, centerY),
+                                            strokeWidth = strokeWidthPx
+                                        )
+                                    }
+
+                                    // 下半段轨道连线
+                                    if (!isLast) {
+                                        drawLine(
+                                            color = bottomTrackColor,
+                                            start = Offset(centerX, centerY),
+                                            end = Offset(centerX, size.height + overlap),
+                                            strokeWidth = strokeWidthPx
+                                        )
+                                    }
+                                }
+
+                                // 节点圆点呈现
+                                when {
+                                    isCurrent -> {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(20.dp)
+                                                .background(busColors.busArrivingAmber, CircleShape)
+                                                .border(2.dp, Color.White, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.DirectionsBus,
+                                                contentDescription = null,
+                                                tint = Color.White,
+                                                modifier = Modifier.size(12.dp)
+                                            )
+                                        }
+                                    }
+                                    isPassed -> {
+                                        // 已过站：柔和静音小灰点，与未到站形成鲜明体积与色彩对比
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .background(busColors.busPassedGray.copy(alpha = 0.45f), CircleShape)
+                                        )
+                                    }
+                                    else -> {
+                                        // 未到站（前方活跃路线）：高对比度翡翠绿，鲜亮饱满
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .background(busColors.routeTrackActive, CircleShape)
+                                                .border(1.5.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                                        )
+                                    }
                                 }
                             }
 
-                            Spacer(modifier = Modifier.width(10.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
 
-                            Text(
-                                text = stop.name,
-                                fontSize = if (isCurrent) 14.sp else 13.sp,
-                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                                color = when {
-                                    isCurrent -> busColors.busArrivingAmber
-                                    isPassed -> busColors.busPassedGray
-                                    else -> MaterialTheme.colorScheme.onSurface
-                                },
-                                modifier = Modifier.weight(1f)
-                            )
+                            // 2. 站点右侧信息内容区（将内边距放在内容区，确保左侧轨道整行无缝相接）
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .defaultMinSize(minHeight = 36.dp)
+                                    .padding(vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // 站点序号
+                                Text(
+                                    text = String.format("%02d", stop.order),
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
+                                    color = when {
+                                        isCurrent -> busColors.busArrivingAmber
+                                        isPassed -> busColors.busPassedGray.copy(alpha = 0.6f)
+                                        else -> busColors.routeTrackActive
+                                    },
+                                    modifier = Modifier.width(22.dp)
+                                )
 
-                            if (isCurrent) {
-                                Surface(
-                                    shape = RoundedCornerShape(4.dp),
-                                    color = busColors.busArrivingAmber.copy(alpha = 0.2f)
-                                ) {
-                                    Text(
-                                        text = if (followedBus.isArrived) "已到站停靠" else "正在接近",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = busColors.busArrivingAmber,
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                    )
+                                // 站点名称
+                                Text(
+                                    text = stop.name,
+                                    fontSize = if (isCurrent) 14.sp else 13.sp,
+                                    fontWeight = if (isCurrent) FontWeight.Bold else if (!isPassed) FontWeight.Medium else FontWeight.Normal,
+                                    color = when {
+                                        isCurrent -> busColors.busArrivingAmber
+                                        isPassed -> busColors.busPassedGray
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+
+                                // 右侧状态指示与徽标
+                                when {
+                                    isCurrent -> {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = busColors.busArrivingAmber.copy(alpha = 0.15f)
+                                        ) {
+                                            Text(
+                                                text = if (followedBus.isArrived) "已到站停靠" else "正在接近",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = busColors.busArrivingAmber,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    isNextStop -> {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = busColors.routeTrackActive.copy(alpha = 0.12f)
+                                        ) {
+                                            Text(
+                                                text = "下一站",
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = busColors.routeTrackActive,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    isPassed -> {
+                                        Text(
+                                            text = "已过",
+                                            fontSize = 11.sp,
+                                            color = busColors.busPassedGray.copy(alpha = 0.5f),
+                                            modifier = Modifier.padding(end = 4.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
