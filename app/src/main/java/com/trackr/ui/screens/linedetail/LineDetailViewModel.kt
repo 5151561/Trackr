@@ -64,7 +64,8 @@ class LineDetailViewModel(
     private val initialStationId: String? = null,
     private val initialSource: DataSourceType = if (initialLineId.startsWith("mg:")) DataSourceType.MYGOLBS else DataSourceType.CHELAILE,
     private val lineNameHint: String = "",
-    private val repository: ITransitRepository = TrackrApp.instance.repository
+    private val repository: ITransitRepository = TrackrApp.instance.repository,
+    private val enableAutoPolling: Boolean = true
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LineDetailUiState())
@@ -85,7 +86,9 @@ class LineDetailViewModel(
 
         // 加载初始线路数据并启动轮询
         loadLineDetail(isInitial = true)
-        startAutoPolling()
+        if (enableAutoPolling) {
+            startAutoPolling()
+        }
     }
 
     /**

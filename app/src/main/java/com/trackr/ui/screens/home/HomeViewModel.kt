@@ -66,10 +66,21 @@ data class HomeUiState(
         }
 }
 
-class HomeViewModel @JvmOverloads constructor(
-    application: Application = TrackrApp.instance,
-    private val repository: ITransitRepository = (application as? TrackrApp)?.repository ?: TrackrApp.instance.repository
+class HomeViewModel(
+    application: Application,
+    private val repository: ITransitRepository,
+    private val enableAutoPolling: Boolean = true
 ) : AndroidViewModel(application) {
+
+    constructor(application: Application) : this(
+        application,
+        (application as? TrackrApp)?.repository ?: TrackrApp.instance.repository
+    )
+
+    constructor() : this(
+        TrackrApp.instance,
+        TrackrApp.instance.repository
+    )
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -131,7 +142,9 @@ class HomeViewModel @JvmOverloads constructor(
         refreshLocationAndNearby()
 
         // 开启 15 秒定时轮询
-        startRealtimePolling()
+        if (enableAutoPolling) {
+            startRealtimePolling()
+        }
     }
 
     private fun fallbackCities(): List<TransitCity> = listOf(

@@ -251,6 +251,7 @@ class TransitUnitTest {
         assertEquals("", RouteProjectionMath.formatDistanceText(0))
     }
 
+    @org.junit.Ignore("Online network probe test - skipped in automated unit testing")
     @Test
     fun testInspectStopDetailOnline() {
         kotlinx.coroutines.runBlocking {

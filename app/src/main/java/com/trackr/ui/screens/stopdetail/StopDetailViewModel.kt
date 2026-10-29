@@ -46,7 +46,8 @@ class StopDetailViewModel(
     private val namesakeStId: String = "",
     private val stationLat: Double = 0.0,
     private val stationLng: Double = 0.0,
-    private val repository: ITransitRepository = TrackrApp.instance.repository
+    private val repository: ITransitRepository = TrackrApp.instance.repository,
+    private val enableAutoPolling: Boolean = true
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -67,7 +68,9 @@ class StopDetailViewModel(
         }
 
         loadStopDetail(isInitial = true)
-        startAutoPolling()
+        if (enableAutoPolling) {
+            startAutoPolling()
+        }
     }
 
     /**
