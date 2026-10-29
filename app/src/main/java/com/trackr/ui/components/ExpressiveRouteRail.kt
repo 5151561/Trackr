@@ -632,7 +632,6 @@ private fun VerticalRouteRail(
                 isPassed = isPassed,
                 isFirst = isFirst,
                 isLast = isLast,
-                hasBottomArrow = (index % 3 == 0),
                 topTrackColor = topTrackColor,
                 bottomTrackColor = bottomTrackColor,
                 stationBuses = stationBuses,
@@ -640,6 +639,16 @@ private fun VerticalRouteRail(
                 onSelectStop = { onSelectStop(stop) },
                 onSelectBus = onSelectBus
             )
+
+            // 站点之间的轨道连接段（含精准居中的方向指示箭头）
+            if (index < stops.size - 1) {
+                val nextStop = stops[index + 1]
+                val segmentColor = getRouteSegmentColor(stop.order, nextStop.order, currentSelectedOrder, busColors)
+                VerticalTrackSegment(
+                    segmentColor = segmentColor,
+                    hasArrow = (index % 3 == 0)
+                )
+            }
         }
     }
 }
@@ -676,7 +685,6 @@ private fun VerticalTimelineRow(
     isPassed: Boolean,
     isFirst: Boolean,
     isLast: Boolean,
-    hasBottomArrow: Boolean,
     topTrackColor: Color,
     bottomTrackColor: Color,
     stationBuses: List<LiveBus>,
@@ -705,7 +713,7 @@ private fun VerticalTimelineRow(
             modifier = Modifier.width(26.dp)
         )
 
-        // 2. 纵向轴线与节点 (Canvas 占满整行高度，上下出界 1px 消除浮点裁切误差，实现 100% 连续无断点)
+        // 2. 纵向轴线与节点 (Canvas 占满整行高度，上下出界 1.5px 消除浮点裁切误差，实现 100% 连续无断点)
         Box(
             modifier = Modifier
                 .width(28.dp)
@@ -715,9 +723,8 @@ private fun VerticalTimelineRow(
             Canvas(modifier = Modifier.fillMaxSize()) {
                 val centerX = size.width / 2f
                 val centerY = size.height / 2f
-                val overlap = 1f // 1px 防微细浮点裂隙
+                val overlap = 1.5f // 防微细浮点裂隙
                 val strokeWidthPx = 3.dp.toPx()
-                val arrowStrokeWidthPx = 2.dp.toPx()
 
                 if (!isFirst) {
                     drawLine(
@@ -728,52 +735,12 @@ private fun VerticalTimelineRow(
                     )
                 }
                 if (!isLast) {
-                    if (hasBottomArrow) {
-                        val midY = (centerY + size.height) / 2f
-                        val arrowGap = 4.dp.toPx()
-                        val arrowArm = 3.dp.toPx()
-                        val arrowSpread = 3.5.dp.toPx()
-
-                        // 下行轨道前半段（站点到箭头间隙）
-                        drawLine(
-                            color = bottomTrackColor,
-                            start = Offset(centerX, centerY),
-                            end = Offset(centerX, midY - arrowGap),
-                            strokeWidth = strokeWidthPx
-                        )
-
-                        // 绘制向下行车折线箭头 'v'
-                        val arrowPath = Path().apply {
-                            moveTo(centerX - arrowSpread, midY - arrowArm)
-                            lineTo(centerX, midY + arrowArm)
-                            lineTo(centerX + arrowSpread, midY - arrowArm)
-                        }
-                        drawPath(
-                            path = arrowPath,
-                            color = bottomTrackColor,
-                            style = Stroke(
-                                width = arrowStrokeWidthPx,
-                                cap = StrokeCap.Round,
-                                join = StrokeJoin.Round
-                            )
-                        )
-
-                        // 下行轨道后半段（箭头间隙到行底边界）
-                        drawLine(
-                            color = bottomTrackColor,
-                            start = Offset(centerX, midY + arrowGap),
-                            end = Offset(centerX, size.height + overlap),
-                            strokeWidth = strokeWidthPx
-                        )
-                    } else {
-                        // 无箭头时，平整绘制贯穿整段的下行轴线
-                        drawLine(
-                            color = bottomTrackColor,
-                            start = Offset(centerX, centerY),
-                            end = Offset(centerX, size.height + overlap),
-                            strokeWidth = strokeWidthPx
-                        )
-                    }
+                    drawLine(
+                        color = bottomTrackColor,
+                        start = Offset(centerX, centerY),
+                        end = Offset(centerX, size.height + overlap),
+                        strokeWidth = strokeWidthPx
+                    )
                 }
             }
 
@@ -878,6 +845,88 @@ private fun VerticalTimelineRow(
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (bus.isArrived) Color.White else busColors.busChipContent
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 纵向时间轴站点之间的轨道连接段（含精准居中于两站正中间的行车方向箭头）
+ */
+@Composable
+private fun VerticalTrackSegment(
+    segmentColor: Color,
+    hasArrow: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(16.dp)
+            .padding(horizontal = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // 与站序号 26.dp 严格对齐
+        Spacer(modifier = Modifier.width(26.dp))
+
+        // 纵向轨道段 (宽度 28.dp，严格对齐上下站点的轨道中心)
+        Box(
+            modifier = Modifier
+                .width(28.dp)
+                .fillMaxHeight(),
+            contentAlignment = Alignment.Center
+        ) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
+                val centerX = size.width / 2f
+                val midY = size.height / 2f
+                val overlap = 1.5f // 消除浮点接缝
+                val strokeWidthPx = 3.dp.toPx()
+                val arrowStrokeWidthPx = 2.dp.toPx()
+                val arrowGap = 4.dp.toPx()
+                val arrowArm = 3.dp.toPx()
+                val arrowSpread = 3.5.dp.toPx()
+
+                if (hasArrow) {
+                    // 上半段轨道（顶端到箭头间隙）
+                    drawLine(
+                        color = segmentColor,
+                        start = Offset(centerX, -overlap),
+                        end = Offset(centerX, midY - arrowGap),
+                        strokeWidth = strokeWidthPx
+                    )
+
+                    // 绘制精准居中的向下行车折线箭头 'v'
+                    val arrowPath = Path().apply {
+                        moveTo(centerX - arrowSpread, midY - arrowArm)
+                        lineTo(centerX, midY + arrowArm)
+                        lineTo(centerX + arrowSpread, midY - arrowArm)
+                    }
+                    drawPath(
+                        path = arrowPath,
+                        color = segmentColor,
+                        style = Stroke(
+                            width = arrowStrokeWidthPx,
+                            cap = StrokeCap.Round,
+                            join = StrokeJoin.Round
+                        )
+                    )
+
+                    // 下半段轨道（箭头间隙到底部边界）
+                    drawLine(
+                        color = segmentColor,
+                        start = Offset(centerX, midY + arrowGap),
+                        end = Offset(centerX, size.height + overlap),
+                        strokeWidth = strokeWidthPx
+                    )
+                } else {
+                    // 无箭头时，平整绘制贯穿整段的连接轴线
+                    drawLine(
+                        color = segmentColor,
+                        start = Offset(centerX, -overlap),
+                        end = Offset(centerX, size.height + overlap),
+                        strokeWidth = strokeWidthPx
                     )
                 }
             }

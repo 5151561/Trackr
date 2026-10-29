@@ -1,8 +1,12 @@
 package com.trackr.ui.screens.linedetail
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -254,67 +258,88 @@ fun LineDetailScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 2. 中部核心三态卡片（AnimatedContent 弹簧过渡）
-            AnimatedContent(
-                targetState = uiState.panelMode,
-                transitionSpec = {
-                    fadeIn(animationSpec = expressiveSpringSpec()) togetherWith
-                            fadeOut(animationSpec = expressiveSpringSpec())
-                },
-                label = "panel_state_transition",
+            // 2. 中部核心三态卡片（固定外层卡片容器与阴影，内部平滑尺寸过渡，杜绝阴影闪烁与裁切痕迹）
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(containerColor = busColors.stationCardContainer),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-            ) { targetMode ->
-                when (targetMode) {
-                    PanelMode.STATION_CARD -> {
-                        StationArrivalCard(
-                            lineDetail = lineDetail,
-                            selectedStop = selectedStop,
-                            isTrackingActive = activeTracking.isActive &&
-                                    activeTracking.lineId == lineDetail.line.lineId &&
-                                    activeTracking.targetOrder == selectedStop?.order,
-                            alertThreshold = uiState.alertThresholdStops,
-                            onThresholdChange = { viewModel.setAlertThreshold(it) },
-                            onOpenBusList = { viewModel.openBusList() },
-                            onSwitchOpposite = { viewModel.switchOppositeDirection() },
-                            onToggleTracking = {
-                                val isTrackingThis = activeTracking.isActive &&
-                                        activeTracking.lineId == lineDetail.line.lineId &&
-                                        activeTracking.targetOrder == selectedStop?.order
-
-                                if (isTrackingThis) {
-                                    BusTrackingService.stopTracking(context)
-                                } else if (selectedStop != null) {
-                                    BusTrackingService.startTracking(
-                                        context = context,
-                                        cityId = viewModel.cityId,
-                                        line = lineDetail.line,
-                                        targetStop = selectedStop,
-                                        totalStops = lineDetail.stops.size,
-                                        alertThresholdStops = uiState.alertThresholdStops
-                                    )
-                                }
+            ) {
+                AnimatedContent(
+                    targetState = uiState.panelMode,
+                    transitionSpec = {
+                        fadeIn(
+                            animationSpec = tween(durationMillis = 200, delayMillis = 60)
+                        ) togetherWith fadeOut(
+                            animationSpec = tween(durationMillis = 140)
+                        ) using SizeTransform(
+                            clip = false,
+                            sizeAnimationSpec = { _, _ ->
+                                spring(
+                                    dampingRatio = Spring.DampingRatioNoBouncy,
+                                    stiffness = Spring.StiffnessMediumLow
+                                )
                             }
                         )
-                    }
+                    },
+                    contentAlignment = Alignment.TopCenter,
+                    label = "panel_state_transition",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(22.dp))
+                ) { targetMode ->
+                    when (targetMode) {
+                        PanelMode.STATION_CARD -> {
+                            StationArrivalContent(
+                                lineDetail = lineDetail,
+                                selectedStop = selectedStop,
+                                isTrackingActive = activeTracking.isActive &&
+                                        activeTracking.lineId == lineDetail.line.lineId &&
+                                        activeTracking.targetOrder == selectedStop?.order,
+                                alertThreshold = uiState.alertThresholdStops,
+                                onThresholdChange = { viewModel.setAlertThreshold(it) },
+                                onOpenBusList = { viewModel.openBusList() },
+                                onSwitchOpposite = { viewModel.switchOppositeDirection() },
+                                onToggleTracking = {
+                                    val isTrackingThis = activeTracking.isActive &&
+                                            activeTracking.lineId == lineDetail.line.lineId &&
+                                            activeTracking.targetOrder == selectedStop?.order
 
-                    PanelMode.BUS_LIST -> {
-                        BusListCard(
-                            lineDetail = lineDetail,
-                            selectedStop = selectedStop,
-                            onBack = { viewModel.backToStationCard() },
-                            onSelectBus = { viewModel.selectBusToFollow(it) }
-                        )
-                    }
+                                    if (isTrackingThis) {
+                                        BusTrackingService.stopTracking(context)
+                                    } else if (selectedStop != null) {
+                                        BusTrackingService.startTracking(
+                                            context = context,
+                                            cityId = viewModel.cityId,
+                                            line = lineDetail.line,
+                                            targetStop = selectedStop,
+                                            totalStops = lineDetail.stops.size,
+                                            alertThresholdStops = uiState.alertThresholdStops
+                                        )
+                                    }
+                                }
+                            )
+                        }
 
-                    PanelMode.BUS_FOLLOW -> {
-                        val followedBus = lineDetail.buses.find { it.busId == uiState.followedBusId }
-                        BusFollowCard(
-                            lineDetail = lineDetail,
-                            followedBus = followedBus,
-                            onBack = { viewModel.backToStationCard() }
-                        )
+                        PanelMode.BUS_LIST -> {
+                            BusListContent(
+                                lineDetail = lineDetail,
+                                selectedStop = selectedStop,
+                                onBack = { viewModel.backToStationCard() },
+                                onSelectBus = { viewModel.selectBusToFollow(it) }
+                            )
+                        }
+
+                        PanelMode.BUS_FOLLOW -> {
+                            val followedBus = lineDetail.buses.find { it.busId == uiState.followedBusId }
+                            BusFollowContent(
+                                lineDetail = lineDetail,
+                                followedBus = followedBus,
+                                onBack = { viewModel.backToStationCard() }
+                            )
+                        }
                     }
                 }
             }
@@ -531,10 +556,10 @@ private fun CapsuleBadge(text: String) {
 }
 
 /**
- * 状态 1：站点到站卡 (`STATION_CARD`)
+ * 状态 1：站点到站内容 (`STATION_CARD`)
  */
 @Composable
-private fun StationArrivalCard(
+private fun StationArrivalContent(
     lineDetail: BusLineDetail,
     selectedStop: BusStop?,
     isTrackingActive: Boolean,
@@ -542,7 +567,8 @@ private fun StationArrivalCard(
     onThresholdChange: (Int) -> Unit,
     onOpenBusList: () -> Unit,
     onSwitchOpposite: () -> Unit,
-    onToggleTracking: () -> Unit
+    onToggleTracking: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val busColors = MaterialTheme.busColors
     val currentOrder = selectedStop?.order ?: 1
@@ -558,13 +584,11 @@ private fun StationArrivalCard(
         currentOrder - upcomingBus.order
     } else null
 
-    Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = busColors.stationCardContainer),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        modifier = Modifier.fillMaxWidth()
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(16.dp)
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
             // 候车站名与状态标
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -800,29 +824,27 @@ private fun StationArrivalCard(
                 )
             }
         }
-    }
 }
 
 /**
- * 状态 2：车辆列表卡片 (`BUS_LIST`)
+ * 状态 2：车辆列表内容 (`BUS_LIST`)
  */
 @Composable
-private fun BusListCard(
+private fun BusListContent(
     lineDetail: BusLineDetail,
     selectedStop: BusStop?,
     onBack: () -> Unit,
-    onSelectBus: (LiveBus) -> Unit
+    onSelectBus: (LiveBus) -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val busColors = MaterialTheme.busColors
     val currentOrder = selectedStop?.order ?: 1
 
-    Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = busColors.stationCardContainer),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        modifier = Modifier.fillMaxWidth()
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(16.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -980,27 +1002,25 @@ private fun BusListCard(
                 }
             }
         }
-    }
 }
 
 /**
- * 状态 3：单车跟随行程轴 (`BUS_FOLLOW`)
+ * 状态 3：单车跟随行程轴内容 (`BUS_FOLLOW`)
  */
 @Composable
-private fun BusFollowCard(
+private fun BusFollowContent(
     lineDetail: BusLineDetail,
     followedBus: LiveBus?,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val busColors = MaterialTheme.busColors
 
-    Card(
-        shape = RoundedCornerShape(22.dp),
-        colors = CardDefaults.cardColors(containerColor = busColors.stationCardContainer),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-        modifier = Modifier.fillMaxWidth()
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(16.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
             // 顶栏：返回按钮与车牌号
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -1165,7 +1185,6 @@ private fun BusFollowCard(
                 }
             }
         }
-    }
 }
 
 /**
