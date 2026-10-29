@@ -1,8 +1,17 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.plugin.compose)
     alias(libs.plugins.kotlin.plugin.serialization)
     id("jacoco")
+}
+
+val localProperties = Properties().apply {
+    val localPropertiesFile = rootProject.file("local.properties")
+    if (localPropertiesFile.exists()) {
+        localPropertiesFile.inputStream().use { load(it) }
+    }
 }
 
 java {
@@ -27,6 +36,28 @@ android {
         }
     }
 
+    signingConfigs {
+        create("release") {
+            val storeFilePath = System.getenv("RELEASE_STORE_FILE")
+                ?: localProperties.getProperty("RELEASE_STORE_FILE")
+            val storePwd = System.getenv("RELEASE_STORE_PASSWORD")
+                ?: localProperties.getProperty("RELEASE_STORE_PASSWORD")
+            val keyAliasStr = System.getenv("RELEASE_KEY_ALIAS")
+                ?: localProperties.getProperty("RELEASE_KEY_ALIAS")
+            val keyPwd = System.getenv("RELEASE_KEY_PASSWORD")
+                ?: localProperties.getProperty("RELEASE_KEY_PASSWORD")
+
+            if (storeFilePath != null && storePwd != null && keyAliasStr != null && keyPwd != null) {
+                val candidate1 = file(storeFilePath)
+                val candidate2 = rootProject.file(storeFilePath.removePrefix("../"))
+                storeFile = if (candidate1.exists()) candidate1 else candidate2
+                storePassword = storePwd
+                keyAlias = keyAliasStr
+                keyPassword = keyPwd
+            }
+        }
+    }
+
     buildTypes {
         debug {
             enableUnitTestCoverage = true
@@ -37,6 +68,10 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            val releaseSigning = signingConfigs.getByName("release")
+            if (releaseSigning.storeFile?.exists() == true) {
+                signingConfig = releaseSigning
+            }
         }
     }
 
