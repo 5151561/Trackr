@@ -216,7 +216,7 @@ class TransitRepository(
         val resolvedUserLat = userLat ?: _userLocation.value?.first
         val resolvedUserLng = userLng ?: _userLocation.value?.second
 
-        val stops = chelaileClient.getStopDetail(
+        val rawStops = chelaileClient.getStopDetail(
             cityId = city.cityId,
             physicalStId = physicalStId.orEmpty(),
             namesakeStId = namesakeStId,
@@ -224,6 +224,39 @@ class TransitRepository(
             userLat = resolvedUserLat,
             userLng = resolvedUserLng
         )
+        // 车来了接口只为当前查询的 physicalStId 返回完整线路与实时数据，其他物理站台为占位空壳
+        // 当存在多个物理站台且其他站台尚未填充完整线路时，并发补全各物理站台的完整线路信息
+        val stops = if (rawStops.size > 1 && rawStops.any { s -> s.lines.isNotEmpty() && s.lines.all { it.line.lineId.isBlank() } }) {
+            coroutineScope {
+                rawStops.map { stop ->
+                    async {
+                        val needsFetch = stop.lines.isNotEmpty() && stop.lines.all { it.line.lineId.isBlank() }
+                        if (needsFetch && !stop.physicalStId.isNullOrBlank()) {
+                            val subResult = runCatching {
+                                chelaileClient.getStopDetail(
+                                    cityId = city.cityId,
+                                    physicalStId = stop.physicalStId,
+                                    namesakeStId = stop.namesakeStId ?: namesakeStId,
+                                    stationId = stop.stopId.takeIf { it.isNotBlank() } ?: stopId,
+                                    userLat = resolvedUserLat,
+                                    userLng = resolvedUserLng
+                                )
+                            }.getOrNull()
+                            val matched = subResult?.firstOrNull { it.physicalStId == stop.physicalStId && it.lines.any { l -> l.line.lineId.isNotBlank() } }
+                                ?: subResult?.firstOrNull { it.lines.any { l -> l.line.lineId.isNotBlank() } }
+                            if (matched != null) {
+                                stop.copy(
+                                    lines = matched.lines,
+                                    subwayLineNames = if (matched.subwayLineNames.isNotEmpty()) matched.subwayLineNames else stop.subwayLineNames
+                                )
+                            } else stop
+                        } else stop
+                    }
+                }.awaitAll()
+            }
+        } else {
+            rawStops
+        }
         if (stops.isNotEmpty()) {
             stops
         } else if (stationLat != null && stationLng != null && stationLat > 0 && stationLng > 0) {

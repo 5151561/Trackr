@@ -89,12 +89,17 @@ class StopDetailViewModel(
             }
 
             val userLoc = repository.userLocation.value
+            val currentSelected = _uiState.value.stops.getOrNull(_uiState.value.selectedStopIndex)
+            val queryPhysicalStId = currentSelected?.physicalStId?.takeIf { it.isNotBlank() } ?: physicalStId.takeIf { it.isNotBlank() }
+            val queryNamesakeStId = currentSelected?.namesakeStId?.takeIf { it.isNotBlank() } ?: namesakeStId.takeIf { it.isNotBlank() }
+            val queryStopId = currentSelected?.stopId?.takeIf { it.isNotBlank() } ?: stopId.takeIf { it.isNotBlank() }
+
             val result = repository.getStopDetail(
                 city = city,
-                stopId = stopId.takeIf { it.isNotBlank() },
+                stopId = queryStopId,
                 stopName = initialStopName.takeIf { it.isNotBlank() },
-                physicalStId = physicalStId.takeIf { it.isNotBlank() },
-                namesakeStId = namesakeStId.takeIf { it.isNotBlank() },
+                physicalStId = queryPhysicalStId,
+                namesakeStId = queryNamesakeStId,
                 stationLat = stationLat.takeIf { it > 0.0 },
                 stationLng = stationLng.takeIf { it > 0.0 },
                 userLat = userLoc?.first,
@@ -116,7 +121,11 @@ class StopDetailViewModel(
 
                 val resolvedName = stopList.firstOrNull()?.name?.takeIf { it.isNotBlank() }
                     ?: initialStopName.ifBlank { "站点详情" }
-                val newIndex = if (stopList.isNotEmpty()) {
+                val currentPhyId = currentSelected?.physicalStId
+                val newIndex = if (currentPhyId != null && stopList.isNotEmpty()) {
+                    val idx = stopList.indexOfFirst { it.physicalStId == currentPhyId }
+                    if (idx >= 0) idx else _uiState.value.selectedStopIndex.coerceIn(0, stopList.size - 1)
+                } else if (stopList.isNotEmpty()) {
                     _uiState.value.selectedStopIndex.coerceIn(0, stopList.size - 1)
                 } else 0
 
@@ -145,6 +154,10 @@ class StopDetailViewModel(
     fun selectStopIndex(index: Int) {
         if (index in _uiState.value.stops.indices) {
             _uiState.update { it.copy(selectedStopIndex = index) }
+            val targetStop = _uiState.value.stops[index]
+            if (targetStop.lines.isEmpty() || targetStop.lines.all { it.line.lineId.isBlank() }) {
+                loadStopDetail(isInitial = false)
+            }
         }
     }
 

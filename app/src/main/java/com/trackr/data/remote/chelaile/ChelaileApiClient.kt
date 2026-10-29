@@ -584,8 +584,8 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
                     distanceMeters = dist,
                     wgsLat = st.optDouble("lat", 0.0),
                     wgsLng = st.optDouble("lng", 0.0),
-                    physicalStId = physicalStId,
-                    namesakeStId = namesakeStId,
+                    physicalStId = st.optString("physicalStId").ifBlank { physicalStId.takeIf { it.isNotBlank() } },
+                    namesakeStId = st.optString("namesakeStId").ifBlank { namesakeStId?.takeIf { it.isNotBlank() } },
                     lines = lineStatuses,
                     subwayLineNames = metroNames
                 )
