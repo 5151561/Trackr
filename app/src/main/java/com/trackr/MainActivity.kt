@@ -1,8 +1,8 @@
 package com.trackr
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -15,6 +15,8 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
@@ -22,12 +24,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.navigation.NavType
-import androidx.navigation.compose.NavHost
-import androidx.navigation.compose.composable
-import androidx.navigation.compose.rememberNavController
-import androidx.navigation.navArgument
+import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
+import androidx.navigation3.runtime.entryProvider
+import androidx.navigation3.runtime.rememberNavBackStack
+import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
+import androidx.navigation3.ui.NavDisplay
 import com.trackr.domain.model.DataSourceType
+import com.trackr.ui.navigation.ScreenKey
 import com.trackr.ui.screens.home.HomeScreen
 import com.trackr.ui.screens.home.HomeViewModel
 import com.trackr.ui.screens.linedetail.LineDetailScreen
@@ -38,6 +41,8 @@ import com.trackr.widget.BusStopWidgetProvider
 
 class MainActivity : ComponentActivity() {
 
+    private var currentIntent by mutableStateOf<Intent?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -45,27 +50,36 @@ class MainActivity : ComponentActivity() {
             window.isNavigationBarContrastEnforced = false
         }
 
-        val initialCityId = intent?.getStringExtra("extra_city_id")
-        val initialLineId = intent?.getStringExtra("extra_line_id")
-        val initialTargetOrder = intent?.getIntExtra("extra_target_order", 0) ?: 0
-        val initialStopId = intent?.getStringExtra("extra_stop_id").orEmpty()
-        val initialSourceName = intent?.getStringExtra("extra_source").orEmpty()
-        val initialLineName = intent?.getStringExtra("extra_line_name").orEmpty()
+        currentIntent = intent
 
         setContent {
             TrackrTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
+                    val activeIntent = currentIntent
+                    val cityId = activeIntent?.getStringExtra("extra_city_id")
+                    val lineId = activeIntent?.getStringExtra("extra_line_id")
+                    val targetOrder = activeIntent?.getIntExtra("extra_target_order", 0) ?: 0
+                    val stopId = activeIntent?.getStringExtra("extra_stop_id").orEmpty()
+                    val sourceName = activeIntent?.getStringExtra("extra_source").orEmpty()
+                    val lineName = activeIntent?.getStringExtra("extra_line_name").orEmpty()
+
                     TrackrNavApp(
-                        deepLinkCityId = initialCityId,
-                        deepLinkLineId = initialLineId,
-                        deepLinkTargetOrder = initialTargetOrder,
-                        deepLinkStopId = initialStopId,
-                        deepLinkSourceName = initialSourceName,
-                        deepLinkLineName = initialLineName
+                        deepLinkCityId = cityId,
+                        deepLinkLineId = lineId,
+                        deepLinkTargetOrder = targetOrder,
+                        deepLinkStopId = stopId,
+                        deepLinkSourceName = sourceName,
+                        deepLinkLineName = lineName
                     )
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        currentIntent = intent
     }
 }
 
@@ -79,7 +93,7 @@ fun TrackrNavApp(
     deepLinkLineName: String = ""
 ) {
     val context = LocalContext.current
-    val navController = rememberNavController()
+    val backStack = rememberNavBackStack(ScreenKey.Home)
     val homeViewModel: HomeViewModel = viewModel()
 
     // 自动同步收藏到桌面快捷方式 (App Shortcuts)
@@ -118,120 +132,95 @@ fun TrackrNavApp(
     }
 
     // 处理来自桌面小组件、快捷方式或通知栏的直接跳转
-    LaunchedEffect(deepLinkCityId, deepLinkLineId) {
+    LaunchedEffect(deepLinkCityId, deepLinkLineId, deepLinkTargetOrder, deepLinkStopId, deepLinkSourceName, deepLinkLineName) {
         if (!deepLinkCityId.isNullOrBlank() && !deepLinkLineId.isNullOrBlank()) {
-            val route = buildLineDetailRoute(
+            val source = runCatching { DataSourceType.valueOf(deepLinkSourceName) }
+                .getOrDefault(DataSourceType.CHELAILE)
+            val lineDetailKey = ScreenKey.LineDetail(
                 cityId = deepLinkCityId,
                 lineId = deepLinkLineId,
                 targetOrder = deepLinkTargetOrder,
                 stopId = deepLinkStopId,
-                source = deepLinkSourceName.ifBlank { DataSourceType.CHELAILE.name },
+                source = source,
                 lineName = deepLinkLineName
             )
-            navController.navigate(route)
+            if (backStack.lastOrNull() != lineDetailKey) {
+                backStack.add(lineDetailKey)
+            }
         }
     }
 
-    NavHost(
-        navController = navController,
-        startDestination = "home"
-    ) {
-        composable("home") {
-            HomeScreen(
-                viewModel = homeViewModel,
-                onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
-                    navController.navigate(
-                        buildLineDetailRoute(
-                            cityId = cityId,
-                            lineId = lineId,
-                            targetOrder = targetOrder,
-                            stopId = stopId,
-                            source = source.name,
-                            lineName = lineName
+    NavDisplay(
+        backStack = backStack,
+        onBack = { backStack.removeLastOrNull() },
+        entryDecorators = listOf(
+            rememberSaveableStateHolderNavEntryDecorator(),
+            rememberViewModelStoreNavEntryDecorator()
+        ),
+        entryProvider = entryProvider {
+            entry<ScreenKey.Home> {
+                HomeScreen(
+                    viewModel = homeViewModel,
+                    onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
+                        backStack.add(
+                            ScreenKey.LineDetail(
+                                cityId = cityId,
+                                lineId = lineId,
+                                targetOrder = targetOrder,
+                                stopId = stopId,
+                                source = source,
+                                lineName = lineName
+                            )
                         )
-                    )
-                },
-                onNavigateToSearch = {
-                    navController.navigate("search")
-                }
-            )
-        }
-
-        composable("search") {
-            SearchScreen(
-                viewModel = homeViewModel,
-                onNavigateBack = { navController.popBackStack() },
-                onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
-                    navController.navigate(
-                        buildLineDetailRoute(
-                            cityId = cityId,
-                            lineId = lineId,
-                            targetOrder = targetOrder,
-                            stopId = stopId,
-                            source = source.name,
-                            lineName = lineName
-                        )
-                    )
-                }
-            )
-        }
-
-        composable(
-            route = "line_detail?cityId={cityId}&lineId={lineId}&targetOrder={targetOrder}&stopId={stopId}&source={source}&lineName={lineName}",
-            arguments = listOf(
-                navArgument("cityId") { type = NavType.StringType; defaultValue = "034" },
-                navArgument("lineId") { type = NavType.StringType; defaultValue = "" },
-                navArgument("targetOrder") { type = NavType.IntType; defaultValue = 0 },
-                navArgument("stopId") { type = NavType.StringType; defaultValue = "" },
-                navArgument("source") { type = NavType.StringType; defaultValue = "CHELAILE" },
-                navArgument("lineName") { type = NavType.StringType; defaultValue = "" }
-            )
-        ) { backStackEntry ->
-            val cityId = backStackEntry.arguments?.getString("cityId") ?: "034"
-            val lineId = Uri.decode(backStackEntry.arguments?.getString("lineId").orEmpty())
-            val targetOrder = backStackEntry.arguments?.getInt("targetOrder") ?: 0
-            val stopId = Uri.decode(backStackEntry.arguments?.getString("stopId").orEmpty())
-            val sourceStr = backStackEntry.arguments?.getString("source") ?: "CHELAILE"
-            val lineName = Uri.decode(backStackEntry.arguments?.getString("lineName").orEmpty())
-            val source = runCatching { DataSourceType.valueOf(sourceStr) }.getOrDefault(DataSourceType.CHELAILE)
-
-            val detailViewModel: LineDetailViewModel = viewModel(
-                key = "detail_${cityId}_${lineId}_${targetOrder}",
-                factory = object : ViewModelProvider.Factory {
-                    @Suppress("UNCHECKED_CAST")
-                    override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                        return LineDetailViewModel(
-                            cityId = cityId,
-                            initialLineId = lineId,
-                            initialTargetOrder = targetOrder.takeIf { it > 0 },
-                            initialStationId = stopId.takeIf { it.isNotBlank() },
-                            initialSource = source,
-                            lineNameHint = lineName
-                        ) as T
+                    },
+                    onNavigateToSearch = {
+                        backStack.add(ScreenKey.Search)
                     }
-                }
-            )
+                )
+            }
 
-            LineDetailScreen(
-                viewModel = detailViewModel,
-                onNavigateBack = { navController.popBackStack() }
-            )
+            entry<ScreenKey.Search> {
+                SearchScreen(
+                    viewModel = homeViewModel,
+                    onNavigateBack = { backStack.removeLastOrNull() },
+                    onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
+                        backStack.add(
+                            ScreenKey.LineDetail(
+                                cityId = cityId,
+                                lineId = lineId,
+                                targetOrder = targetOrder,
+                                stopId = stopId,
+                                source = source,
+                                lineName = lineName
+                            )
+                        )
+                    }
+                )
+            }
+
+            entry<ScreenKey.LineDetail> { key ->
+                val detailViewModel: LineDetailViewModel = viewModel(
+                    key = "detail_${key.cityId}_${key.lineId}_${key.targetOrder}",
+                    factory = object : ViewModelProvider.Factory {
+                        @Suppress("UNCHECKED_CAST")
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                            return LineDetailViewModel(
+                                cityId = key.cityId,
+                                initialLineId = key.lineId,
+                                initialTargetOrder = key.targetOrder.takeIf { it > 0 },
+                                initialStationId = key.stopId.takeIf { it.isNotBlank() },
+                                initialSource = key.source,
+                                lineNameHint = key.lineName
+                            ) as T
+                        }
+                    }
+                )
+
+                LineDetailScreen(
+                    viewModel = detailViewModel,
+                    onNavigateBack = { backStack.removeLastOrNull() }
+                )
+            }
         }
-    }
-}
-
-private fun buildLineDetailRoute(
-    cityId: String,
-    lineId: String,
-    targetOrder: Int,
-    stopId: String,
-    source: String,
-    lineName: String
-): String {
-    return "line_detail?cityId=${Uri.encode(cityId)}" +
-        "&lineId=${Uri.encode(lineId)}" +
-        "&targetOrder=$targetOrder" +
-        "&stopId=${Uri.encode(stopId)}" +
-        "&source=${Uri.encode(source)}" +
-        "&lineName=${Uri.encode(lineName)}"
+    )
 }
