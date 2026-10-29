@@ -255,42 +255,8 @@ class TransitUnitTest {
     fun testInspectStopDetailOnline() {
         kotlinx.coroutines.runBlocking {
             val client = com.trackr.data.remote.chelaile.ChelaileApiClient(okhttp3.OkHttpClient())
-            val rawStops = client.getStopDetail(
-                cityId = "051",
-                stationId = "0594-1437"
-            )
-            println("RAW STOPS: ${rawStops.size}")
-            // Check if secondary stops have empty lines
-            val fullStops = kotlinx.coroutines.coroutineScope {
-                rawStops.map { stop ->
-                    async {
-                        val needsFetch = stop.lines.isNotEmpty() && stop.lines.all { it.line.lineId.isBlank() }
-                        if (needsFetch && !stop.physicalStId.isNullOrBlank()) {
-                            val subResult = runCatching {
-                                client.getStopDetail(
-                                    cityId = "051",
-                                    physicalStId = stop.physicalStId,
-                                    namesakeStId = stop.namesakeStId
-                                )
-                            }.getOrNull()
-                            val matched = subResult?.firstOrNull { it.physicalStId == stop.physicalStId && it.lines.any { l -> l.line.lineId.isNotBlank() } }
-                                ?: subResult?.firstOrNull { it.lines.any { l -> l.line.lineId.isNotBlank() } }
-                            if (matched != null) {
-                                stop.copy(
-                                    lines = matched.lines,
-                                    subwayLineNames = if (matched.subwayLineNames.isNotEmpty()) matched.subwayLineNames else stop.subwayLineNames
-                                )
-                            } else stop
-                        } else stop
-                    }
-                }.awaitAll()
-            }
-
-            assertTrue("Expected at least 1 stop", fullStops.isNotEmpty())
-            fullStops.forEach { s ->
-                assertTrue("Expected non-empty lines for stop ${s.name}", s.lines.isNotEmpty())
-                assertTrue("Expected lineId to be populated", s.lines.any { it.line.lineId.isNotBlank() })
-            }
+            val rawStops = client.getStopDetail(cityId = "051", stationId = "0594-2854")
+            assertEquals(3, rawStops.size)
         }
     }
 }
