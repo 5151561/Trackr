@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>「追客」D-2A 向上凸起拱形弧度精修</title>
+  <title>「追客」自适应图标安全区缩放修复对比</title>
   <style>
     :root {
       --bg: #F8F9FA;
@@ -11,6 +11,7 @@
       --border: #E8EAED;
       --text: #202124;
       --subtext: #5F6368;
+      --primary: #1A73E8;
     }
     body {
       margin: 0;
@@ -20,15 +21,15 @@
       color: var(--text);
     }
     .container {
-      max-width: 1100px;
+      max-width: 1040px;
       margin: 0 auto;
     }
     header {
       text-align: center;
-      margin-bottom: 36px;
+      margin-bottom: 32px;
     }
     h1 {
-      font-size: 2.1rem;
+      font-size: 2rem;
       font-weight: 700;
       margin: 0 0 10px 0;
       color: #202124;
@@ -37,119 +38,149 @@
     .subtitle {
       color: var(--subtext);
       font-size: 1.05rem;
+      max-width: 680px;
+      margin: 0 auto;
+      line-height: 1.6;
     }
     .toolbar {
       display: flex;
       justify-content: center;
-      gap: 10px;
-      margin-bottom: 36px;
+      gap: 12px;
+      margin-bottom: 32px;
+      flex-wrap: wrap;
     }
     .btn {
-      padding: 8px 18px;
+      padding: 8px 20px;
       border-radius: 9999px;
       border: 1px solid var(--border);
       background: var(--card-bg);
       color: var(--text);
-      cursor: pointer;
-      font-size: 0.9rem;
+      font-size: 0.95rem;
       font-weight: 500;
-      box-shadow: 0 1px 2px rgba(60,64,67,0.1);
+      cursor: pointer;
       transition: all 0.2s ease;
     }
-    .btn:hover, .btn.active {
-      background: #E8F0FE;
-      color: #1A73E8;
-      border-color: #1A73E8;
+    .btn:hover {
+      background: #F1F3F4;
     }
+    .btn.active {
+      background: #202124;
+      color: #FFFFFF;
+      border-color: #202124;
+    }
+
     .grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
       gap: 28px;
       margin-bottom: 40px;
     }
     .card {
       background: var(--card-bg);
       border: 1px solid var(--border);
-      border-radius: 24px;
-      padding: 26px;
+      border-radius: 20px;
+      padding: 28px;
       display: flex;
       flex-direction: column;
       align-items: center;
-      text-align: center;
-      box-shadow: 0 1px 3px rgba(60,64,67,0.08), 0 4px 8px rgba(60,64,67,0.04);
-      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.03);
+      position: relative;
     }
-    .card:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 8px 24px rgba(60,64,67,0.12);
+    .tag {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 4px 10px;
+      border-radius: 6px;
     }
+    .tag.bad {
+      background: #FCE8E6;
+      color: #C5221F;
+    }
+    .tag.good {
+      background: #E6F4EA;
+      color: #137333;
+    }
+
+    h3 {
+      margin: 0 0 18px 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+      align-self: flex-start;
+    }
+
     .icon-wrapper {
-      width: 175px;
-      height: 175px;
-      margin: 16px 0 24px 0;
+      width: 220px;
+      height: 220px;
+      margin: 10px 0 24px 0;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+      transition: border-radius 0.3s cubic-bezier(0.2, 0, 0, 1);
+      overflow: hidden;
       display: flex;
       align-items: center;
       justify-content: center;
       background: #FFFFFF;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.08), 0 0 1px rgba(0,0,0,0.15);
-      transition: border-radius 0.3s ease;
+      position: relative;
     }
+
+    /* 裁切形状 */
     .icon-wrapper.squircle {
-      border-radius: 44px;
+      border-radius: 24%; /* Samsung One UI / Xiaomi 常见平滑圆角 */
     }
     .icon-wrapper.circle {
-      border-radius: 50%;
+      border-radius: 50%; /* Pixel 原生圆形 */
     }
     .icon-wrapper.rounded {
-      border-radius: 28px;
+      border-radius: 18%; /* 经典圆角矩形 */
     }
-    .icon-wrapper svg {
-      width: 100%;
-      height: 100%;
-      border-radius: inherit;
+    .icon-wrapper.teardrop {
+      border-radius: 50% 50% 50% 0%; /* 水滴形状 */
     }
-    .card h3 {
-      font-size: 1.25rem;
-      margin: 0 0 8px 0;
-      color: #202124;
+
+    /* 安全区辅助线 */
+    .icon-wrapper.show-safe::after {
+      content: "";
+      position: absolute;
+      width: 61.1%;
+      height: 61.1%;
+      border: 2px dashed rgba(26, 115, 232, 0.7);
+      border-radius: 50%;
+      pointer-events: none;
+      box-sizing: border-box;
     }
-    .card .tag {
-      display: inline-block;
-      padding: 3px 10px;
-      border-radius: 12px;
-      font-size: 0.75rem;
-      font-weight: 500;
-      margin-bottom: 12px;
-      background: #E8F0FE;
-      color: #1A73E8;
-    }
+
     .card p {
-      font-size: 0.88rem;
-      color: var(--subtext);
-      line-height: 1.5;
       margin: 0;
+      color: var(--subtext);
+      font-size: 0.95rem;
+      line-height: 1.6;
     }
+
     .mockup-section {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
+      background: #202124;
+      color: #FFFFFF;
       border-radius: 24px;
-      padding: 30px;
-      box-shadow: 0 1px 3px rgba(60,64,67,0.08);
+      padding: 32px;
+      margin-top: 10px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.15);
     }
     .mockup-title {
-      font-size: 1.1rem;
+      font-size: 1.15rem;
       font-weight: 600;
-      margin-bottom: 20px;
-      color: #3C4043;
+      margin-bottom: 24px;
       text-align: center;
     }
     .phone-dock {
+      background: rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(20px);
+      border-radius: 36px;
+      padding: 16px 28px;
       display: flex;
-      justify-content: center;
-      gap: 40px;
-      padding: 24px;
-      background: #EEF2F6;
-      border-radius: 20px;
+      justify-content: space-around;
+      max-width: 480px;
+      margin: 0 auto;
     }
     .dock-app {
       display: flex;
@@ -157,134 +188,131 @@
       align-items: center;
       gap: 8px;
     }
-    .dock-app .mini-icon {
-      width: 60px;
-      height: 60px;
-      background: #FFFFFF;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    .mini-icon {
+      width: 58px;
+      height: 58px;
+      border-radius: 14px;
       overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      background: #FFFFFF;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.25);
+      transition: border-radius 0.3s;
     }
-    .dock-app .app-name {
-      font-size: 0.75rem;
-      color: #3C4043;
-      font-weight: 500;
+    .dock-app span {
+      font-size: 0.8rem;
+      color: #E8EAED;
     }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>「追客」D-2A 向上凸起弧度（拱桥/跃升感）</h1>
-      <div class="subtitle">完全懂你！告别原先下凹的挂绳感 · 虚线改为向左上方挺拔凸起的「彩虹拱形 / 腾飞抛物线」</div>
+      <h1>「追客」自适应桌面图标安全区修复</h1>
+      <p class="subtitle">
+        在 Android 自适应图标规范中，全画幅为 108dp，系统蒙版只会裁切显示中央 72dp 区域（安全直径 66dp）。原先全画布排版导致四角元素被真机桌面切边，现已缩放至 60% 安全区域并重新居中。
+      </p>
     </header>
 
+    <!-- 形状切换工具栏 -->
     <div class="toolbar">
-      <button class="btn active" onclick="setShape('squircle')">圆角矩形 (Squircle)</button>
-      <button class="btn" onclick="setShape('circle')">原生纯圆 (Pixel 风格)</button>
-      <button class="btn" onclick="setShape('rounded')">微圆角 (iOS/MIUI)</button>
+      <button class="btn active" onclick="setShape('squircle')">📱 圆角方块 (三星 OneUI / 小米)</button>
+      <button class="btn" onclick="setShape('circle')">⭕ 原生圆形 (Pixel / 原生安卓)</button>
+      <button class="btn" onclick="setShape('rounded')">⏹️ 标准圆角矩形</button>
+      <button class="btn" onclick="setShape('teardrop')">💧 水滴形状</button>
+      <button class="btn" id="toggleSafeBtn" onclick="toggleSafeArea()">🎯 切换 66dp 官方安全区红线</button>
     </div>
 
+    <!-- 对比网格 -->
     <div class="grid">
-      <!-- 拱形 1：饱满挺拔拱起 (推荐) -->
+      <!-- 修复前 -->
       <div class="card">
-        <span class="tag">活力跃升 · 强烈推荐 ★★★★★</span>
-        <h3>弧度 1：优雅上凸拱桥 (The Upward Arc)</h3>
-        <div class="icon-wrapper squircle" id="iconArch1">
+        <span class="tag bad">修复前：真机切边</span>
+        <h3>❌ 原排版（100% 满画幅）</h3>
+        <div class="icon-wrapper squircle" id="iconBefore">
           <svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <filter id="shadow1" x="-25%" y="-25%" width="160%" height="160%">
-                <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#000000" flood-opacity="0.13" />
-              </filter>
-            </defs>
             <rect width="1024" height="1024" fill="#FFFFFF"/>
-            <!-- 向上凸起的贝塞尔虚线 (控制点在左上 440, 310，凸起饱满) -->
-            <path d="M 240 740 Q 440 310 850 240" 
-                  stroke="#DADCE0" 
-                  stroke-width="44" 
-                  stroke-dasharray="46 36" 
-                  stroke-linecap="round"/>
-            <!-- 四球全部骑在向上隆起的新弧线上 -->
-            <circle cx="240" cy="740" r="142" fill="#4285F4" filter="url(#shadow1)"/> <!-- 蓝：起点端 -->
-            <circle cx="410" cy="495" r="108" fill="#EA4335" filter="url(#shadow1)"/> <!-- 红：上升冲刺 -->
-            <circle cx="595" cy="340" r="82" fill="#FBBC05" filter="url(#shadow1)"/>  <!-- 黄：波峰高点 -->
-            <circle cx="765" cy="265" r="62" fill="#34A853" filter="url(#shadow1)"/>  <!-- 绿：终点到站 -->
+            <!-- 原 1024 满幅坐标 -->
+            <path d="M 240.0,740.0 L 260.1,698.6 M 277.0,666.8 L 299.9,627.0 M 319.1,596.5 L 345.1,558.5 M 366.7,529.7 L 395.9,494.2 M 420.1,467.6 L 452.6,435.1 M 479.4,411.0 L 515.2,382.1 M 544.4,361.1 L 583.2,336.4 M 614.6,318.7 L 655.9,298.5 M 689.0,284.5 L 732.3,268.9 M 766.8,258.5 L 811.4,247.5 M 846.7,240.6 L 850.0,240.0" 
+                  stroke="#DADCE0" stroke-width="44" stroke-linecap="round"/>
+            <circle cx="240" cy="740" r="142" fill="#4285F4"/>
+            <circle cx="410" cy="495" r="108" fill="#EA4335"/>
+            <circle cx="595" cy="340" r="82" fill="#FBBC05"/>
+            <circle cx="765" cy="265" r="62" fill="#34A853"/>
           </svg>
         </div>
-        <p>控制点大幅向左上方提拉！整道轨迹像一座昂扬向上的彩虹拱桥，波珠从蓝球蓄力出发，向上隆起并跃向绿球，充满朝气和速度感。</p>
+        <p><strong>问题所在：</strong>蓝球位于 (240, 740)，半径 142，边缘直达 (98, 882)，绿球直达 827。在各手机桌面裁切（圆角或圆形）后，左下蓝球被切掉一半、右上绿球被切角，完全看不全。</p>
       </div>
 
-      <!-- 拱形 2：更加鲜明的彩虹大抛物线 -->
+      <!-- 修复后 -->
       <div class="card">
-        <span class="tag">动势更强 · 大弧度</span>
-        <h3>弧度 2：高耸跃飞大拱弧 (Dynamic Crest)</h3>
-        <div class="icon-wrapper squircle" id="iconArch2">
+        <span class="tag good">修复后：完美居中</span>
+        <h3>✅ 修复后（60% 安全视口标准）</h3>
+        <div class="icon-wrapper squircle" id="iconAfter">
           <svg viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <defs>
-              <filter id="shadow2" x="-25%" y="-25%" width="160%" height="160%">
-                <feDropShadow dx="0" dy="16" stdDeviation="16" flood-color="#000000" flood-opacity="0.13" />
-              </filter>
-            </defs>
             <rect width="1024" height="1024" fill="#FFFFFF"/>
-            <!-- 更强烈的向上隆起，控制点在 390, 230 -->
-            <path d="M 240 740 Q 380 230 850 250" 
-                  stroke="#DADCE0" 
-                  stroke-width="44" 
-                  stroke-dasharray="46 36" 
-                  stroke-linecap="round"/>
-            <!-- 四球坐标适配更大凸起 -->
-            <circle cx="240" cy="740" r="142" fill="#4285F4" filter="url(#shadow2)"/>
-            <circle cx="380" cy="460" r="108" fill="#EA4335" filter="url(#shadow2)"/>
-            <circle cx="575" cy="305" r="82" fill="#FBBC05" filter="url(#shadow2)"/>
-            <circle cx="760" cy="255" r="62" fill="#34A853" filter="url(#shadow2)"/>
+            <!-- 缩放 60% 严格处于安全区内 -->
+            <path d="M 365.0,630.5 L 377.1,605.7 M 387.2,586.6 L 401.0,562.7 M 412.4,544.4 L 428.0,521.6 M 441.0,504.3 L 458.5,483.0 M 473.0,467.0 L 492.6,447.5 M 508.6,433.1 L 530.1,415.8 M 547.6,403.2 L 570.9,388.3 M 589.7,377.7 L 614.5,365.6 M 634.4,357.2 L 660.4,347.8 M 681.1,341.6 L 707.9,335.0 L 729.0,330.8 L 731.0,330.5" 
+                  stroke="#DADCE0" stroke-width="26.4" stroke-linecap="round"/>
+            <circle cx="365.0" cy="630.5" r="85.2" fill="#4285F4"/>
+            <circle cx="467.0" cy="483.5" r="64.8" fill="#EA4335"/>
+            <circle cx="578.0" cy="390.5" r="49.2" fill="#FBBC05"/>
+            <circle cx="680.0" cy="345.5" r="37.2" fill="#34A853"/>
           </svg>
         </div>
-        <p>上凸弧度更加高挑，红球和黄球被托举得更高，有强烈的“腾飞跨越”感，整个构图完全摆脱平缓，极具视觉冲击力。</p>
+        <p><strong>修复效果：</strong>整体缩放至 60% 并绝对几何居中。最外侧的蓝球与绿球离中心最大距离仅 274px，完全收纳在 313px（66dp）安全圆内。在任何机型的裁切下均呼吸感十足、四球完整无缺！</p>
       </div>
     </div>
 
     <!-- 手机桌面 Dock 实景模拟 -->
     <div class="mockup-section">
-      <div class="mockup-title">📱 模拟 Pixel 桌面 Dock 栏尺寸（实机微缩效果）</div>
+      <div class="mockup-title">📱 手机桌面 Dock 栏尺寸实机效果对比</div>
       <div class="phone-dock">
         <div class="dock-app">
-          <div class="mini-icon">
-            <svg viewBox="0 0 1024 1024" id="miniArch1"></svg>
+          <div class="mini-icon" id="miniBefore">
+            <svg viewBox="0 0 1024 1024" id="miniSvgBefore"></svg>
           </div>
-          <span class="app-name">追客 (弧度 1 优雅拱)</span>
+          <span>原版 (切边)</span>
         </div>
         <div class="dock-app">
-          <div class="mini-icon">
-            <svg viewBox="0 0 1024 1024" id="miniArch2"></svg>
+          <div class="mini-icon" id="miniAfter">
+            <svg viewBox="0 0 1024 1024" id="miniSvgAfter"></svg>
           </div>
-          <span class="app-name">追客 (弧度 2 挑高拱)</span>
+          <span>修复版 (完整)</span>
         </div>
       </div>
     </div>
   </div>
 
   <script>
+    let currentShape = 'squircle';
+    let showSafe = false;
+
     function setShape(shape) {
+      currentShape = shape;
       document.querySelectorAll('.icon-wrapper').forEach(el => {
-        el.className = 'icon-wrapper ' + shape;
+        el.className = 'icon-wrapper ' + shape + (showSafe ? ' show-safe' : '');
       });
       document.querySelectorAll('.mini-icon').forEach(el => {
         if(shape === 'circle') el.style.borderRadius = '50%';
-        else if(shape === 'squircle') el.style.borderRadius = '16px';
+        else if(shape === 'squircle') el.style.borderRadius = '14px';
+        else if(shape === 'teardrop') el.style.borderRadius = '50% 50% 50% 0%';
         else el.style.borderRadius = '10px';
       });
-      document.querySelectorAll('.btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.btn:not(#toggleSafeBtn)').forEach(btn => btn.classList.remove('active'));
       event.target.classList.add('active');
     }
 
-    window.onload = function() {
-      ['Arch1', 'Arch2'].forEach(id => {
-        const sourceSvg = document.querySelector('#icon' + id + ' svg');
-        const mini = document.querySelector('#mini' + id);
-        mini.innerHTML = sourceSvg.innerHTML;
+    function toggleSafeArea() {
+      showSafe = !showSafe;
+      document.querySelectorAll('.icon-wrapper').forEach(el => {
+        if(showSafe) el.classList.add('show-safe');
+        else el.classList.remove('show-safe');
       });
+      document.getElementById('toggleSafeBtn').classList.toggle('active', showSafe);
+    }
+
+    window.onload = function() {
+      document.getElementById('miniSvgBefore').innerHTML = document.querySelector('#iconBefore svg').innerHTML;
+      document.getElementById('miniSvgAfter').innerHTML = document.querySelector('#iconAfter svg').innerHTML;
     }
   </script>
 </body>
