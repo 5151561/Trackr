@@ -841,7 +841,7 @@ private fun VerticalTimelineRow(
                     )
                     Spacer(modifier = Modifier.width(3.dp))
                     Text(
-                        text = if (bus.isArrived) "已到站" else "${formatBusChipShortText(bus.plateOrFleetNo)} 进站中",
+                        text = if (bus.isArrived) "已到站" else formatBusChipShortText(bus.plateOrFleetNo),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (bus.isArrived) Color.White else busColors.busChipContent

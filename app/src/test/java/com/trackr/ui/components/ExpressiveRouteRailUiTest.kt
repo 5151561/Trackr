@@ -90,6 +90,36 @@ class ExpressiveRouteRailUiTest {
     }
 
     @Test
+    fun testVerticalRouteRail_rendersBusChipWithoutEnteringText() {
+        val stops = listOf(
+            BusStop(stopId = "1", name = "汉口路", order = 1),
+            BusStop(stopId = "2", name = "人民广场", order = 2)
+        )
+        val buses = listOf(
+            LiveBus(busId = "bus_101", plateOrFleetNo = "沪A1234", order = 2, isArrived = false),
+            LiveBus(busId = "bus_102", plateOrFleetNo = "沪A5678", order = 1, isArrived = true)
+        )
+
+        composeTestRule.setContent {
+            TrackrTheme {
+                ExpressiveRouteRail(
+                    stops = stops,
+                    buses = buses,
+                    selectedStop = stops[0],
+                    layoutMode = RouteRailLayoutMode.Vertical,
+                    onSelectStop = {},
+                    onSelectBus = {}
+                )
+            }
+        }
+
+        // 未到站的车辆只展示简短车牌号，不再包含“进站中”后缀
+        composeTestRule.onNodeWithText("1234").assertIsDisplayed()
+        // 已到站的车辆保持展示“已到站”
+        composeTestRule.onNodeWithText("已到站").assertIsDisplayed()
+    }
+
+    @Test
     fun testGetRouteSegmentColor_consistentLogic() {
         val lightColors = com.trackr.ui.theme.LightBusSemanticColors
 
