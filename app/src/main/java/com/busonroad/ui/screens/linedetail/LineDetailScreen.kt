@@ -129,6 +129,7 @@ fun LineDetailScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        contentWindowInsets = WindowInsets.safeDrawing,
         containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             // 底部 M3E 悬浮胶囊工具栏 (Floating Pill Toolbar)
@@ -192,6 +193,7 @@ fun LineDetailScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .consumeWindowInsets(innerPadding)
                 .verticalScroll(rememberScrollState())
         ) {
             // 1. 顶部 Header：返回键、线路名徽标、数据源标签、首末站方向与运营胶囊
@@ -1154,6 +1156,7 @@ private fun BottomFloatingToolbar(
     Box(
         modifier = Modifier
             .fillMaxWidth()
+            .navigationBarsPadding()
             .padding(bottom = 16.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -1253,6 +1256,7 @@ private fun TimetableBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
                 .padding(horizontal = 20.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState())
         ) {

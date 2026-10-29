@@ -86,11 +86,13 @@ fun SearchScreen(
     }
 
     Scaffold(
+        contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface)
+                    .statusBarsPadding()
             ) {
                 Row(
                     modifier = Modifier
@@ -158,20 +160,39 @@ fun SearchScreen(
 
         if (state.searchQuery.isBlank()) {
             // 空输入时展示快捷建议与双源搜索提示
-            SearchSuggestionsView(
-                cityName = state.currentCity.cityName,
-                onSelectQuery = { viewModel.updateSearchQuery(it) }
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .consumeWindowInsets(paddingValues)
+            ) {
+                SearchSuggestionsView(
+                    cityName = state.currentCity.cityName,
+                    onSelectQuery = { viewModel.updateSearchQuery(it) }
+                )
+            }
         } else if (!state.isSearching && result != null && result.lines.isEmpty() && result.stops.isEmpty()) {
             // 无搜索结果提示
-            EmptySearchResultView(query = state.searchQuery)
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+                    .consumeWindowInsets(paddingValues)
+            ) {
+                EmptySearchResultView(query = state.searchQuery)
+            }
         } else {
             // 搜索结果列表
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues),
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 12.dp),
+                    .consumeWindowInsets(paddingValues),
+                contentPadding = PaddingValues(
+                    start = 16.dp,
+                    end = 16.dp,
+                    top = paddingValues.calculateTopPadding() + 12.dp,
+                    bottom = paddingValues.calculateBottomPadding() + 24.dp
+                ),
                 verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
                 // 1. 公交线路结果分组
