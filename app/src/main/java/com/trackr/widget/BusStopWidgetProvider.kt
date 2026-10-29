@@ -58,125 +58,164 @@ class BusStopWidgetProvider : AppWidgetProvider() {
         appWidgetManager: AppWidgetManager,
         appWidgetId: Int
     ) {
-        scope.launch {
-            val views = RemoteViews(context.packageName, R.layout.widget_bus_stop)
+        try {
             val app = context.applicationContext as? TrackrApp ?: TrackrApp.instance
             val repository = try { app.repository } catch (e: Exception) { null }
             val favorites = repository?.favorites?.value.orEmpty()
             val favorite = favorites.firstOrNull()
 
-            // 点击小组件主视图打开应用
-            val mainIntent = Intent(context, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-                if (favorite != null) {
-                    putExtra("extra_city_id", favorite.cityId)
-                    putExtra("extra_line_id", favorite.lineId)
-                    putExtra("extra_target_order", favorite.targetOrder)
-                    putExtra("extra_stop_id", favorite.targetStopId)
-                    putExtra("extra_source", favorite.source.name)
-                    putExtra("extra_line_name", favorite.lineName)
-                }
-            }
-            val mainPendingIntent = PendingIntent.getActivity(
-                context,
-                appWidgetId,
-                mainIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            views.setOnClickPendingIntent(R.id.widget_root, mainPendingIntent)
-
-            // 绑定右上角刷新按钮
-            val refreshIntent = Intent(context, BusStopWidgetProvider::class.java).apply {
-                action = ACTION_WIDGET_REFRESH
-            }
-            val refreshPendingIntent = PendingIntent.getBroadcast(
-                context,
-                appWidgetId,
-                refreshIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            views.setOnClickPendingIntent(R.id.widget_btn_refresh, refreshPendingIntent)
-
-            val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-            views.setTextViewText(R.id.widget_updated_time, timeFormat.format(Date()))
-
-            if (favorite == null) {
-                // 没有收藏
-                views.setViewVisibility(R.id.widget_empty_view, View.VISIBLE)
-                views.setViewVisibility(R.id.widget_content_view, View.GONE)
-            } else {
-                views.setViewVisibility(R.id.widget_empty_view, View.GONE)
-                views.setViewVisibility(R.id.widget_content_view, View.VISIBLE)
-
-                views.setTextViewText(R.id.widget_line_name, favorite.lineName)
-                views.setTextViewText(R.id.widget_city_tag, "${favorite.cityName} · ${favorite.source.displayName}")
-                views.setTextViewText(R.id.widget_direction, "开往 ${favorite.endStop}")
-                views.setTextViewText(R.id.widget_stop_name, "候车站: ${favorite.targetStopName}")
-
-                // 拉取实时线路详情
-                var etaText = "查询中…"
-                var progressPercent = 0
-                try {
-                    val city = TransitCity(cityId = favorite.cityId, cityName = favorite.cityName)
-                    val result = repository?.getLineDetail(
-                        city = city,
-                        lineId = favorite.lineId,
-                        targetOrder = favorite.targetOrder,
-                        stationId = favorite.targetStopId,
-                        source = favorite.source,
-                        lineNameHint = favorite.lineName,
-                        directionHint = favorite.direction
-                    )
-                    val detail = result?.getOrNull()
-                    if (detail != null) {
-                        // 寻找尚未通过候车站的最近在途车辆 (order <= targetOrder)
-                        val approachingBuses = detail.buses
-                            .filter { it.order <= favorite.targetOrder }
-                            .sortedByDescending { it.order }
-
-                        val nearestBus = approachingBuses.firstOrNull()
-                        if (nearestBus != null) {
-                            val stopsRemaining = favorite.targetOrder - nearestBus.order
-                            if (stopsRemaining == 0 && nearestBus.isArrived) {
-                                etaText = "已到达 ${favorite.targetStopName}"
-                                progressPercent = 100
-                            } else if (stopsRemaining == 0) {
-                                etaText = "即将进站"
-                                progressPercent = 92
-                            } else {
-                                val etaFormatted = RouteProjectionMath.formatEtaText(nearestBus.etaSeconds)
-                                etaText = "还有 $stopsRemaining 站 · $etaFormatted"
-                                val totalToTarget = favorite.targetOrder.coerceAtLeast(1)
-                                val currentSegment = (nearestBus.order - 1).coerceAtLeast(0) + nearestBus.segmentProgress
-                                progressPercent = ((currentSegment / totalToTarget) * 100).toInt().coerceIn(5, 95)
-                            }
-                        } else {
-                            etaText = detail.statusDescription.ifBlank {
-                                if (detail.operatingState.defaultLabel.isNotEmpty()) {
-                                    detail.operatingState.defaultLabel
-                                } else {
-                                    "暂无在途车辆"
-                                }
-                            }
-                            progressPercent = 0
-                        }
-                    } else {
-                        etaText = "点击刷新同步数据"
-                    }
-                } catch (e: Exception) {
-                    etaText = "网络连接异常，点击刷新"
-                }
-
-                views.setTextViewText(R.id.widget_eta_large, etaText)
-                views.setProgressBar(R.id.widget_progress_bar, 100, progressPercent, false)
-            }
-
+            // 1. 同步构建并立即推送初始视图，确保启动器在添加微件瞬间获得有效布局，避免出现超时或空白
+            val views = buildBaseRemoteViews(context, appWidgetId, favorite)
             appWidgetManager.updateAppWidget(appWidgetId, views)
+
+            // 2. 如果存在收藏，异步在后台拉取实时到站并更新视图
+            if (favorite != null && repository != null) {
+                scope.launch {
+                    try {
+                        val city = TransitCity(cityId = favorite.cityId, cityName = favorite.cityName)
+                        val result = repository.getLineDetail(
+                            city = city,
+                            lineId = favorite.lineId,
+                            targetOrder = favorite.targetOrder,
+                            stationId = favorite.targetStopId,
+                            source = favorite.source,
+                            lineNameHint = favorite.lineName,
+                            directionHint = favorite.direction
+                        )
+                        val detail = result.getOrNull()
+                        val updatedViews = buildBaseRemoteViews(context, appWidgetId, favorite)
+                        var etaText = "点击刷新同步数据"
+                        var progressPercent = 0
+
+                        if (detail != null) {
+                            val approachingBuses = detail.buses
+                                .filter { it.order <= favorite.targetOrder }
+                                .sortedByDescending { it.order }
+
+                            val nearestBus = approachingBuses.firstOrNull()
+                            if (nearestBus != null) {
+                                val stopsRemaining = favorite.targetOrder - nearestBus.order
+                                if (stopsRemaining == 0 && nearestBus.isArrived) {
+                                    etaText = "已到达 ${favorite.targetStopName}"
+                                    progressPercent = 100
+                                } else if (stopsRemaining == 0) {
+                                    etaText = "即将进站"
+                                    progressPercent = 92
+                                } else {
+                                    val etaFormatted = RouteProjectionMath.formatEtaText(nearestBus.etaSeconds)
+                                    etaText = "还有 $stopsRemaining 站 · $etaFormatted"
+                                    val totalToTarget = favorite.targetOrder.coerceAtLeast(1)
+                                    val currentSegment = (nearestBus.order - 1).coerceAtLeast(0) + nearestBus.segmentProgress
+                                    progressPercent = ((currentSegment / totalToTarget) * 100).toInt().coerceIn(5, 95)
+                                }
+                            } else {
+                                etaText = detail.statusDescription.ifBlank {
+                                    if (detail.operatingState.defaultLabel.isNotEmpty()) {
+                                        detail.operatingState.defaultLabel
+                                    } else {
+                                        "暂无在途车辆"
+                                    }
+                                }
+                                progressPercent = 0
+                            }
+                        }
+
+                        updatedViews.setTextViewText(R.id.widget_eta_large, etaText)
+                        updatedViews.setProgressBar(R.id.widget_progress_bar, 100, progressPercent, false)
+                        appWidgetManager.updateAppWidget(appWidgetId, updatedViews)
+                    } catch (e: Exception) {
+                        val updatedViews = buildBaseRemoteViews(context, appWidgetId, favorite)
+                        updatedViews.setTextViewText(R.id.widget_eta_large, "网络连接异常，点击刷新")
+                        appWidgetManager.updateAppWidget(appWidgetId, updatedViews)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
+    }
+
+    private fun buildBaseRemoteViews(
+        context: Context,
+        appWidgetId: Int,
+        favorite: FavoriteStationLine?
+    ): RemoteViews {
+        val views = RemoteViews(context.packageName, R.layout.widget_bus_stop)
+
+        // 点击小组件主视图打开应用
+        val mainIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            if (favorite != null) {
+                putExtra("extra_city_id", favorite.cityId)
+                putExtra("extra_line_id", favorite.lineId)
+                putExtra("extra_target_order", favorite.targetOrder)
+                putExtra("extra_stop_id", favorite.targetStopId)
+                putExtra("extra_source", favorite.source.name)
+                putExtra("extra_line_name", favorite.lineName)
+            }
+        }
+        val mainPendingIntent = PendingIntent.getActivity(
+            context,
+            appWidgetId,
+            mainIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        views.setOnClickPendingIntent(R.id.widget_root, mainPendingIntent)
+
+        // 绑定右上角刷新按钮
+        val refreshIntent = Intent(context, BusStopWidgetProvider::class.java).apply {
+            action = ACTION_WIDGET_REFRESH
+        }
+        val refreshPendingIntent = PendingIntent.getBroadcast(
+            context,
+            appWidgetId,
+            refreshIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        views.setOnClickPendingIntent(R.id.widget_btn_refresh, refreshPendingIntent)
+
+        val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
+        views.setTextViewText(R.id.widget_updated_time, timeFormat.format(Date()))
+
+        if (favorite == null) {
+            views.setViewVisibility(R.id.widget_empty_view, View.VISIBLE)
+            views.setViewVisibility(R.id.widget_content_view, View.GONE)
+        } else {
+            views.setViewVisibility(R.id.widget_empty_view, View.GONE)
+            views.setViewVisibility(R.id.widget_content_view, View.VISIBLE)
+
+            views.setTextViewText(R.id.widget_line_name, favorite.lineName)
+            views.setTextViewText(R.id.widget_city_tag, "${favorite.cityName} · ${favorite.source.displayName}")
+            views.setTextViewText(R.id.widget_direction, "开往 ${favorite.endStop}")
+            views.setTextViewText(R.id.widget_stop_name, "候车站: ${favorite.targetStopName}")
+            views.setTextViewText(R.id.widget_eta_large, "查询中…")
+            views.setProgressBar(R.id.widget_progress_bar, 100, 0, false)
+        }
+
+        return views
     }
 
     companion object {
         const val ACTION_WIDGET_REFRESH = "com.trackr.action.WIDGET_REFRESH"
+
+        /**
+         * 触发所有桌面小组件刷新
+         */
+        fun triggerRefresh(context: Context) {
+            try {
+                val appWidgetManager = AppWidgetManager.getInstance(context)
+                val componentName = ComponentName(context, BusStopWidgetProvider::class.java)
+                val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
+                if (appWidgetIds != null && appWidgetIds.isNotEmpty()) {
+                    val intent = Intent(context, BusStopWidgetProvider::class.java).apply {
+                        action = ACTION_WIDGET_REFRESH
+                    }
+                    context.sendBroadcast(intent)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }
 
         /**
          * 使用 ShortcutManagerCompat 将前 3 个常用候车站注册为桌面长按图标快捷方式

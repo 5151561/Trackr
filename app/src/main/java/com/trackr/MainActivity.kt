@@ -96,10 +96,11 @@ fun TrackrNavApp(
     val backStack = rememberNavBackStack(ScreenKey.Home)
     val homeViewModel: HomeViewModel = viewModel()
 
-    // 自动同步收藏到桌面快捷方式 (App Shortcuts)
+    // 自动同步收藏到桌面快捷方式 (App Shortcuts) 与桌面小组件 (AppWidget)
     val favorites by TrackrApp.instance.repository.favorites.collectAsStateWithLifecycle()
     LaunchedEffect(favorites) {
         BusStopWidgetProvider.updateDynamicShortcuts(context, favorites)
+        BusStopWidgetProvider.triggerRefresh(context)
     }
 
     // 申请定位与通知权限

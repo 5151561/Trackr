@@ -108,11 +108,12 @@ class HomeViewModel @JvmOverloads constructor(
             }
         }
 
-        // 观察数据仓库收藏列表，并在变更时同步桌面快捷方式
+        // 观察数据仓库收藏列表，并在变更时同步桌面快捷方式与微件
         viewModelScope.launch {
             repository.favorites.collect { favs ->
                 _uiState.update { it.copy(favorites = favs) }
                 BusStopWidgetProvider.updateDynamicShortcuts(getApplication(), favs)
+                BusStopWidgetProvider.triggerRefresh(getApplication())
             }
         }
 
