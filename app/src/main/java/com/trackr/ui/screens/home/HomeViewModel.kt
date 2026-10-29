@@ -170,6 +170,7 @@ class HomeViewModel @JvmOverloads constructor(
             if (gpsLocation != null) {
                 val lat = gpsLocation.latitude
                 val lng = gpsLocation.longitude
+                repository.updateUserLocation(lat, lng)
 
                 // 尝试反向根据坐标解析匹配城市
                 val resolvedCity = try {
@@ -461,7 +462,13 @@ class HomeViewModel @JvmOverloads constructor(
         searchJob = viewModelScope.launch {
             delay(300L) // 300ms 防抖
             _uiState.update { it.copy(isSearching = true) }
-            val res = repository.search(_uiState.value.currentCity, query.trim())
+            val state = _uiState.value
+            val res = repository.search(
+                city = state.currentCity,
+                keyword = query.trim(),
+                userLat = state.currentLat.takeIf { it > 0.0 },
+                userLng = state.currentLng.takeIf { it > 0.0 }
+            )
             _uiState.update {
                 it.copy(
                     isSearching = false,

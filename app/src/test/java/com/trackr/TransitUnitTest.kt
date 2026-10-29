@@ -226,4 +226,23 @@ class TransitUnitTest {
         assertEquals(12, extracted.getInt("targetOrder"))
         assertEquals("417", extracted.getJSONArray("buses").getJSONObject(0).getString("licence"))
     }
+
+    @Test
+    fun testCalculateDistanceMeters_knownLocations() {
+        // 上海人民广场 (31.2317, 121.4756) 到 陆家嘴东方明珠 (31.2397, 121.4998) 距离约 2.4 公里 (约 2400-2500 米)
+        val dist = RouteProjectionMath.calculateDistanceMeters(31.2317, 121.4756, 31.2397, 121.4998)
+        assertNotNull(dist)
+        assertTrue("Distance should be around 2400-2500m but was $dist", dist!! in 2300..2600)
+
+        // 零坐标或无效坐标应返回 null
+        assertNull(RouteProjectionMath.calculateDistanceMeters(0.0, 0.0, 31.23, 121.47))
+    }
+
+    @Test
+    fun testFormatDistanceText() {
+        assertEquals("350米", RouteProjectionMath.formatDistanceText(350))
+        assertEquals("1.2公里", RouteProjectionMath.formatDistanceText(1200))
+        assertEquals("", RouteProjectionMath.formatDistanceText(null))
+        assertEquals("", RouteProjectionMath.formatDistanceText(0))
+    }
 }

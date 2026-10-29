@@ -21,4 +21,15 @@ sealed interface ScreenKey : NavKey {
         val source: DataSourceType = DataSourceType.CHELAILE,
         val lineName: String = ""
     ) : ScreenKey
+
+    @Serializable
+    data class StopDetail(
+        val cityId: String = "034",
+        val stopId: String = "",
+        val stopName: String = "",
+        val physicalStId: String = "",
+        val namesakeStId: String = "",
+        val lat: Double = 0.0,
+        val lng: Double = 0.0
+    ) : ScreenKey
 }

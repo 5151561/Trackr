@@ -270,14 +270,25 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
     }
 
     /**
-     * 关键字搜索线路与站点
+     * 关键字搜索线路与站点（传入当前用户 GPS 可获取精确站点距离）
      */
-    suspend fun search(cityId: String, keyword: String): TransitSearchResult = withContext(Dispatchers.IO) {
+    suspend fun search(
+        cityId: String,
+        keyword: String,
+        userLat: Double? = null,
+        userLng: Double? = null
+    ): TransitSearchResult = withContext(Dispatchers.IO) {
         val params = LinkedHashMap(DEFAULT_PARAMS).apply {
             put("cityId", cityId)
             put("localCityId", cityId)
             put("key", keyword)
             put("supportPhyStn", "true")
+            if (userLat != null && userLng != null && userLat > 0.0 && userLng > 0.0) {
+                put("lat", userLat.toString())
+                put("lng", userLng.toString())
+                put("geo_lat", userLat.toString())
+                put("geo_lng", userLng.toString())
+            }
         }
         val data = executeEncrypted("$BASE_URL/bus/query!nSearch.action", params)
         val resultObj = data.optJSONObject("result") ?: JSONObject()
@@ -326,14 +337,23 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
         val stopList = ArrayList<NearbyStop>()
         for (i in 0 until stationsArr.length()) {
             val s = stationsArr.getJSONObject(i)
-            val dist = if (s.has("distance")) s.optInt("distance") else null
+            val stLat = s.optDouble("lat", 0.0)
+            val stLng = s.optDouble("lng", 0.0)
+            val serverDist = if (s.has("distance")) s.optInt("distance") else null
+            val dist = if (serverDist != null && serverDist > 0) {
+                serverDist
+            } else if (userLat != null && userLng != null && userLat > 0.0 && userLng > 0.0 && stLat > 0.0 && stLng > 0.0) {
+                RouteProjectionMath.calculateDistanceMeters(userLat, userLng, stLat, stLng)
+            } else {
+                null
+            }
             stopList.add(
                 NearbyStop(
                     stopId = s.optString("sId"),
                     name = s.optString("sn"),
                     distanceMeters = dist,
-                    wgsLat = s.optDouble("lat", 0.0),
-                    wgsLng = s.optDouble("lng", 0.0),
+                    wgsLat = stLat,
+                    wgsLng = stLng,
                     physicalStId = s.optString("physicalStId").takeIf { it.isNotBlank() },
                     namesakeStId = s.optString("namesakeStId").takeIf { it.isNotBlank() },
                     isSubway = s.optInt("subwayV2", 0) == 1
@@ -459,14 +479,15 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
     }
 
     /**
-     * 获取物理车站详情（包含同名/各物理站台全部途经线路与地铁）
+     * 获取物理车站详情（包含同名/各物理站台全部途经线路与地铁，传入用户坐标可获取精确测地距离）
      */
     suspend fun getStopDetail(
         cityId: String,
-        physicalStId: String,
+        physicalStId: String = "",
         namesakeStId: String? = null,
-        wgsLat: Double? = null,
-        wgsLng: Double? = null
+        stationId: String? = null,
+        userLat: Double? = null,
+        userLng: Double? = null
     ): List<NearbyStop> = withContext(Dispatchers.IO) {
         val params = LinkedHashMap(DEFAULT_PARAMS).apply {
             put("cityId", cityId)
@@ -474,11 +495,11 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             put("physicalStId", physicalStId)
             put("namesakeStId", namesakeStId ?: "")
             put("firstLineId", "")
-            put("stationId", "")
-            put("lat", wgsLat?.toString() ?: "")
-            put("lng", wgsLng?.toString() ?: "")
-            put("geo_lat", wgsLat?.toString() ?: "")
-            put("geo_lng", wgsLng?.toString() ?: "")
+            put("stationId", stationId ?: "")
+            put("lat", userLat?.takeIf { it > 0.0 }?.toString() ?: "")
+            put("lng", userLng?.takeIf { it > 0.0 }?.toString() ?: "")
+            put("geo_lat", userLat?.takeIf { it > 0.0 }?.toString() ?: "")
+            put("geo_lng", userLng?.takeIf { it > 0.0 }?.toString() ?: "")
             put("actionState", "1")
             put("permission", "0")
         }
@@ -488,7 +509,16 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
 
         for (i in 0 until stationList.length()) {
             val st = stationList.getJSONObject(i)
-            val dist = if (st.has("distance")) st.optInt("distance") else null
+            val stLat = st.optDouble("lat", 0.0)
+            val stLng = st.optDouble("lng", 0.0)
+            val serverDist = if (st.has("distance")) st.optInt("distance") else null
+            val dist = if (serverDist != null && serverDist > 0) {
+                serverDist
+            } else if (userLat != null && userLng != null && userLat > 0.0 && userLng > 0.0 && stLat > 0.0 && stLng > 0.0) {
+                RouteProjectionMath.calculateDistanceMeters(userLat, userLng, stLat, stLng)
+            } else {
+                null
+            }
 
             val linesArr = st.optJSONArray("lines") ?: JSONArray()
             val lineStatuses = ArrayList<NearbyStopLineStatus>()

@@ -18,7 +18,9 @@ interface ITransitRepository {
     val selectedCity: StateFlow<TransitCity>
     val favorites: StateFlow<List<FavoriteStationLine>>
     val activeTrackingSession: StateFlow<TrackingSessionState>
+    val userLocation: StateFlow<Pair<Double, Double>?>
 
+    fun updateUserLocation(lat: Double, lng: Double)
     suspend fun selectCity(city: TransitCity)
     suspend fun getSupportedCities(forceRefresh: Boolean = false): Result<List<TransitCity>>
     suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): Result<TransitCity?>
@@ -32,15 +34,21 @@ interface ITransitRepository {
 
     suspend fun getStopDetail(
         city: TransitCity,
-        physicalStId: String,
+        stopId: String? = null,
+        stopName: String? = null,
+        physicalStId: String? = null,
         namesakeStId: String? = null,
-        wgsLat: Double? = null,
-        wgsLng: Double? = null
+        stationLat: Double? = null,
+        stationLng: Double? = null,
+        userLat: Double? = null,
+        userLng: Double? = null
     ): Result<List<NearbyStop>>
 
     suspend fun search(
         city: TransitCity,
-        keyword: String
+        keyword: String,
+        userLat: Double? = null,
+        userLng: Double? = null
     ): Result<TransitSearchResult>
 
     suspend fun getLineDetail(

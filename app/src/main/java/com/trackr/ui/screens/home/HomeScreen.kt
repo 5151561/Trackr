@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsBus
@@ -90,6 +91,7 @@ import com.trackr.domain.model.TransitCity
 fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit,
+    onNavigateToStopDetail: ((cityId: String, stopId: String, stopName: String, physicalStId: String, namesakeStId: String, lat: Double, lng: Double) -> Unit)? = null,
     onNavigateToSearch: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -203,6 +205,19 @@ fun HomeScreen(
                     NearbyStopCard(
                         stop = stop,
                         cityId = state.currentCity.cityId,
+                        onStopClick = onNavigateToStopDetail?.let { nav ->
+                            {
+                                nav(
+                                    state.currentCity.cityId,
+                                    stop.stopId,
+                                    stop.name,
+                                    stop.physicalStId.orEmpty(),
+                                    stop.namesakeStId.orEmpty(),
+                                    stop.wgsLat,
+                                    stop.wgsLng
+                                )
+                            }
+                        },
                         onLineClick = { lineStatus ->
                             onNavigateToLineDetail(
                                 state.currentCity.cityId,
@@ -799,6 +814,7 @@ private fun NearbyStopsHeader(
 private fun NearbyStopCard(
     stop: NearbyStop,
     cityId: String,
+    onStopClick: (() -> Unit)? = null,
     onLineClick: (NearbyStopLineStatus) -> Unit
 ) {
     ElevatedCard(
@@ -812,9 +828,17 @@ private fun NearbyStopCard(
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 1.dp)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // 站点名、距离与地铁换乘标识
+            // 站点名、距离与地铁换乘标识（支持点击进入站点详情）
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        if (onStopClick != null) {
+                            Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onStopClick() }
+                        } else Modifier
+                    ),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
@@ -857,12 +881,24 @@ private fun NearbyStopCard(
                     }
                 }
 
-                if (stop.distanceMeters != null && stop.distanceMeters > 0) {
-                    Text(
-                        text = "${stop.distanceMeters} 米",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val distText = RouteProjectionMath.formatDistanceText(stop.distanceMeters)
+                    if (distText.isNotBlank()) {
+                        Text(
+                            text = distText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    if (onStopClick != null) {
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "进入站点详情",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
             }
 

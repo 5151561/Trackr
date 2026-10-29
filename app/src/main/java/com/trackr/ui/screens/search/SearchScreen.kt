@@ -65,6 +65,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusLineSummary
 import com.trackr.domain.model.DataSourceType
@@ -76,7 +77,8 @@ import com.trackr.ui.screens.home.HomeViewModel
 fun SearchScreen(
     viewModel: HomeViewModel = viewModel(),
     onNavigateBack: () -> Unit,
-    onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit
+    onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit,
+    onNavigateToStopDetail: (cityId: String, stopId: String, stopName: String, physicalStId: String, namesakeStId: String, lat: Double, lng: Double) -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val focusRequester = remember { FocusRequester() }
@@ -242,6 +244,17 @@ fun SearchScreen(
                     ) { stop ->
                         SearchStopItemCard(
                             stop = stop,
+                            onCardClick = {
+                                onNavigateToStopDetail(
+                                    state.currentCity.cityId,
+                                    stop.stopId,
+                                    stop.name,
+                                    stop.physicalStId.orEmpty(),
+                                    stop.namesakeStId.orEmpty(),
+                                    stop.wgsLat,
+                                    stop.wgsLng
+                                )
+                            },
                             onLineClick = { lineStatus ->
                                 onNavigateToLineDetail(
                                     state.currentCity.cityId,
@@ -434,9 +447,11 @@ private fun SearchLineItemCard(
 @Composable
 private fun SearchStopItemCard(
     stop: NearbyStop,
+    onCardClick: () -> Unit,
     onLineClick: (com.trackr.domain.model.NearbyStopLineStatus) -> Unit
 ) {
     ElevatedCard(
+        onClick = onCardClick,
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.elevatedCardColors(
@@ -484,11 +499,21 @@ private fun SearchStopItemCard(
                     }
                 }
 
-                if (stop.distanceMeters != null && stop.distanceMeters > 0) {
-                    Text(
-                        text = "${stop.distanceMeters} 米",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val distText = RouteProjectionMath.formatDistanceText(stop.distanceMeters)
+                    if (distText.isNotBlank()) {
+                        Text(
+                            text = distText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                        contentDescription = "进入站点详情",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }
@@ -543,6 +568,13 @@ private fun SearchStopItemCard(
                         }
                     }
                 }
+            } else {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "点击查看该站所有途经公交及实时到站",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
     }

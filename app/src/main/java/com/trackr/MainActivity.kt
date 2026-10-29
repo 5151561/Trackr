@@ -36,6 +36,8 @@ import com.trackr.ui.screens.home.HomeViewModel
 import com.trackr.ui.screens.linedetail.LineDetailScreen
 import com.trackr.ui.screens.linedetail.LineDetailViewModel
 import com.trackr.ui.screens.search.SearchScreen
+import com.trackr.ui.screens.stopdetail.StopDetailScreen
+import com.trackr.ui.screens.stopdetail.StopDetailViewModel
 import com.trackr.ui.theme.TrackrTheme
 import com.trackr.widget.BusStopWidgetProvider
 
@@ -174,6 +176,19 @@ fun TrackrNavApp(
                             )
                         )
                     },
+                    onNavigateToStopDetail = { cityId, stopId, stopName, physicalStId, namesakeStId, lat, lng ->
+                        backStack.add(
+                            ScreenKey.StopDetail(
+                                cityId = cityId,
+                                stopId = stopId,
+                                stopName = stopName,
+                                physicalStId = physicalStId,
+                                namesakeStId = namesakeStId,
+                                lat = lat,
+                                lng = lng
+                            )
+                        )
+                    },
                     onNavigateToSearch = {
                         backStack.add(ScreenKey.Search)
                     }
@@ -193,6 +208,19 @@ fun TrackrNavApp(
                                 stopId = stopId,
                                 source = source,
                                 lineName = lineName
+                            )
+                        )
+                    },
+                    onNavigateToStopDetail = { cityId, stopId, stopName, physicalStId, namesakeStId, lat, lng ->
+                        backStack.add(
+                            ScreenKey.StopDetail(
+                                cityId = cityId,
+                                stopId = stopId,
+                                stopName = stopName,
+                                physicalStId = physicalStId,
+                                namesakeStId = namesakeStId,
+                                lat = lat,
+                                lng = lng
                             )
                         )
                     }
@@ -220,6 +248,43 @@ fun TrackrNavApp(
                 LineDetailScreen(
                     viewModel = detailViewModel,
                     onNavigateBack = { backStack.removeLastOrNull() }
+                )
+            }
+
+            entry<ScreenKey.StopDetail> { key ->
+                val stopDetailViewModel: StopDetailViewModel = viewModel(
+                    key = "stop_${key.cityId}_${key.stopId}_${key.physicalStId}_${key.stopName}",
+                    factory = object : ViewModelProvider.Factory {
+                        @Suppress("UNCHECKED_CAST")
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                            return StopDetailViewModel(
+                                cityId = key.cityId,
+                                stopId = key.stopId,
+                                initialStopName = key.stopName,
+                                physicalStId = key.physicalStId,
+                                namesakeStId = key.namesakeStId,
+                                stationLat = key.lat,
+                                stationLng = key.lng
+                            ) as T
+                        }
+                    }
+                )
+
+                StopDetailScreen(
+                    viewModel = stopDetailViewModel,
+                    onNavigateBack = { backStack.removeLastOrNull() },
+                    onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
+                        backStack.add(
+                            ScreenKey.LineDetail(
+                                cityId = cityId,
+                                lineId = lineId,
+                                targetOrder = targetOrder,
+                                stopId = stopId,
+                                source = source,
+                                lineName = lineName
+                            )
+                        )
+                    }
                 )
             }
         }

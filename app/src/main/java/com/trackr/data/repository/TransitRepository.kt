@@ -57,6 +57,15 @@ class TransitRepository(
     private val _activeTrackingSession = MutableStateFlow(TrackingSessionState())
     override val activeTrackingSession: StateFlow<TrackingSessionState> = _activeTrackingSession.asStateFlow()
 
+    private val _userLocation = MutableStateFlow<Pair<Double, Double>?>(null)
+    override val userLocation: StateFlow<Pair<Double, Double>?> = _userLocation.asStateFlow()
+
+    override fun updateUserLocation(lat: Double, lng: Double) {
+        if (lat > 0.0 && lng > 0.0) {
+            _userLocation.value = Pair(lat, lng)
+        }
+    }
+
     // 内存中的静态站表缓存（lineId -> List<BusStop>）
     private val stopsCache = ConcurrentHashMap<String, List<BusStop>>()
     private var cachedCities: List<TransitCity> = emptyList()
@@ -195,25 +204,70 @@ class TransitRepository(
 
     override suspend fun getStopDetail(
         city: TransitCity,
-        physicalStId: String,
+        stopId: String?,
+        stopName: String?,
+        physicalStId: String?,
         namesakeStId: String?,
-        wgsLat: Double?,
-        wgsLng: Double?
+        stationLat: Double?,
+        stationLng: Double?,
+        userLat: Double?,
+        userLng: Double?
     ): Result<List<NearbyStop>> = runCatching {
-        chelaileClient.getStopDetail(
+        val resolvedUserLat = userLat ?: _userLocation.value?.first
+        val resolvedUserLng = userLng ?: _userLocation.value?.second
+
+        val stops = chelaileClient.getStopDetail(
             cityId = city.cityId,
-            physicalStId = physicalStId,
+            physicalStId = physicalStId.orEmpty(),
             namesakeStId = namesakeStId,
-            wgsLat = wgsLat,
-            wgsLng = wgsLng
+            stationId = stopId,
+            userLat = resolvedUserLat,
+            userLng = resolvedUserLng
         )
+        if (stops.isNotEmpty()) {
+            stops
+        } else if (stationLat != null && stationLng != null && stationLat > 0 && stationLng > 0) {
+            val nearby = chelaileClient.getNearbyStops(city.cityId, stationLat, stationLng, limit = 6)
+            val matched = if (!stopName.isNullOrBlank()) {
+                val filtered = nearby.filter { it.name.contains(stopName) || stopName.contains(it.name) }
+                if (filtered.isNotEmpty()) filtered else nearby
+            } else {
+                nearby
+            }
+            if (resolvedUserLat != null && resolvedUserLng != null) {
+                matched.map { s ->
+                    if (s.distanceMeters == null || s.distanceMeters <= 0) {
+                        val d = RouteProjectionMath.calculateDistanceMeters(resolvedUserLat, resolvedUserLng, s.wgsLat, s.wgsLng)
+                        s.copy(distanceMeters = d)
+                    } else s
+                }
+            } else {
+                matched
+            }
+        } else {
+            emptyList()
+        }
     }
 
-    override suspend fun search(city: TransitCity, keyword: String): Result<TransitSearchResult> = runCatching {
+    override suspend fun search(
+        city: TransitCity,
+        keyword: String,
+        userLat: Double?,
+        userLng: Double?
+    ): Result<TransitSearchResult> = runCatching {
+        val resolvedUserLat = userLat ?: _userLocation.value?.first
+        val resolvedUserLng = userLng ?: _userLocation.value?.second
+
         coroutineScope {
             val chelaileDeferred = async {
-                runCatching { chelaileClient.search(city.cityId, keyword) }
-                    .getOrDefault(TransitSearchResult(keyword))
+                runCatching {
+                    chelaileClient.search(
+                        cityId = city.cityId,
+                        keyword = keyword,
+                        userLat = resolvedUserLat,
+                        userLng = resolvedUserLng
+                    )
+                }.getOrDefault(TransitSearchResult(keyword))
             }
 
             val mygolbsCode = city.mygolbsCityCode ?: if (city.cityName.contains("玉林")) "450900" else null

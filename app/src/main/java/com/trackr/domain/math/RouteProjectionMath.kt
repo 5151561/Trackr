@@ -80,6 +80,38 @@ object RouteProjectionMath {
     }
 
     /**
+     * 计算两个经纬度坐标点之间的测地直线距离（米，基于 Haversine 公式）
+     */
+    fun calculateDistanceMeters(
+        lat1: Double,
+        lng1: Double,
+        lat2: Double,
+        lng2: Double
+    ): Int? {
+        if (lat1 <= 0.0 || lng1 <= 0.0 || lat2 <= 0.0 || lng2 <= 0.0) return null
+        val earthRadius = 6371000.0 // 地球平均半径（米）
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLng = Math.toRadians(lng2 - lng1)
+        val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+                kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
+                kotlin.math.sin(dLng / 2) * kotlin.math.sin(dLng / 2)
+        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+        return (earthRadius * c).roundToInt()
+    }
+
+    /**
+     * 格式化距离文本（小于1公里显示米，大于等于1公里显示公里）
+     */
+    fun formatDistanceText(meters: Int?): String {
+        if (meters == null || meters <= 0) return ""
+        return if (meters < 1000) {
+            "${meters}米"
+        } else {
+            String.format(java.util.Locale.CHINA, "%.1f公里", meters / 1000.0)
+        }
+    }
+
+    /**
      * 路线名称智能排序：纯数字线路按数值升序排在前面，带字母/汉字专线排在后面
      */
     fun compareLineNames(a: String, b: String): Int {
