@@ -88,4 +88,41 @@ class ExpressiveRouteRailUiTest {
         composeTestRule.onNodeWithText("人民广场").performClick()
         assertEquals("人民广场", clickedStop?.name)
     }
+
+    @Test
+    fun testGetRouteSegmentColor_consistentLogic() {
+        val lightColors = com.trackr.ui.theme.LightBusSemanticColors
+
+        // 1. 首站或全景模式 (currentSelectedOrder <= 1)：所有路段均为活跃绿
+        assertEquals(
+            lightColors.routeTrackActive,
+            getRouteSegmentColor(fromOrder = 1, toOrder = 2, currentSelectedOrder = 1, busColors = lightColors)
+        )
+        assertEquals(
+            lightColors.routeTrackActive,
+            getRouteSegmentColor(fromOrder = 2, toOrder = 3, currentSelectedOrder = 1, busColors = lightColors)
+        )
+
+        // 2. 候车中模式 (currentSelectedOrder = 3)：候车站之前的各路段为已过站灰，候车站及之后路段为活跃绿
+        // 路段 1->2 (已过站)
+        assertEquals(
+            lightColors.busPassedGray,
+            getRouteSegmentColor(fromOrder = 1, toOrder = 2, currentSelectedOrder = 3, busColors = lightColors)
+        )
+        // 路段 2->3 (到达候车站之前的进站路段，亦属于用户无法乘坐的历史区间 -> 灰)
+        assertEquals(
+            lightColors.busPassedGray,
+            getRouteSegmentColor(fromOrder = 2, toOrder = 3, currentSelectedOrder = 3, busColors = lightColors)
+        )
+        // 路段 3->4 (候车站出发路段，属于乘车可达区间 -> 绿)
+        assertEquals(
+            lightColors.routeTrackActive,
+            getRouteSegmentColor(fromOrder = 3, toOrder = 4, currentSelectedOrder = 3, busColors = lightColors)
+        )
+        // 路段 4->5 (后续乘车区间 -> 绿)
+        assertEquals(
+            lightColors.routeTrackActive,
+            getRouteSegmentColor(fromOrder = 4, toOrder = 5, currentSelectedOrder = 3, busColors = lightColors)
+        )
+    }
 }
