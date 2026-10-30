@@ -508,13 +508,11 @@ fun TrackrNavApp(
                 entry<ScreenKey.FavoritesGroup> {
                     FavoritesGroupScreen(
                         viewModel = favoritesGroupViewModel,
-                        onNavigateBack = dropUnlessResumed {
-                            if (activeBackStack.size > 1) {
+                        onNavigateBack = if (activeBackStack.size > 1) {
+                            dropUnlessResumed {
                                 activeBackStack.removeLastOrNull()
-                            } else if (selectedTab != "home") {
-                                selectedTab = "home"
                             }
-                        },
+                        } else null,
                         onNavigateToLineDetail = dropUnlessResumed { cityId, lineId, targetOrder, stopId, source, lineName ->
                             val key = ScreenKey.LineDetail(
                                 cityId = cityId,

@@ -82,6 +82,40 @@ class MapShareParserTest {
     }
 
     @Test
+    fun testEnrichPlanFromBaiduUrlWithComplexParams() {
+        val baiduUrl = "https://map.baidu.com/mobile/webapp/index/index#route/transit?origin=name%3A%E6%9D%AD%E5%B7%9E%E4%B8%9C%E7%AB%99%7Clatlng%3A30.29%2C120.21&destination=name%3A%E7%81%B5%E9%9A%90%7Clatlng%3A30.24%2C120.10"
+        val plan = MapShareParser.enrichPlanFromUrl(null, baiduUrl)
+
+        assertNotNull(plan)
+        assertEquals("杭州东站", plan?.originName)
+        assertEquals("灵隐", plan?.destinationName)
+    }
+
+    @Test
+    fun testParseShareTextWithEndpointPrefix() {
+        val text = "起点：翠苑新村，终点：武林广场，乘坐156路。"
+        val plan = MapShareParser.parseShareText(text)
+
+        assertNotNull(plan)
+        assertEquals("翠苑新村", plan?.originName)
+        assertEquals("武林广场", plan?.destinationName)
+        assertEquals(1, plan?.legs?.size)
+        assertEquals("156路", plan?.legs?.first()?.lineName)
+    }
+
+    @Test
+    fun testParseShareTextArrowFormat() {
+        val text = "杭州东站 -> 灵隐 7路"
+        val plan = MapShareParser.parseShareText(text)
+
+        assertNotNull(plan)
+        assertEquals("杭州东站", plan?.originName)
+        assertEquals("灵隐", plan?.destinationName)
+        assertEquals(1, plan?.legs?.size)
+        assertEquals("7路", plan?.legs?.first()?.lineName)
+    }
+
+    @Test
     fun testParseAndAlignWithoutNetwork() = runTest {
         val text = "从 翠苑 到 市民中心 乘坐 156路 到 武林广场 ，换乘 地铁4号线 到 市民中心"
         val city = TransitCity(cityId = "033", cityName = "杭州")

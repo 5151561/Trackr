@@ -42,23 +42,23 @@ class RouteGroupRepository(
     private fun loadInitialGroups(): List<TransitGroup> {
         val rawJson = prefs.getString(KEY_GROUPS_JSON, null)
         if (rawJson.isNullOrBlank()) {
-            val defaults = createDefaultSampleGroups()
-            persistGroupsInternal(defaults)
-            return defaults
+            return emptyList()
         }
         return try {
             val loaded = json.decodeFromString<List<TransitGroup>>(rawJson)
-            if (loaded.isEmpty()) {
-                val defaults = createDefaultSampleGroups()
-                persistGroupsInternal(defaults)
-                defaults
-            } else {
-                loaded.sortedBy { it.sortOrder }
+            // 彻底清理历史测试注入的假数据（如 sample_commute_group 或含 sample_line_ 伪造标识的分组）
+            val sanitized = loaded.filterNot { group ->
+                group.id == "sample_commute_group" ||
+                    group.legs.any { leg ->
+                        leg.candidateLines.any { it.lineId.startsWith("sample_") }
+                    }
             }
+            if (sanitized.size != loaded.size) {
+                persistGroupsInternal(sanitized)
+            }
+            sanitized.sortedBy { it.sortOrder }
         } catch (_: Exception) {
-            val defaults = createDefaultSampleGroups()
-            persistGroupsInternal(defaults)
-            defaults
+            emptyList()
         }
     }
 
@@ -139,65 +139,6 @@ class RouteGroupRepository(
         } catch (_: Exception) {}
     }
 
-    private fun createDefaultSampleGroups(): List<TransitGroup> {
-        val sampleGroup = TransitGroup(
-            id = "sample_commute_group",
-            name = "早高峰上班通勤",
-            category = GroupCategory.COMMUTE,
-            isTemporary = false,
-            sortOrder = 0,
-            legs = listOf(
-                TransitLeg(
-                    legIndex = 0,
-                    fromStopName = "翠苑新村",
-                    toStopName = "武林广场",
-                    fromStopLat = 30.2850,
-                    fromStopLng = 120.1250,
-                    toStopLat = 30.2730,
-                    toStopLng = 120.1600,
-                    candidateLines = listOf(
-                        CandidateLine(
-                            cityId = "033",
-                            cityName = "杭州",
-                            lineId = "sample_line_156",
-                            lineName = "156路",
-                            source = DataSourceType.CHELAILE,
-                            direction = 0,
-                            fromStopOrder = 1,
-                            toStopOrder = 7,
-                            startStopName = "翠苑新村",
-                            endStopName = "城站火车站"
-                        )
-                    )
-                ),
-                TransitLeg(
-                    legIndex = 1,
-                    fromStopName = "武林广场",
-                    toStopName = "市民中心",
-                    fromStopLat = 30.2730,
-                    fromStopLng = 120.1600,
-                    toStopLat = 30.2450,
-                    toStopLng = 120.2100,
-                    candidateLines = listOf(
-                        CandidateLine(
-                            cityId = "033",
-                            cityName = "杭州",
-                            lineId = "sample_line_m4",
-                            lineName = "地铁4号线",
-                            source = DataSourceType.CHELAILE,
-                            direction = 0,
-                            fromStopOrder = 8,
-                            toStopOrder = 14,
-                            startStopName = "彭埠",
-                            endStopName = "浦沿"
-                        )
-                    ),
-                    walkingDistanceMeters = 80
-                )
-            )
-        )
-        return listOf(sampleGroup)
-    }
 
     companion object {
         private const val PREFS_NAME = "trackr_route_groups"

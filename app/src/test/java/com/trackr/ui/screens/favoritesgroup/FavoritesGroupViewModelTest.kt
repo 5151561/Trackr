@@ -62,10 +62,17 @@ class FavoritesGroupViewModelTest {
         testScheduler.runCurrent()
 
         val initialList = viewModel.groups.value
-        assertEquals(1, initialList.size)
-        assertEquals(GroupCategory.COMMUTE, initialList.first().category)
+        assertEquals(0, initialList.size)
 
-        // 添加一个休闲分组
+        // 添加一个通勤分组与一个休闲分组
+        val commuteGroup = TransitGroup(
+            id = "group_commute",
+            name = "早间通勤",
+            category = GroupCategory.COMMUTE,
+            legs = listOf(TransitLeg(legIndex = 0, fromStopName = "X", toStopName = "Y"))
+        )
+        viewModel.saveGroup(commuteGroup)
+
         val leisureGroup = TransitGroup(
             id = "group_leisure",
             name = "周末西湖",
@@ -134,5 +141,21 @@ class FavoritesGroupViewModelTest {
         viewModel.deleteGroup("temp_1")
         testScheduler.runCurrent()
         assertNull(groupRepository.getGroupById("temp_1"))
+    }
+
+    @Test
+    fun testCustomAmapApiKeyPersistence() {
+        val sharedPrefs = context.getSharedPreferences("test_prefs", Context.MODE_PRIVATE)
+        val viewModel = FavoritesGroupViewModel(
+            groupRepository = groupRepository,
+            transitRepository = fakeTransitRepository,
+            prefs = sharedPrefs,
+            enableAutoRefresh = false
+        )
+
+        assertNull(viewModel.customAmapApiKey.value)
+        viewModel.saveCustomAmapApiKey("test_key_123456")
+        assertEquals("test_key_123456", viewModel.customAmapApiKey.value)
+        assertEquals("test_key_123456", sharedPrefs.getString("custom_amap_web_key", null))
     }
 }

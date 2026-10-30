@@ -37,14 +37,23 @@ class RouteGroupRepositoryTest {
     }
 
     @Test
-    fun testInitialPresetSampleGroup() {
+    fun testInitialGroupsEmptyAndNoFakeData() {
         val groups = repository.groups.value
-        assertEquals(1, groups.size)
-        val sample = groups.first()
-        assertEquals("早高峰上班通勤", sample.name)
-        assertEquals(GroupCategory.COMMUTE, sample.category)
-        assertFalse(sample.isTemporary)
-        assertEquals(2, sample.legs.size)
+        assertTrue(groups.isEmpty())
+    }
+
+    @Test
+    fun testSanitizesLegacyFakeSampleDataOnLoad() {
+        val fakeSampleJson = """
+            [{"id":"sample_commute_group","name":"早高峰上班通勤","category":"COMMUTE","sortOrder":0,"legs":[]}]
+        """.trimIndent()
+        context.getSharedPreferences("trackr_route_groups", Context.MODE_PRIVATE)
+            .edit()
+            .putString("groups_list_json", fakeSampleJson)
+            .commit()
+
+        val reloadedRepo = RouteGroupRepository(context, testDispatcher)
+        assertTrue(reloadedRepo.groups.value.isEmpty())
     }
 
     @Test
@@ -76,7 +85,7 @@ class RouteGroupRepositoryTest {
         repository.addGroup(newGroup)
 
         val list = repository.groups.value
-        assertEquals(2, list.size)
+        assertEquals(1, list.size)
         val retrieved = repository.getGroupById("group_weekend")
         assertNotNull(retrieved)
         assertEquals("周末西湖游玩", retrieved?.name)
@@ -91,7 +100,12 @@ class RouteGroupRepositoryTest {
 
     @Test
     fun testUpdateGroup() = runTest(testDispatcher) {
-        val group = repository.groups.value.first()
+        val group = TransitGroup(
+            id = "group_work",
+            name = "上班日常",
+            category = GroupCategory.COMMUTE
+        )
+        repository.addGroup(group)
         val updated = group.copy(name = "日常上下班新名称")
 
         repository.updateGroup(updated)
@@ -102,12 +116,17 @@ class RouteGroupRepositoryTest {
 
     @Test
     fun testDeleteGroup() = runTest(testDispatcher) {
-        val sample = repository.groups.value.first()
-        repository.deleteGroup(sample.id)
+        val group = TransitGroup(
+            id = "group_temp_del",
+            name = "待删除分组",
+            category = GroupCategory.CUSTOM
+        )
+        repository.addGroup(group)
+        repository.deleteGroup(group.id)
 
         val list = repository.groups.value
         assertTrue(list.isEmpty())
-        assertNull(repository.getGroupById(sample.id))
+        assertNull(repository.getGroupById(group.id))
     }
 
     @Test

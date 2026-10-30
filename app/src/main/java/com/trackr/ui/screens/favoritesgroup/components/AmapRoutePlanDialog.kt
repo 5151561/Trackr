@@ -20,12 +20,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -60,6 +62,8 @@ fun AmapRoutePlanDialog(
     onAddScheme: (AmapTransitSchemeResult) -> Unit,
     onStartTrackingScheme: (AmapTransitSchemeResult) -> Unit,
     onDismiss: () -> Unit,
+    customApiKey: String? = null,
+    onSaveCustomApiKey: ((String) -> Unit)? = null,
     onClearOriginTips: () -> Unit = { onSearchOrigin("") },
     onClearDestTips: () -> Unit = { onSearchDest("") }
 ) {
@@ -70,6 +74,8 @@ fun AmapRoutePlanDialog(
 
     var dismissOriginTips by remember { mutableStateOf(false) }
     var dismissDestTips by remember { mutableStateOf(false) }
+    var showKeyDialog by remember { mutableStateOf(false) }
+    var inputKey by remember(customApiKey) { mutableStateOf(customApiKey.orEmpty()) }
 
     // 当搜索结果更新时，重新显示候选列表
     LaunchedEffect(originTips) {
@@ -113,17 +119,39 @@ fun AmapRoutePlanDialog(
             }
         },
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.AltRoute,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "高德智能公交换乘规划",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.AltRoute,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "智能公交换乘规划",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+                if (onSaveCustomApiKey != null) {
+                    IconButton(
+                        onClick = {
+                            inputKey = customApiKey.orEmpty()
+                            showKeyDialog = true
+                        },
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "高德 Web Key 设置",
+                            tint = if (customApiKey.isNullOrBlank()) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         },
         text = {
@@ -133,7 +161,7 @@ fun AmapRoutePlanDialog(
                     .height(440.dp)
             ) {
                 Text(
-                    text = "基于高德开放平台路径规划，输入起终点一键生成换乘路线组：",
+                    text = "输入起终点一键规划换乘路线组（支持高德云端规划与实时公交双引擎）：",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -374,4 +402,44 @@ fun AmapRoutePlanDialog(
             }
         }
     )
+
+    if (showKeyDialog && onSaveCustomApiKey != null) {
+        AlertDialog(
+            onDismissRequest = { showKeyDialog = false },
+            title = { Text("高德 Web 服务 Key 设置") },
+            text = {
+                Column {
+                    Text(
+                        text = "高德开放平台为个人开发者提供每日免费云端公交/地铁规划额度。填入您的专属 Web 服务 Key 即可启用高德全量换乘规划；若留空则优先使用本地实时公交直达匹配。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = inputKey,
+                        onValueChange = { inputKey = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        label = { Text("高德 Web 服务 Key") },
+                        placeholder = { Text("粘贴 32 位 Web 服务 Key") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onSaveCustomApiKey(inputKey.trim())
+                        showKeyDialog = false
+                    }
+                ) {
+                    Text("保存")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showKeyDialog = false }) {
+                    Text("取消")
+                }
+            }
+        )
+    }
 }

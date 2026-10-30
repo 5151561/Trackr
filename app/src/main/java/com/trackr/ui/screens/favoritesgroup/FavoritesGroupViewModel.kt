@@ -1,6 +1,7 @@
 package com.trackr.ui.screens.favoritesgroup
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.trackr.TrackrApp
@@ -13,6 +14,7 @@ import com.trackr.data.remote.amap.AmapTransitSchemeResult
 import com.trackr.data.repository.IRouteGroupRepository
 import com.trackr.data.repository.ITransitRepository
 import com.trackr.domain.math.RouteProjectionMath
+import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.GroupTrackingSessionState
 import com.trackr.domain.model.TransitCity
@@ -41,8 +43,13 @@ class FavoritesGroupViewModel(
     private val coordinator: TransitProviderCoordinator? = runCatching { TrackrApp.instance.coordinator }.getOrNull(),
     private val okHttpClient: OkHttpClient? = runCatching { TrackrApp.instance.okHttpClient }.getOrNull(),
     private val amapApiClient: AmapTransitApiClient = AmapTransitApiClient(okHttpClient ?: OkHttpClient()),
+    private val prefs: SharedPreferences? = runCatching { TrackrApp.instance.getSharedPreferences("trackr_prefs", Context.MODE_PRIVATE) }.getOrNull(),
     enableAutoRefresh: Boolean = true
 ) : ViewModel() {
+
+    companion object {
+        const val PREF_KEY_AMAP_KEY = "custom_amap_web_key"
+    }
 
     private val _selectedCategory = MutableStateFlow<GroupCategory?>(null)
     val selectedCategory: StateFlow<GroupCategory?> = _selectedCategory.asStateFlow()
@@ -86,6 +93,11 @@ class FavoritesGroupViewModel(
     private val _planErrorMessage = MutableStateFlow<String?>(null)
     val planErrorMessage: StateFlow<String?> = _planErrorMessage.asStateFlow()
 
+    private val _customAmapApiKey = MutableStateFlow<String?>(
+        prefs?.getString(PREF_KEY_AMAP_KEY, null)?.trim()?.ifBlank { null }
+    )
+    val customAmapApiKey: StateFlow<String?> = _customAmapApiKey.asStateFlow()
+
     init {
         // 当分组列表加载完毕后，预热刷新一次各分组首程线路的实时到站状态
         if (enableAutoRefresh) {
@@ -99,6 +111,12 @@ class FavoritesGroupViewModel(
 
     fun selectCategory(category: GroupCategory?) {
         _selectedCategory.value = category
+    }
+
+    fun saveCustomAmapApiKey(key: String) {
+        val trimmed = key.trim().ifBlank { null }
+        prefs?.edit()?.putString(PREF_KEY_AMAP_KEY, trimmed)?.apply()
+        _customAmapApiKey.value = trimmed
     }
 
     /**
@@ -154,7 +172,7 @@ class FavoritesGroupViewModel(
     }
 
     /**
-     * 搜索起点关键字候选项
+     * 搜索起点关键字候选项（优先高德，失败则智能降级至本地站点搜索）
      */
     fun searchOriginTips(keyword: String) {
         if (keyword.isBlank()) {
@@ -162,14 +180,22 @@ class FavoritesGroupViewModel(
             return
         }
         viewModelScope.launch {
-            val city = transitRepository.selectedCity.value.cityName
-            val result = amapApiClient.searchPoiTips(keyword, city)
-            _amapOriginTips.value = result.getOrDefault(emptyList())
+            val city = transitRepository.selectedCity.value
+            val customKey = _customAmapApiKey.value
+            val amapResult = runCatching {
+                amapApiClient.searchPoiTips(keyword, city.cityName, customKey)
+            }.getOrNull()
+            val tips = amapResult?.getOrNull().orEmpty()
+            if (tips.isNotEmpty()) {
+                _amapOriginTips.value = tips
+            } else {
+                _amapOriginTips.value = searchLocalStopTips(keyword, city)
+            }
         }
     }
 
     /**
-     * 搜索终点关键字候选项
+     * 搜索终点关键字候选项（优先高德，失败则智能降级至本地站点搜索）
      */
     fun searchDestTips(keyword: String) {
         if (keyword.isBlank()) {
@@ -177,14 +203,53 @@ class FavoritesGroupViewModel(
             return
         }
         viewModelScope.launch {
-            val city = transitRepository.selectedCity.value.cityName
-            val result = amapApiClient.searchPoiTips(keyword, city)
-            _amapDestTips.value = result.getOrDefault(emptyList())
+            val city = transitRepository.selectedCity.value
+            val customKey = _customAmapApiKey.value
+            val amapResult = runCatching {
+                amapApiClient.searchPoiTips(keyword, city.cityName, customKey)
+            }.getOrNull()
+            val tips = amapResult?.getOrNull().orEmpty()
+            if (tips.isNotEmpty()) {
+                _amapDestTips.value = tips
+            } else {
+                _amapDestTips.value = searchLocalStopTips(keyword, city)
+            }
+        }
+    }
+
+    private suspend fun searchLocalStopTips(keyword: String, city: TransitCity): List<AmapTipItem> {
+        val coord = coordinator ?: return emptyList()
+        return try {
+            val searchRes = coord.search(city, keyword, com.trackr.domain.model.EngineMode.CHELAILE)
+            val stopTips = searchRes.stops.map { stop ->
+                val loc = if (stop.wgsLat != 0.0 && stop.wgsLng != 0.0) "${stop.wgsLng},${stop.wgsLat}" else ""
+                AmapTipItem(
+                    name = stop.name,
+                    district = city.cityName,
+                    address = stop.name,
+                    location = loc
+                )
+            }
+            if (stopTips.isNotEmpty()) {
+                stopTips
+            } else {
+                searchRes.lines.mapNotNull { line ->
+                    val dir = line.directions.firstOrNull() ?: return@mapNotNull null
+                    AmapTipItem(
+                        name = dir.name,
+                        district = city.cityName,
+                        address = "${dir.startStop} ➔ ${dir.endStop}",
+                        location = ""
+                    )
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
     /**
-     * 执行高德智能公交路线规划
+     * 执行公交路线规划（高德云端规划 + 本地真实公交换乘双引擎容灾兜底）
      */
     fun planTransitRoute(
         origin: AmapTipItem,
@@ -196,29 +261,128 @@ class FavoritesGroupViewModel(
             _planErrorMessage.value = null
             _plannedSchemes.value = emptyList()
 
-            val city = transitRepository.selectedCity.value.cityName
-            val result = amapApiClient.planTransit(
-                originLngLat = origin.location,
-                destinationLngLat = destination.location,
-                originName = origin.name,
-                destName = destination.name,
-                city = city
-            )
+            val city = transitRepository.selectedCity.value
+            val customKey = _customAmapApiKey.value
 
-            result.onSuccess { schemes ->
+            var schemes: List<AmapTransitSchemeResult> = emptyList()
+
+            // 优先尝试高德云端 API（需要有效经纬度坐标）
+            if (origin.location.contains(",") && destination.location.contains(",")) {
+                val result = amapApiClient.planTransit(
+                    originLngLat = origin.location,
+                    destinationLngLat = destination.location,
+                    originName = origin.name,
+                    destName = destination.name,
+                    city = city.cityName,
+                    apiKey = customKey
+                )
+                schemes = result.getOrNull().orEmpty()
+            }
+
+            // 若高德未配置 Key、调用异常或结果为空，平滑降级至本地公交实时站点直达/换乘匹配
+            if (schemes.isEmpty()) {
+                schemes = planLocalTransitRoute(origin, destination, city)
+            }
+
+            if (schemes.isNotEmpty()) {
                 _plannedSchemes.value = schemes
-                if (schemes.isEmpty()) {
-                    _planErrorMessage.value = "未找到合适的公交换乘方案"
-                    onComplete?.invoke(false)
+                onComplete?.invoke(true)
+            } else {
+                _planErrorMessage.value = if (customKey.isNullOrBlank()) {
+                    "未查到直达方案。如需高德云端复杂换乘规划，可配置高德 Web 服务 Key。"
                 } else {
-                    onComplete?.invoke(true)
+                    "未找到合适的公交换乘方案"
                 }
-            }.onFailure { err ->
-                _planErrorMessage.value = "规划路线失败: ${err.message}"
                 onComplete?.invoke(false)
             }
 
             _isPlanningRoute.value = false
+        }
+    }
+
+    private suspend fun planLocalTransitRoute(
+        origin: AmapTipItem,
+        destination: AmapTipItem,
+        city: TransitCity
+    ): List<AmapTransitSchemeResult> {
+        val coord = coordinator ?: return emptyList()
+        return try {
+            val originCore = RouteProjectionMath.coreStopName(origin.name)
+            val destCore = RouteProjectionMath.coreStopName(destination.name)
+
+            val originSearch = coord.search(city, origin.name, com.trackr.domain.model.EngineMode.CHELAILE)
+            val schemes = mutableListOf<AmapTransitSchemeResult>()
+
+            for (lineSummary in originSearch.lines.take(8)) {
+                for (dir in lineSummary.directions) {
+                    val detail = runCatching {
+                        coord.getLineDetail(
+                            city = city,
+                            request = LineDetailRequest(
+                                lineId = dir.lineId,
+                                source = dir.source,
+                                lineNameHint = dir.name,
+                                directionHint = dir.direction
+                            )
+                        )
+                    }.getOrNull() ?: continue
+
+                    val stops = detail.stops
+                    val fromStop = stops.find { RouteProjectionMath.coreStopName(it.name) == originCore || it.name.contains(originCore) }
+                    val toStop = stops.find { RouteProjectionMath.coreStopName(it.name) == destCore || it.name.contains(destCore) }
+
+                    if (fromStop != null && toStop != null && fromStop.order < toStop.order) {
+                        val stopCount = toStop.order - fromStop.order
+                        val duration = (stopCount * 3 + 2).coerceAtLeast(5)
+                        val leg = TransitLeg(
+                            legIndex = 0,
+                            fromStopName = fromStop.name,
+                            fromStopLat = fromStop.wgsLat,
+                            fromStopLng = fromStop.wgsLng,
+                            toStopName = toStop.name,
+                            toStopLat = toStop.wgsLat,
+                            toStopLng = toStop.wgsLng,
+                            candidateLines = listOf(
+                                CandidateLine(
+                                    cityId = city.cityId,
+                                    cityName = city.cityName,
+                                    lineId = dir.lineId,
+                                    lineName = dir.name,
+                                    source = dir.source,
+                                    direction = dir.direction,
+                                    fromStopOrder = fromStop.order,
+                                    toStopOrder = toStop.order,
+                                    startStopName = dir.startStop,
+                                    endStopName = dir.endStop,
+                                    mygolbsCityCode = city.mygolbsCityCode
+                                )
+                            )
+                        )
+                        val group = TransitGroup(
+                            id = UUID.randomUUID().toString(),
+                            name = "${origin.name} ➔ ${destination.name} (${dir.name} 直达)",
+                            category = GroupCategory.TEMPORARY,
+                            legs = listOf(leg),
+                            isTemporary = true,
+                            sortOrder = 0
+                        )
+                        schemes.add(
+                            AmapTransitSchemeResult(
+                                title = "${dir.name} 直达 · 共${stopCount}站",
+                                durationMinutes = duration,
+                                walkingMeters = 80,
+                                costYuan = "2.0",
+                                transferCount = 0,
+                                group = group
+                            )
+                        )
+                    }
+                }
+                if (schemes.size >= 4) break
+            }
+            schemes
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 
