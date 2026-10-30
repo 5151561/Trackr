@@ -1,5 +1,6 @@
 package com.trackr.ui.screens.favoritesgroup.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -38,23 +39,56 @@ fun GroupEditDialog(
     onDismiss: () -> Unit,
     onSave: (TransitGroup) -> Unit
 ) {
-    var groupName by remember { mutableStateOf(initialGroup?.name.orEmpty()) }
-    var selectedCategory by remember { mutableStateOf(initialGroup?.category ?: GroupCategory.COMMUTE) }
-
-    // 简易两段换乘站名与路线名输入
+    // 初始值快照，用于判断用户是否有未保存的修改 (dirty state)
     val leg1 = initialGroup?.legs?.getOrNull(0)
     val leg2 = initialGroup?.legs?.getOrNull(1)
 
-    var from1 by remember { mutableStateOf(leg1?.fromStopName.orEmpty()) }
-    var to1 by remember { mutableStateOf(leg1?.toStopName.orEmpty()) }
-    var line1 by remember { mutableStateOf(leg1?.primaryLine?.lineName.orEmpty()) }
+    val initialName = remember(initialGroup) { initialGroup?.name.orEmpty() }
+    val initialCategory = remember(initialGroup) { initialGroup?.category ?: GroupCategory.COMMUTE }
+    val initialFrom1 = remember(leg1) { leg1?.fromStopName.orEmpty() }
+    val initialTo1 = remember(leg1) { leg1?.toStopName.orEmpty() }
+    val initialLine1 = remember(leg1) { leg1?.primaryLine?.lineName.orEmpty() }
+    val initialFrom2 = remember(leg2, leg1) { leg2?.fromStopName.orEmpty().ifEmpty { initialTo1 } }
+    val initialTo2 = remember(leg2) { leg2?.toStopName.orEmpty() }
+    val initialLine2 = remember(leg2) { leg2?.primaryLine?.lineName.orEmpty() }
 
-    var from2 by remember { mutableStateOf(leg2?.fromStopName.orEmpty().ifEmpty { to1 }) }
-    var to2 by remember { mutableStateOf(leg2?.toStopName.orEmpty()) }
-    var line2 by remember { mutableStateOf(leg2?.primaryLine?.lineName.orEmpty()) }
+    var groupName by remember { mutableStateOf(initialName) }
+    var selectedCategory by remember { mutableStateOf(initialCategory) }
+
+    var from1 by remember { mutableStateOf(initialFrom1) }
+    var to1 by remember { mutableStateOf(initialTo1) }
+    var line1 by remember { mutableStateOf(initialLine1) }
+
+    var from2 by remember { mutableStateOf(initialFrom2) }
+    var to2 by remember { mutableStateOf(initialTo2) }
+    var line2 by remember { mutableStateOf(initialLine2) }
+
+    var showDiscardConfirmDialog by remember { mutableStateOf(false) }
+
+    val isDirty = groupName != initialName ||
+        selectedCategory != initialCategory ||
+        from1 != initialFrom1 ||
+        to1 != initialTo1 ||
+        line1 != initialLine1 ||
+        from2 != initialFrom2 ||
+        to2 != initialTo2 ||
+        line2 != initialLine2
+
+    // 拦截物理返回键或手势返回，防止误触导致表单内容丢失
+    BackHandler(enabled = isDirty) {
+        showDiscardConfirmDialog = true
+    }
+
+    val handleDismissRequest = {
+        if (isDirty) {
+            showDiscardConfirmDialog = true
+        } else {
+            onDismiss()
+        }
+    }
 
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = handleDismissRequest,
         title = { Text(if (initialGroup == null) "新建路线分组" else "编辑路线分组") },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -210,9 +244,32 @@ fun GroupEditDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(onClick = handleDismissRequest) {
                 Text("取消")
             }
         }
     )
+
+    if (showDiscardConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardConfirmDialog = false },
+            title = { Text("放弃未保存的修改？") },
+            text = { Text("当前表单已有编辑内容，退出后所作修改将不会保存。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDiscardConfirmDialog = false
+                        onDismiss()
+                    }
+                ) {
+                    Text("放弃修改", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardConfirmDialog = false }) {
+                    Text("继续编辑")
+                }
+            }
+        )
+    }
 }

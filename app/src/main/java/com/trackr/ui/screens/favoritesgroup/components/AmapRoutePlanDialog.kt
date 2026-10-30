@@ -1,5 +1,6 @@
 package com.trackr.ui.screens.favoritesgroup.components
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -31,6 +32,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,15 +59,59 @@ fun AmapRoutePlanDialog(
     onPlanRoute: (origin: AmapTipItem, dest: AmapTipItem) -> Unit,
     onAddScheme: (AmapTransitSchemeResult) -> Unit,
     onStartTrackingScheme: (AmapTransitSchemeResult) -> Unit,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onClearOriginTips: () -> Unit = { onSearchOrigin("") },
+    onClearDestTips: () -> Unit = { onSearchDest("") }
 ) {
     var originText by remember { mutableStateOf("") }
     var destText by remember { mutableStateOf("") }
     var selectedOrigin by remember { mutableStateOf<AmapTipItem?>(null) }
     var selectedDest by remember { mutableStateOf<AmapTipItem?>(null) }
 
+    var dismissOriginTips by remember { mutableStateOf(false) }
+    var dismissDestTips by remember { mutableStateOf(false) }
+
+    // 当搜索结果更新时，重新显示候选列表
+    LaunchedEffect(originTips) {
+        if (originTips.isNotEmpty()) {
+            dismissOriginTips = false
+        }
+    }
+    LaunchedEffect(destTips) {
+        if (destTips.isNotEmpty()) {
+            dismissDestTips = false
+        }
+    }
+
+    val isDestTipsVisible = !dismissDestTips && selectedDest == null && destTips.isNotEmpty()
+    val isOriginTipsVisible = !dismissOriginTips && selectedOrigin == null && originTips.isNotEmpty()
+    val hasTipsVisible = isDestTipsVisible || isOriginTipsVisible
+
+    // 遵循 LIFO 消费返回事件：先收起终点候选建议 -> 再收起起点候选建议 -> 最后才关闭对话框
+    BackHandler(enabled = hasTipsVisible) {
+        if (isDestTipsVisible) {
+            dismissDestTips = true
+            onClearDestTips()
+        } else if (isOriginTipsVisible) {
+            dismissOriginTips = true
+            onClearOriginTips()
+        }
+    }
+
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = {
+            if (hasTipsVisible) {
+                if (isDestTipsVisible) {
+                    dismissDestTips = true
+                    onClearDestTips()
+                } else if (isOriginTipsVisible) {
+                    dismissOriginTips = true
+                    onClearOriginTips()
+                }
+            } else {
+                onDismiss()
+            }
+        },
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -99,6 +145,7 @@ fun AmapRoutePlanDialog(
                     onValueChange = {
                         originText = it
                         selectedOrigin = null
+                        dismissOriginTips = false
                         onSearchOrigin(it)
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -113,7 +160,7 @@ fun AmapRoutePlanDialog(
                 )
 
                 // 起点搜索候选
-                if (selectedOrigin == null && originTips.isNotEmpty()) {
+                if (isOriginTipsVisible) {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -128,6 +175,7 @@ fun AmapRoutePlanDialog(
                                     .clickable {
                                         selectedOrigin = tip
                                         originText = tip.name
+                                        dismissOriginTips = true
                                     }
                                     .padding(horizontal = 10.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -159,6 +207,7 @@ fun AmapRoutePlanDialog(
                     onValueChange = {
                         destText = it
                         selectedDest = null
+                        dismissDestTips = false
                         onSearchDest(it)
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -173,7 +222,7 @@ fun AmapRoutePlanDialog(
                 )
 
                 // 终点搜索候选
-                if (selectedDest == null && destTips.isNotEmpty()) {
+                if (isDestTipsVisible) {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -188,6 +237,7 @@ fun AmapRoutePlanDialog(
                                     .clickable {
                                         selectedDest = tip
                                         destText = tip.name
+                                        dismissDestTips = true
                                     }
                                     .padding(horizontal = 10.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically

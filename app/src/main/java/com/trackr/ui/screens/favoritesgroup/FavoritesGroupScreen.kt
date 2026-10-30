@@ -51,7 +51,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,8 +64,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.GroupCategory
@@ -85,7 +83,6 @@ fun FavoritesGroupScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -110,24 +107,20 @@ fun FavoritesGroupScreen(
     var editingGroup by remember { mutableStateOf<TransitGroup?>(null) }
 
     // 页面进入或恢复到前台时，自动检测剪贴板是否含有高德/百度分享文本
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                try {
-                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                    if (clipboard != null && clipboard.hasPrimaryClip()) {
-                        val clip = clipboard.primaryClip
-                        if (clip != null && clip.itemCount > 0) {
-                            val text = clip.getItemAt(0)?.coerceToText(context)?.toString()
-                            viewModel.checkClipboardForShareContent(text)
-                        }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        try {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            if (clipboard != null && clipboard.hasPrimaryClip()) {
+                val clip = clipboard.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    val text = clip.getItemAt(0)?.coerceToText(context)?.toString()
+                    if (!text.isNullOrBlank()) {
+                        viewModel.checkClipboardForShareContent(text)
                     }
-                } catch (_: Exception) {}
+                }
             }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
+        } catch (_: Exception) {
+            // 安全捕获剪贴板跨进程读取或安全沙箱权限异常
         }
     }
 
@@ -425,6 +418,8 @@ fun FavoritesGroupScreen(
             isPlanning = isPlanningRoute,
             onSearchOrigin = { viewModel.searchOriginTips(it) },
             onSearchDest = { viewModel.searchDestTips(it) },
+            onClearOriginTips = { viewModel.searchOriginTips("") },
+            onClearDestTips = { viewModel.searchDestTips("") },
             onPlanRoute = { origin, dest ->
                 viewModel.planTransitRoute(origin, dest)
             },
