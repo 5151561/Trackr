@@ -1,70 +1,78 @@
 <div align="center">
 
+<img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png" width="76" height="76" alt="Trackr Logo" />
+
 # Trackr · BusOnRoad
 
 <p align="center">
-  <strong>Android 实时公交到站追踪应用</strong>
+  <strong>Android 现代实时公交到站追踪应用</strong>
 </p>
 
 <p align="center">
+  <a href="https://github.com/5151561/Trackr-/releases">
+    <img src="https://img.shields.io/badge/Release-v0.0.2-006874?style=flat&logo=github" alt="Release" />
+  </a>
   <a href="https://developer.android.com">
-    <img src="https://img.shields.io/badge/Platform-Android%208.0%2B-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android" />
+    <img src="https://img.shields.io/badge/Platform-Android%208.0%2B-3DDC84?style=flat&logo=android&logoColor=white" alt="Android" />
   </a>
   <a href="https://kotlinlang.org">
-    <img src="https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white" alt="Kotlin" />
+    <img src="https://img.shields.io/badge/Kotlin-2.0%2B-7F52FF?style=flat&logo=kotlin&logoColor=white" alt="Kotlin" />
   </a>
   <a href="https://developer.android.com/jetpack/compose">
-    <img src="https://img.shields.io/badge/Jetpack-Compose-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white" alt="Jetpack Compose" />
-  </a>
-  <a href="https://m3.material.io">
-    <img src="https://img.shields.io/badge/Design-Material%203-7C4DFF?style=for-the-badge&logo=materialdesign&logoColor=white" alt="Material 3" />
+    <img src="https://img.shields.io/badge/Jetpack%20Compose-M3-4285F4?style=flat&logo=jetpackcompose&logoColor=white" alt="Jetpack Compose" />
   </a>
   <a href="LICENSE">
-    <img src="https://img.shields.io/badge/License-MIT-E91E63?style=for-the-badge&logo=opensourceinitiative&logoColor=white" alt="License" />
+    <img src="https://img.shields.io/badge/License-MIT-E91E63?style=flat" alt="License" />
   </a>
-</p>
-
-<p align="center">
-  <img src="https://img.shields.io/badge/Target%20SDK-36-blue?style=flat-square&logo=google" alt="Target SDK" />
-  <img src="https://img.shields.io/badge/Min%20SDK-26-orange?style=flat-square&logo=android" alt="Min SDK" />
-  <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen.svg?style=flat-square" alt="PRs Welcome" />
-  <img src="https://img.shields.io/badge/Status-Active-success?style=flat-square" alt="Status" />
+  <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen?style=flat" alt="PRs Welcome" />
 </p>
 
 </div>
 
 ---
 
-## 项目简介
+## 📸 界面预览
 
-Trackr (BusOnRoad) 是一个 Android 实时公交到站查询应用。通过接入公共交通接口，展示车辆当前站序、预计到达时间与实时位置。
+| 首页通勤看板 | 线路实时走向 | 车队在途雷达 | 换乘枢纽看板 |
+| :---: | :---: | :---: | :---: |
+| <img src="screenshots/01_home_screen_light.png" width="240" alt="首页通勤看板" /> | <img src="screenshots/02_line_detail_horizontal.png" width="240" alt="线路实时走向" /> | <img src="screenshots/04_fleet_radar_bus_list.png" width="240" alt="车队在途雷达" /> | <img src="screenshots/05_stop_detail_hub.png" width="240" alt="换乘枢纽看板" /> |
 
----
-
-## 功能特性
-
-- 实时追踪：展示线路上所有运行车辆的相对站序、预计到达时间与站点距离。
-- 路线示意图：基于 Jetpack Compose 构建，支持横向与纵向线路示意及动态取色。
-- 桌面微件：在系统主屏幕展示下一班车到站信息。
-- 状态栏通知：支持常驻进度通知与到站提醒。
-- 架构基础：使用 Navigation 3 路由、Coroutines 与 Flow 异步数据流、DataStore 存储。
+> 💡 更多界面（包括深色夜间模式、纵向时间轴走向、极速搜索等）请查看 [完整截图物料库](screenshots/index.html)。
 
 ---
 
-## 技术栈
+## 📖 项目简介
+
+Trackr (BusOnRoad) 是一款专为通勤族打造的 Android 实时公交追踪应用。基于 **Material Design 3 Expressive** 设计规范与现代 Android 响应式架构构建，提供精准的车辆站序、到站倒计时、沿途车速与停靠区间展示，让日常公交候车更从容。
+
+---
+
+## ✨ 功能特性
+
+- **🚌 实时追踪与到站预报**：精确展示目标线路上在途车辆的相对站序、预计到达时间与实时距离。
+- **🗺️ 双模式线路走向图**：基于 Jetpack Compose 构建，支持横向平滑全景轨道与纵向时间轴两种视图无缝切换，适配不同读图习惯。
+- **📡 车队雷达看板**：全线在途车辆一目了然，支持按距当前站距离排序，直观掌握车牌、实时时速与准点状态。
+- **🚏 多站台交通枢纽看板**：支持大型公交枢纽站多物理站台一键切换、地铁换乘指引与全线综合到站看板。
+- **🔍 极速线路与站点搜索**：支持拼音字母及汉字模糊即时联想，快速定位目标线路与首末班方向。
+- **📱 桌面微件与常驻通知**：支持桌面 Widget 一键查看关注线路到站，搭配系统状态栏常驻进度与到站提醒通知。
+- **🌙 质感深色模式**：遵循 Material 3 动态色彩与深色调优规范，夜晚候车舒适不刺眼。
+
+---
+
+## 🛠️ 技术栈
 
 | 模块 | 方案 | 徽标 |
 | :--- | :--- | :--- |
-| 编程语言 | Kotlin (Coroutines & Flow) | <img src="https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white" /> |
-| UI 框架 | Jetpack Compose, Material 3 | <img src="https://img.shields.io/badge/Jetpack_Compose-4285F4?style=flat-square&logo=jetpackcompose&logoColor=white" /> |
-| 导航组件 | AndroidX Navigation 3 | <img src="https://img.shields.io/badge/Navigation_3-34A853?style=flat-square&logo=android" /> |
-| 网络请求 | OkHttp, Kotlinx Serialization | <img src="https://img.shields.io/badge/OkHttp-008080?style=flat-square" /> |
-| 本地存储 | Jetpack DataStore Preferences | <img src="https://img.shields.io/badge/DataStore-4285F4?style=flat-square&logo=google" /> |
-| 构建系统 | Gradle Kotlin DSL, Version Catalogs | <img src="https://img.shields.io/badge/Gradle-02303A?style=flat-square&logo=gradle&logoColor=white" /> |
+| 编程语言 | Kotlin (Coroutines & StateFlow) | <img src="https://img.shields.io/badge/Kotlin-7F52FF?style=flat&logo=kotlin&logoColor=white" /> |
+| UI 架构 | Jetpack Compose, Material 3 Expressive | <img src="https://img.shields.io/badge/Jetpack_Compose-4285F4?style=flat&logo=jetpackcompose&logoColor=white" /> |
+| 导航组件 | AndroidX Navigation 3 | <img src="https://img.shields.io/badge/Navigation_3-34A853?style=flat&logo=android" /> |
+| 网络层 | OkHttp 4, Kotlinx Serialization | <img src="https://img.shields.io/badge/OkHttp-008080?style=flat" /> |
+| 本地存储 | Jetpack DataStore Preferences | <img src="https://img.shields.io/badge/DataStore-4285F4?style=flat&logo=google" /> |
+| 构建系统 | Gradle Kotlin DSL, Version Catalogs | <img src="https://img.shields.io/badge/Gradle-02303A?style=flat&logo=gradle&logoColor=white" /> |
 
 ---
 
-## 构建与运行
+## 🚀 构建与运行
 
 ### 环境要求
 
@@ -74,25 +82,25 @@ Trackr (BusOnRoad) 是一个 Android 实时公交到站查询应用。通过接�
 
 ### 编译步骤
 
-1. 克隆仓库
+1. **克隆仓库**
    ```bash
    git clone https://github.com/5151561/Trackr-.git
    cd busonroad
    ```
 
-2. 构建 Debug APK
+2. **构建 Debug APK**
    ```bash
    ./gradlew assembleDebug
    ```
 
-3. 安装到已连接设备
+3. **安装到已连接设备**
    ```bash
    ./gradlew installDebug
    ```
 
 ---
 
-## 致谢
+## 🤝 致谢
 
 本项目在数据协议与接口分析中参考了以下开源项目：
 
@@ -101,12 +109,12 @@ Trackr (BusOnRoad) 是一个 Android 实时公交到站查询应用。通过接�
 
 ---
 
-## 许可证
+## 📄 许可证
 
 本项目采用 [MIT License](LICENSE)。
 
 ---
 
-## 友情链接
-[LINUX DO ](https://linux.do/)—— 真诚分享、友好讨论的技术社区，本项目的交流与反馈也发布于此
+## 🌐 友情链接
 
+- [LINUX DO](https://linux.do/) —— 真诚分享、友好讨论的技术社区，本项目的交流与反馈也发布于此。
