@@ -11,8 +11,12 @@ import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.graphics.drawable.IconCompat
+import com.trackr.R
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.TrackingSessionState
+import com.trackr.service.vendor.LiveUpdatePromotion
+import com.trackr.service.vendor.OppoFluidCloudAdapter
 import com.trackr.service.vendor.XiaomiFocusAdapter
 
 /**
@@ -55,32 +59,52 @@ object LiveProgressNotificationHelper {
     }
 
     /**
-     * 计算当前追踪任务的站间跨度与最大进度标尺
+     * 计算进度标尺：以「线路起点站 → 目标候车站」的全区间为基准，
+     * 保证进度条填充比例与「剩 N 站」文案始终一致
      */
-    fun calculateSpanAndMaxProgress(startTrackingOrder: Int, targetOrder: Int): Pair<Int, Int> {
-        val span = (targetOrder - startTrackingOrder).coerceAtLeast(1)
-        return span to (span * 100)
+    fun calculateSpanAndMaxProgress(targetOrder: Int): Pair<Int, Int> {
+        val hops = (targetOrder - 1).coerceAtLeast(1)
+        return hops to (hops * 100)
     }
 
     /**
-     * 计算当前车辆相对于追踪起点的插值进度 [0, maxProgress]
+     * 计算当前车辆相对于线路起点站的进度 [0, maxProgress]
+     * 剩余站数是唯一基准：已完成站间数 = 全区间站间数 - (剩余站数 + 未走完的当前站间比例)
      */
     fun calculateCurrentProgress(
         state: TrackingSessionState,
         isArrived: Boolean = state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45)
     ): Int {
-        val (span, maxProgress) = calculateSpanAndMaxProgress(state.startTrackingOrder, state.targetOrder)
-        if (state.currentBusOrder <= 0) return 0
+        val (hops, maxProgress) = calculateSpanAndMaxProgress(state.targetOrder)
         if (isArrived) return maxProgress
+        if (state.currentBusOrder <= 0 || state.stopsRemaining < 0) return 0
 
-        // 车辆在全线上的 1-based 连续物理坐标：在 (currentBusOrder - 1) 与 currentBusOrder 之间
-        // 例如：order=8, progress=0.2 时，车辆位于第 7 站到第 8 站之间，坐标为 7.2
-        val busContinuous = ((state.currentBusOrder - 1) + state.currentBusProgress.coerceIn(0f, 1f))
-            .coerceAtLeast(1.0f)
-        // 起始基准站的 1-based 物理坐标：第 startTrackingOrder 站对应坐标 startTrackingOrder.toFloat()
-        val startContinuous = state.startTrackingOrder.toFloat()
-        val completedHops = (busContinuous - startContinuous).coerceIn(0f, span.toFloat())
-        return (completedHops * 100).toInt().coerceIn(0, maxProgress)
+        val segmentFraction = state.currentBusProgress.coerceIn(0f, 1f)
+        val remainingHops = state.stopsRemaining + (1f - segmentFraction)
+        val completedHops = (hops - remainingHops).coerceIn(0f, hops.toFloat())
+        return (completedHops / hops * maxProgress).toInt().coerceIn(0, maxProgress)
+    }
+
+    /**
+     * 构建站点标点：系统最多渲染 4 个，且首尾位置的标点会被丢弃，
+     * 因此只在区间内部均匀取点，站距过密时抽稀
+     */
+    private fun buildStationPoints(
+        span: Int,
+        currentProgress: Int
+    ): List<NotificationCompat.ProgressStyle.Point> {
+        val maxPoints = 4
+        if (span <= 1) return emptyList()
+        val innerHops = (1 until span).toList()
+        val step = ((innerHops.size + maxPoints - 1) / maxPoints).coerceAtLeast(1)
+        return innerHops
+            .filterIndexed { index, _ -> index % step == 0 }
+            .take(maxPoints)
+            .map { hopIndex ->
+                val pointPos = hopIndex * 100
+                val pointColor = if (pointPos <= currentProgress) COLOR_COMPLETED else COLOR_REMAINING
+                NotificationCompat.ProgressStyle.Point(pointPos).setColor(pointColor)
+            }
     }
 
     /**
@@ -89,37 +113,26 @@ object LiveProgressNotificationHelper {
     fun buildNotification(context: Context, state: TrackingSessionState): Notification {
         ensureNotificationChannel(context)
 
-        val (span, maxProgress) = calculateSpanAndMaxProgress(state.startTrackingOrder, state.targetOrder)
+        val (span, maxProgress) = calculateSpanAndMaxProgress(state.targetOrder)
         val isArrived = state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45)
         val currentProgress = calculateCurrentProgress(state, isArrived)
 
-        // 3. 构建 Android 16 ProgressStyle 分段（已行驶绿色段与剩余蓝色段）
-        val completedLength = currentProgress.coerceIn(1, maxProgress)
-        val remainingLength = (maxProgress - completedLength).coerceAtLeast(0)
+        // 3. 单段进度条：填充/未填充由 styledByProgress 统一着色，避免双段叠加导致填充比例失真
+        val segments = listOf(
+            NotificationCompat.ProgressStyle.Segment(maxProgress).setColor(COLOR_COMPLETED)
+        )
 
-        val segments = if (remainingLength > 0) {
-            listOf(
-                NotificationCompat.ProgressStyle.Segment(completedLength).setColor(COLOR_COMPLETED),
-                NotificationCompat.ProgressStyle.Segment(remainingLength).setColor(COLOR_REMAINING)
-            )
-        } else {
-            listOf(
-                NotificationCompat.ProgressStyle.Segment(maxProgress).setColor(COLOR_COMPLETED)
-            )
-        }
-
-        // 4. 构建沿途各个站点的 Point 标点
-        val points = (1..span).map { hopIndex ->
-            val pointPos = hopIndex * 100
-            val pointColor = if (pointPos <= currentProgress) COLOR_COMPLETED else COLOR_REMAINING
-            NotificationCompat.ProgressStyle.Point(pointPos).setColor(pointColor)
-        }
+        // 4. 站点标点：仅取区间内部站点，且受系统 4 个标点上限约束
+        val points = buildStationPoints(span, currentProgress)
 
         val progressStyle = NotificationCompat.ProgressStyle()
             .setStyledByProgress(true)
             .setProgress(currentProgress)
             .setProgressSegments(segments)
             .setProgressPoints(points)
+            .setProgressTrackerIcon(
+                IconCompat.createWithResource(context, R.drawable.ic_stat_trackr)
+            )
 
         // 5. Android 16 状态栏胶囊 Live Updates 短文本（<= 7 字符）
         val shortCriticalText = when {
@@ -200,7 +213,7 @@ object LiveProgressNotificationHelper {
         }
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID_LIVE_PROGRESS)
-            .setSmallIcon(context.applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_dialog_info)
+            .setSmallIcon(R.drawable.ic_stat_trackr)
             .setContentTitle(title)
             .setContentText(contentText)
             .setSubText("候车追踪 · 第${state.targetOrder}站")
@@ -225,11 +238,35 @@ object LiveProgressNotificationHelper {
         if (isLiveEnabled) {
             builder.setRequestPromotedOngoing(true)
             builder.setShortCriticalText(shortCriticalText)
-            // 注入小米 HyperOS 焦点通知 / 超级岛协议参数
-            XiaomiFocusAdapter.attachFocusParams(builder, state)
+            if (XiaomiFocusAdapter.isXiaomiRom()) {
+                XiaomiFocusAdapter.attachFocusParams(builder, state)
+            }
         }
 
-        return builder.build()
+        val notification = builder.build()
+        if (isLiveEnabled && LiveUpdatePromotion.isPromotionSupported()) {
+            logPromotionState(context, notification)
+        }
+        return notification
+    }
+
+    private fun logPromotionState(context: Context, notification: Notification) {
+        try {
+            val canPost = LiveUpdatePromotion.canPromote(context)
+            val promotable = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.BAKLAVA) {
+                notification.hasPromotableCharacteristics()
+            } else {
+                false
+            }
+            Log.i(
+                TAG,
+                "promotion canPost=$canPost promotable=$promotable " +
+                        "requested=${NotificationCompat.isRequestPromotedOngoing(notification)} " +
+                        "fluidCloud=${OppoFluidCloudAdapter.isColorOs()}"
+            )
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to inspect promotion state", e)
+        }
     }
 
     /**

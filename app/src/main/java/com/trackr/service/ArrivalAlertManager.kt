@@ -12,8 +12,10 @@ import android.os.VibratorManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.trackr.R
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.TrackingSessionState
+import com.trackr.service.vendor.LiveUpdatePromotion
 
 /**
  * 负责管理高优先级到站/进站预警通知渠道及震动声音提醒
@@ -60,35 +62,38 @@ object ArrivalAlertManager {
      */
     fun triggerApproachingAlert(context: Context, state: TrackingSessionState) {
         ensureNotificationChannel(context)
+        cancelCounterpart(context, NOTIFICATION_ID_ARRIVED)
 
-        val etaText = if (state.etaSeconds > 0) {
-            "（${RouteProjectionMath.formatEtaText(state.etaSeconds)}）"
-        } else {
-            ""
-        }
-        val title = "【即将到站】${state.lineName}"
-        val content = "距 ${state.targetStopName} 还有 ${state.stopsRemaining} 站$etaText，请准备上车/下车！"
+        if (shouldPostStandaloneNotification(context, state)) {
+            val etaText = if (state.etaSeconds > 0) {
+                "（${RouteProjectionMath.formatEtaText(state.etaSeconds)}）"
+            } else {
+                ""
+            }
+            val title = "【即将到站】${state.lineName}"
+            val content = "距 ${state.targetStopName} 还有 ${state.stopsRemaining} 站$etaText，请准备上车/下车！"
 
-        val contentPendingIntent = createMainActivityPendingIntent(context, NOTIFICATION_ID_APPROACHING)
+            val contentPendingIntent = createMainActivityPendingIntent(context, NOTIFICATION_ID_APPROACHING)
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
-            .setSmallIcon(context.applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_dialog_info)
-            .setContentTitle(title)
-            .setContentText(content)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setAutoCancel(true)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setContentIntent(contentPendingIntent)
-            .build()
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
+                .setSmallIcon(R.drawable.ic_stat_trackr)
+                .setContentTitle(title)
+                .setContentText(content)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(content))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setAutoCancel(true)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setContentIntent(contentPendingIntent)
+                .build()
 
-        try {
-            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_APPROACHING, notification)
-        } catch (e: SecurityException) {
-            Log.w(TAG, "Cannot post approaching alert: missing POST_NOTIFICATIONS permission", e)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to post approaching alert notification", e)
+            try {
+                NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_APPROACHING, notification)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "Cannot post approaching alert: missing POST_NOTIFICATIONS permission", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to post approaching alert notification", e)
+            }
         }
 
         performWaveformVibration(context, APPROACHING_VIBRATION_PATTERN)
@@ -99,33 +104,59 @@ object ArrivalAlertManager {
      */
     fun triggerArrivedAlert(context: Context, state: TrackingSessionState) {
         ensureNotificationChannel(context)
+        cancelCounterpart(context, NOTIFICATION_ID_APPROACHING)
 
-        val title = "【车辆已到站】${state.lineName}"
-        val content = "${state.lineName} 已到达 ${state.targetStopName}！请注意上车/下车。"
+        if (shouldPostStandaloneNotification(context, state)) {
+            val title = "【车辆已到站】${state.lineName}"
+            val content = "${state.lineName} 已到达 ${state.targetStopName}！请注意上车/下车。"
 
-        val contentPendingIntent = createMainActivityPendingIntent(context, NOTIFICATION_ID_ARRIVED)
+            val contentPendingIntent = createMainActivityPendingIntent(context, NOTIFICATION_ID_ARRIVED)
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
-            .setSmallIcon(context.applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_dialog_info)
-            .setContentTitle(title)
-            .setContentText(content)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setAutoCancel(true)
-            .setDefaults(NotificationCompat.DEFAULT_ALL)
-            .setContentIntent(contentPendingIntent)
-            .build()
+            val notification = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
+                .setSmallIcon(R.drawable.ic_stat_trackr)
+                .setContentTitle(title)
+                .setContentText(content)
+                .setStyle(NotificationCompat.BigTextStyle().bigText(content))
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setAutoCancel(true)
+                .setDefaults(NotificationCompat.DEFAULT_ALL)
+                .setContentIntent(contentPendingIntent)
+                .build()
 
-        try {
-            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_ARRIVED, notification)
-        } catch (e: SecurityException) {
-            Log.w(TAG, "Cannot post arrived alert: missing POST_NOTIFICATIONS permission", e)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to post arrived alert notification", e)
+            try {
+                NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_ARRIVED, notification)
+            } catch (e: SecurityException) {
+                Log.w(TAG, "Cannot post arrived alert: missing POST_NOTIFICATIONS permission", e)
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to post arrived alert notification", e)
+            }
         }
 
         performOneShotVibration(context, ARRIVED_VIBRATION_DURATION_MS)
+    }
+
+    /**
+     * 实时活动（流体云 / 焦点通知 / 状态栏胶囊）已经在通知栏常驻展示同一趟车的进度与到站状态时，
+     * 不再重复发一条内容相同的强提醒通知，仅保留震动提示
+     */
+    private fun shouldPostStandaloneNotification(context: Context, state: TrackingSessionState): Boolean {
+        if (!state.isActive) return true
+        val liveEnabled = try {
+            com.trackr.TrackrApp.instance.repository.isLiveNotificationEnabled.value
+        } catch (_: Exception) {
+            false
+        }
+        if (!liveEnabled) return true
+        return !LiveUpdatePromotion.canPromote(context)
+    }
+
+    private fun cancelCounterpart(context: Context, notificationId: Int) {
+        try {
+            NotificationManagerCompat.from(context).cancel(notificationId)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to cancel notification $notificationId", e)
+        }
     }
 
     private fun createMainActivityPendingIntent(context: Context, requestCode: Int): PendingIntent {

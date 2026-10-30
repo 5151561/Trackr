@@ -54,6 +54,7 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,11 +65,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.TransitCodeProvider
+import com.trackr.service.vendor.LiveUpdatePromotion
+import com.trackr.service.vendor.OppoFluidCloudAdapter
 import com.trackr.service.vendor.XiaomiFocusAdapter
 import com.trackr.ui.components.ScheduledRemindersBottomSheet
 import com.trackr.util.TransitCodeHelper
@@ -90,6 +94,13 @@ fun MoreScreen(
 
     // 采用 rememberSaveable 确保配置变更（旋转/折叠展开）时不丢失弹窗状态
     var showRemindersSheet by rememberSaveable { mutableStateOf(false) }
+
+    // 系统实时活动（流体云 / 置顶通知）授权状态，返回前台时重新查询
+    var canPromoteLiveUpdate by remember { mutableStateOf(LiveUpdatePromotion.canPromote(context)) }
+    LifecycleResumeEffect(Unit) {
+        canPromoteLiveUpdate = LiveUpdatePromotion.canPromote(context)
+        onPauseOrDispose { }
+    }
 
     // 向上滑动时标题栏平滑向上收起为单行栏，向下拉时展开
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -453,7 +464,7 @@ fun MoreScreen(
                                         )
                                         Spacer(modifier = Modifier.height(2.dp))
                                         Text(
-                                            text = "在状态栏胶囊与锁屏显示公交到达进度。支持 Android 16、小米澎湃OS 焦点通知及 OPPO 流体云",
+                                            text = "在状态栏胶囊与锁屏显示公交到达进度。支持 Android 16 实时活动、小米澎湃OS 焦点通知及 OPPO 流体云（需开启系统「置顶通知」）",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -469,8 +480,33 @@ fun MoreScreen(
 
                                 if (isLiveNotificationEnabled) {
                                     Spacer(modifier = Modifier.height(10.dp))
+                                    Text(
+                                        text = if (canPromoteLiveUpdate) {
+                                            "系统实时活动权限已开启，可在状态栏胶囊 / 流体云中显示"
+                                        } else {
+                                            "系统实时活动权限未开启，胶囊与流体云不会显示"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (canPromoteLiveUpdate) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            MaterialTheme.colorScheme.error
+                                        }
+                                    )
+                                    Spacer(modifier = Modifier.height(10.dp))
                                     FilledTonalButton(
-                                        onClick = { XiaomiFocusAdapter.openNotificationSettings(context) },
+                                        onClick = {
+                                            when {
+                                                !canPromoteLiveUpdate ->
+                                                    LiveUpdatePromotion.openPromotionSettings(context)
+                                                XiaomiFocusAdapter.isXiaomiRom() ->
+                                                    XiaomiFocusAdapter.openNotificationSettings(context)
+                                                OppoFluidCloudAdapter.isColorOs() ->
+                                                    OppoFluidCloudAdapter.openFluidCloudSettings(context)
+                                                else ->
+                                                    LiveUpdatePromotion.openAppNotificationSettings(context)
+                                            }
+                                        },
                                         modifier = Modifier.fillMaxWidth(),
                                         shape = RoundedCornerShape(12.dp)
                                     ) {
@@ -481,7 +517,11 @@ fun MoreScreen(
                                         )
                                         Spacer(modifier = Modifier.width(8.dp))
                                         Text(
-                                            text = "打开系统流体云 / 焦点通知设置",
+                                            text = if (canPromoteLiveUpdate) {
+                                                "打开系统流体云 / 焦点通知设置"
+                                            } else {
+                                                "去开启实时活动 / 置顶通知权限"
+                                            },
                                             style = MaterialTheme.typography.labelLarge
                                         )
                                     }
