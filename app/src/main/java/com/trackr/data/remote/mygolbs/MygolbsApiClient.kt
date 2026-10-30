@@ -1,5 +1,6 @@
 package com.trackr.data.remote.mygolbs
 
+import com.trackr.data.remote.common.BaseTransitApiClient
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
@@ -10,7 +11,6 @@ import com.trackr.domain.model.LineOperatingState
 import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.NearbyStopLineStatus
-import com.trackr.domain.model.sanitizePlateOrFleetNo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -28,7 +28,7 @@ import java.util.concurrent.ConcurrentHashMap
  * 掌上公交（Mygolbs）全国实时公交直连 API 客户端
  * 基于 H5 数据面协议实现，严格携带 Origin 与 Referer 头，支持纯本地直连
  */
-class MygolbsApiClient(private val httpClient: OkHttpClient) {
+class MygolbsApiClient(httpClient: OkHttpClient) : BaseTransitApiClient(httpClient) {
 
     companion object {
         const val API_URL = "https://h5.mygolbs.com/ApiData.do"
@@ -93,13 +93,7 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
             .header("User-Agent", USER_AGENT)
             .build()
 
-        val response = httpClient.newCall(request).execute()
-        if (!response.isSuccessful) {
-            throw IOException("Mygolbs HTTP error ${response.code}")
-        }
-        val bodyStr = response.body?.string() ?: throw IOException("Empty response body from Mygolbs")
-
-        val json = JSONObject(bodyStr)
+        val json = executeJson(request)
         val status = json.opt("status")?.toString()?.trim('"')
         if (status != "1") {
             val msg = json.optString("msg")
@@ -282,9 +276,7 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
                 val item = dataArr.optJSONObject(i) ?: continue
                 val stationName = item.optString("stationName").trim()
                 if (stationName.isBlank() || !seenStops.add(stationName)) continue
-                val isSubway = stationName.contains("（地铁站）") ||
-                        stationName.contains("(地铁站)")
-                if (isSubway) continue // 过滤纯地铁站（保留名称以地铁口命名的地面公交站）
+                if (isSubwayStationName(stationName)) continue // 过滤纯地铁站（保留名称以地铁口命名的地面公交站）
 
                 val lat = item.optDouble("station_lat", 0.0)
                 val lng = item.optDouble("station_lon", 0.0)
@@ -458,15 +450,16 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
                 val name = item.optString("name").trim()
                 if (name.isBlank()) continue
                 // 过滤纯地铁站点
-                if (name.contains("（地铁站）") || name.contains("(地铁站)") || name.endsWith("地铁站")) continue
+                if (isSubwayStationName(name)) continue
 
                 val lat = item.optDouble("lat", 0.0)
                 val lng = item.optDouble("lon", 0.0)
                 val dis = item.optInt("dis", 0)
 
                 rawStationList.add(Triple(name, lat, lng))
-                if (dis > 0) {
-                    distMap[name] = dis
+                val resolvedDist = resolveDistance(dis.takeIf { it > 0 }, wgsLat, wgsLng, lat, lng)
+                if (resolvedDist != null) {
+                    distMap[name] = resolvedDist
                 }
                 if (rawStationList.size >= limit) break
             }
@@ -636,7 +629,7 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
             liveBuses.add(
                 LiveBus(
                     busId = busNumber,
-                    plateOrFleetNo = sanitizePlateOrFleetNo(busNumber),
+                    plateOrFleetNo = sanitizeBusPlate(busNumber),
                     order = bOrder,
                     segmentProgress = segmentProgress,
                     isArrived = isArrived,

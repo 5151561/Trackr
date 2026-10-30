@@ -1,5 +1,6 @@
 package com.trackr.data.remote.chelaile
 
+import com.trackr.data.remote.common.BaseTransitApiClient
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
@@ -15,7 +16,6 @@ import com.trackr.domain.model.ProvinceCityCatalog
 import com.trackr.domain.model.TimetableSegment
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitSearchResult
-import com.trackr.domain.model.sanitizePlateOrFleetNo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -32,7 +32,7 @@ import java.time.format.DateTimeFormatter
  * 车来了（Chelaile）全国实时公交直连 API 客户端
  * 基于微信小程序协议抓包逆向构建，纯本地直连，不经过任何中间转接服务器
  */
-class ChelaileApiClient(private val httpClient: OkHttpClient) {
+class ChelaileApiClient(httpClient: OkHttpClient) : BaseTransitApiClient(httpClient) {
 
     companion object {
         const val BASE_DOMAIN = "https://web.chelaile.net.cn"
@@ -132,11 +132,13 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             reqBuilder.header(hk, hv)
         }
 
-        val response = httpClient.newCall(reqBuilder.build()).execute()
+        val response = executeHttpCall(reqBuilder.build())
         if (!response.isSuccessful) {
-            throw IOException("Chelaile HTTP ${response.code} error for $url")
+            val code = response.code
+            response.close()
+            throw IOException("Chelaile HTTP $code error for $url")
         }
-        val bodyStr = response.body?.string() ?: throw IOException("Empty response body from $url")
+        val bodyStr = response.body.string().ifBlank { throw IOException("Empty response body from $url") }
         ChelaileCrypto.extractEnvelopeDataJson(bodyStr)
     }
 
@@ -156,11 +158,13 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             reqBuilder.header(hk, hv)
         }
 
-        val response = httpClient.newCall(reqBuilder.build()).execute()
+        val response = executeHttpCall(reqBuilder.build())
         if (!response.isSuccessful) {
-            throw IOException("Chelaile plain HTTP ${response.code} error for $url")
+            val code = response.code
+            response.close()
+            throw IOException("Chelaile plain HTTP $code error for $url")
         }
-        val bodyStr = response.body?.string() ?: throw IOException("Empty response body from $url")
+        val bodyStr = response.body.string().ifBlank { throw IOException("Empty response body from $url") }
         val cleanStr = cleanPlainJson(bodyStr)
         JSONObject(cleanStr)
     }
@@ -348,23 +352,13 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             val s = stationsArr.getJSONObject(i)
             val isSubway = s.optInt("subwayV2", 0) == 1 || s.optInt("isSubway", 0) == 1
             val sn = s.optString("sn").trim()
-            val isPureSubway = isSubway ||
-                    sn.endsWith("（M）", ignoreCase = true) ||
-                    sn.endsWith("(M)", ignoreCase = true) ||
-                    sn.contains("（地铁站）") ||
-                    sn.contains("(地铁站)")
+            val isPureSubway = isSubway || isSubwayStationName(sn)
             if (isPureSubway) continue // 纯地铁站点，不加入公交站点列表
 
             val stLat = s.optDouble("lat", 0.0)
             val stLng = s.optDouble("lng", 0.0)
             val serverDist = if (s.has("distance")) s.optInt("distance") else null
-            val dist = if (serverDist != null && serverDist > 0) {
-                serverDist
-            } else if (userLat != null && userLng != null && userLat > 0.0 && userLng > 0.0 && stLat > 0.0 && stLng > 0.0) {
-                RouteProjectionMath.calculateDistanceMeters(userLat, userLng, stLat, stLng)
-            } else {
-                null
-            }
+            val dist = resolveDistance(serverDist, userLat, userLng, stLat, stLng)
             stopList.add(
                 NearbyStop(
                     stopId = s.optString("sId"),
@@ -414,55 +408,15 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             val s = nearStsArr.getJSONObject(i)
             val isSubway = s.optInt("isSubway", 0) == 1 || s.optInt("subwayV2", 0) == 1
             val sn = s.optString("sn").trim()
-            val isPureSubway = isSubway ||
-                    sn.endsWith("（M）", ignoreCase = true) ||
-                    sn.endsWith("(M)", ignoreCase = true) ||
-                    sn.contains("（地铁站）") ||
-                    sn.contains("(地铁站)")
+            val isPureSubway = isSubway || isSubwayStationName(sn)
             if (isPureSubway) continue // 纯地铁站点，不作为附近公交站点展示
 
-            val dist = if (s.has("distance")) s.optInt("distance") else null
+            val stLat = s.optDouble("lat", 0.0)
+            val stLng = s.optDouble("lng", 0.0)
+            val serverDist = if (s.has("distance")) s.optInt("distance") else null
+            val dist = resolveDistance(serverDist, wgsLat, wgsLng, stLat, stLng)
 
-            // 途经线路
-            val linesArr = s.optJSONArray("lines") ?: JSONArray()
-            val lineStatuses = ArrayList<NearbyStopLineStatus>()
-            for (j in 0 until linesArr.length()) {
-                val li = linesArr.getJSONObject(j)
-                val lineObj = li.optJSONObject("line") ?: JSONObject()
-                val targetStn = li.optJSONObject("targetStation") ?: JSONObject()
-                val targetStationOrder = targetStn.optInt("order", 0)
-                val stnStatesArr = li.optJSONArray("stnStates") ?: JSONArray()
-                val liveBuses = parseStnStates(stnStatesArr, targetStationOrder)
-
-                val dir = BusLineDirection(
-                    lineId = lineObj.optString("lineId"),
-                    name = lineObj.optString("name"),
-                    lineNo = lineObj.optString("lineNo"),
-                    direction = lineObj.optInt("direction", 0),
-                    startStop = lineObj.optString("startSn"),
-                    endStop = lineObj.optString("endSn"),
-                    firstTime = lineObj.optString("firstTime"),
-                    lastTime = lineObj.optString("lastTime"),
-                    price = lineObj.optString("price"),
-                    source = DataSourceType.CHELAILE
-                )
-
-                val shortDesc = lineObj.optString("shortDesc").trim()
-                val nextOp = lineObj.optString("nextOperationTimeDesc").trim()
-                val statusText = shortDesc.ifBlank { nextOp }
-
-                lineStatuses.add(
-                    NearbyStopLineStatus(
-                        line = dir,
-                        targetOrder = targetStn.optInt("order", 0),
-                        targetStopId = targetStn.optString("sId"),
-                        targetStopName = targetStn.optString("sn").ifBlank { s.optString("sn") },
-                        statusText = statusText,
-                        preArrivalTime = li.optString("preArrivalTime").takeIf { it.isNotBlank() },
-                        approachingBuses = liveBuses
-                    )
-                )
-            }
+            val lineStatuses = parseNearbyLineStatus(s.optJSONArray("lines"), s.optString("sn"))
 
             // 地铁线路
             val subwayArr = s.optJSONArray("subwayV2Lines") ?: JSONArray()
@@ -525,53 +479,9 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             val stLat = st.optDouble("lat", 0.0)
             val stLng = st.optDouble("lng", 0.0)
             val serverDist = if (st.has("distance")) st.optInt("distance") else null
-            val dist = if (serverDist != null && serverDist > 0) {
-                serverDist
-            } else if (userLat != null && userLng != null && userLat > 0.0 && userLng > 0.0 && stLat > 0.0 && stLng > 0.0) {
-                RouteProjectionMath.calculateDistanceMeters(userLat, userLng, stLat, stLng)
-            } else {
-                null
-            }
+            val dist = resolveDistance(serverDist, userLat, userLng, stLat, stLng)
 
-            val linesArr = st.optJSONArray("lines") ?: JSONArray()
-            val lineStatuses = ArrayList<NearbyStopLineStatus>()
-            for (j in 0 until linesArr.length()) {
-                val li = linesArr.getJSONObject(j)
-                val lineObj = li.optJSONObject("line") ?: JSONObject()
-                val targetStn = li.optJSONObject("targetStation") ?: JSONObject()
-                val targetStationOrder = targetStn.optInt("order", 0)
-                val stnStatesArr = li.optJSONArray("stnStates") ?: JSONArray()
-                val liveBuses = parseStnStates(stnStatesArr, targetStationOrder)
-
-                val dir = BusLineDirection(
-                    lineId = lineObj.optString("lineId"),
-                    name = lineObj.optString("name"),
-                    lineNo = lineObj.optString("lineNo"),
-                    direction = lineObj.optInt("direction", 0),
-                    startStop = lineObj.optString("startSn"),
-                    endStop = lineObj.optString("endSn"),
-                    firstTime = lineObj.optString("firstTime"),
-                    lastTime = lineObj.optString("lastTime"),
-                    price = lineObj.optString("price"),
-                    source = DataSourceType.CHELAILE
-                )
-
-                val shortDesc = lineObj.optString("shortDesc").trim()
-                val nextOp = lineObj.optString("nextOperationTimeDesc").trim()
-                val statusText = shortDesc.ifBlank { nextOp }
-
-                lineStatuses.add(
-                    NearbyStopLineStatus(
-                        line = dir,
-                        targetOrder = targetStn.optInt("order", 0),
-                        targetStopId = targetStn.optString("sId"),
-                        targetStopName = targetStn.optString("sn").ifBlank { st.optString("sn") },
-                        statusText = statusText,
-                        preArrivalTime = li.optString("preArrivalTime").takeIf { it.isNotBlank() },
-                        approachingBuses = liveBuses
-                    )
-                )
-            }
+            val lineStatuses = parseNearbyLineStatus(st.optJSONArray("lines"), st.optString("sn"))
 
             val metrosArr = st.optJSONArray("metros") ?: JSONArray()
             val metroNames = ArrayList<String>()
@@ -597,14 +507,60 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
         result
     }
 
+    private fun parseNearbyLineStatus(
+        linesArr: JSONArray?,
+        fallbackStopName: String
+    ): List<NearbyStopLineStatus> {
+        if (linesArr == null) return emptyList()
+        val lineStatuses = ArrayList<NearbyStopLineStatus>(linesArr.length())
+        for (j in 0 until linesArr.length()) {
+            val li = linesArr.getJSONObject(j)
+            val lineObj = li.optJSONObject("line") ?: JSONObject()
+            val targetStn = li.optJSONObject("targetStation") ?: JSONObject()
+            val targetStationOrder = targetStn.optInt("order", 0)
+            val stnStatesArr = li.optJSONArray("stnStates") ?: JSONArray()
+            val liveBuses = parseStnStates(stnStatesArr, targetStationOrder)
+
+            val dir = BusLineDirection(
+                lineId = lineObj.optString("lineId"),
+                name = lineObj.optString("name"),
+                lineNo = lineObj.optString("lineNo"),
+                direction = lineObj.optInt("direction", 0),
+                startStop = lineObj.optString("startSn"),
+                endStop = lineObj.optString("endSn"),
+                firstTime = lineObj.optString("firstTime"),
+                lastTime = lineObj.optString("lastTime"),
+                price = lineObj.optString("price"),
+                source = DataSourceType.CHELAILE
+            )
+
+            val shortDesc = lineObj.optString("shortDesc").trim()
+            val nextOp = lineObj.optString("nextOperationTimeDesc").trim()
+            val statusText = shortDesc.ifBlank { nextOp }
+
+            lineStatuses.add(
+                NearbyStopLineStatus(
+                    line = dir,
+                    targetOrder = targetStationOrder,
+                    targetStopId = targetStn.optString("sId"),
+                    targetStopName = targetStn.optString("sn").ifBlank { fallbackStopName },
+                    statusText = statusText,
+                    preArrivalTime = li.optString("preArrivalTime").takeIf { it.isNotBlank() },
+                    approachingBuses = liveBuses
+                )
+            )
+        }
+        return lineStatuses
+    }
+
     private fun parseStnStates(stnStatesArr: JSONArray, targetStationOrder: Int): List<LiveBus> {
         val liveBuses = ArrayList<LiveBus>()
         for (k in 0 until stnStatesArr.length()) {
             val b = stnStatesArr.getJSONObject(k)
             val travelTime = b.optInt("travelTime", -1)
             val bBusId = b.optString("busId")
-            val bPlate = sanitizePlateOrFleetNo(b.optString("licence")).ifBlank {
-                sanitizePlateOrFleetNo(bBusId)
+            val bPlate = sanitizeBusPlate(b.optString("licence")).ifBlank {
+                sanitizeBusPlate(bBusId)
             }
             val stopsAway = b.optInt("value", -1)
             val state = b.optInt("state", 0)
@@ -798,8 +754,8 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             val bLng = b.optDouble("lng", 0.0)
             val bSpeed = b.optDouble("speed", 0.0)
             val rawLicence = b.optString("licence")
-            val plate = sanitizePlateOrFleetNo(rawLicence).ifBlank {
-                sanitizePlateOrFleetNo(bId)
+            val plate = sanitizeBusPlate(rawLicence).ifBlank {
+                sanitizeBusPlate(bId)
             }
             val nextStopName = b.optString("nextStationName").takeIf { it.isNotBlank() }
 
