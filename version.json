@@ -1,9 +1,9 @@
 {
-  "versionCode": 2,
-  "versionName": "0.0.2",
+  "versionCode": 3,
+  "versionName": "0.0.3",
   "minSupportedVersionCode": 1,
-  "changelog": "1. 新增新版本检测与更新提醒功能\n2. 优化线路与站点到站展示体验\n3. 修复部分已知问题",
-  "downloadUrl": "https://github.com/5151561/Trackr/releases",
+  "changelog": "chore: 将发布版本调整为 0.0.3",
+  "downloadUrl": "https://github.com/5151561/Trackr/releases/tag/v0.0.3",
   "publishTime": "2026-10-30",
   "forceUpdate": false
 }
