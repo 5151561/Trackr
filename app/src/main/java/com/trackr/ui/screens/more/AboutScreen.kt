@@ -34,14 +34,17 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import com.trackr.R
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,6 +59,13 @@ fun AboutScreen(
         packageInfo.versionName ?: "0.0.1"
     } catch (_: Exception) {
         "0.0.1"
+    }
+    val appIconBitmap = remember(context) {
+        val drawable = ContextCompat.getDrawable(context, R.mipmap.ic_launcher)
+            ?: context.packageManager.getApplicationIcon(context.packageName)
+        val width = if (drawable.intrinsicWidth > 0) drawable.intrinsicWidth else 192
+        val height = if (drawable.intrinsicHeight > 0) drawable.intrinsicHeight else 192
+        drawable.toBitmap(width = width, height = height).asImageBitmap()
     }
 
     Scaffold(
@@ -109,7 +119,7 @@ fun AboutScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Image(
-                        painter = painterResource(R.mipmap.ic_launcher),
+                        bitmap = appIconBitmap,
                         contentDescription = "应用图标",
                         modifier = Modifier
                             .size(72.dp)
