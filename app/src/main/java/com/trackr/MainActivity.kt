@@ -28,12 +28,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -142,7 +145,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleTransitCodeIntent(intent: Intent?) {
-        if (intent?.action == "com.trackr.action.OPEN_TRANSIT_CODE") {
+        if (intent?.action == "com.trackr.action.OPEN_TRANSIT_CODE" ||
+            intent?.action == "com.github.u5151561.trackr.action.OPEN_TRANSIT_CODE"
+        ) {
             val providerStr = intent.getStringExtra("extra_provider")
             val provider = if (providerStr == "alipay") TransitCodeProvider.ALIPAY else TransitCodeProvider.UNIONPAY
             TransitCodeHelper.openTransitCode(this, provider)
@@ -185,22 +190,78 @@ fun TrackrNavApp(
         }
     }
 
+    var showLocationDisclosureDialog by rememberSaveable { mutableStateOf(false) }
+
+    val needsLocation = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+    val needsNotification = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+        ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+
     LaunchedEffect(Unit) {
-        val needed = mutableListOf<String>()
-        if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
-        ) {
-            needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
-            needed.add(Manifest.permission.ACCESS_COARSE_LOCATION)
+        if (needsLocation) {
+            showLocationDisclosureDialog = true
+        } else if (needsNotification) {
+            permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            needed.add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-        if (needed.isNotEmpty()) {
-            permissionLauncher.launch(needed.toTypedArray())
-        }
+    }
+
+    if (showLocationDisclosureDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                showLocationDisclosureDialog = false
+                if (needsNotification) {
+                    permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                }
+            },
+            icon = {
+                Icon(
+                    imageVector = Icons.Default.DirectionsBus,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            },
+            title = {
+                Text(
+                    text = "位置信息权限说明",
+                    style = MaterialTheme.typography.titleMedium
+                )
+            },
+            text = {
+                Text(
+                    text = "为了向您展示附近的公交站点、候车站距离以及途经线路的实时到站动态，追客需要在您使用应用期间获取设备的大致或精准位置信息。\n\n我们承诺：位置信息仅在本地用于附近公交站点匹配，不会用于追踪个人身份或与任何第三方共享。",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showLocationDisclosureDialog = false
+                        val needed = mutableListOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                        if (needsNotification) {
+                            needed.add(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                        permissionLauncher.launch(needed.toTypedArray())
+                    }
+                ) {
+                    Text("同意并授权")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = {
+                        showLocationDisclosureDialog = false
+                        if (needsNotification) {
+                            permissionLauncher.launch(arrayOf(Manifest.permission.POST_NOTIFICATIONS))
+                        }
+                    }
+                ) {
+                    Text("暂不授权")
+                }
+            }
+        )
     }
 
     // 处理来自桌面小组件、快捷方式或通知栏的直接跳转（一次性消费，防止重复入栈）

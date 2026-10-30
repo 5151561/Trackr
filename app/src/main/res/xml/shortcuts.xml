@@ -7,8 +7,8 @@
         android:shortcutShortLabel="@string/shortcut_alipay_transit_code_short"
         android:shortcutLongLabel="@string/shortcut_alipay_transit_code_long">
         <intent
-            android:action="com.trackr.action.OPEN_TRANSIT_CODE"
-            android:targetPackage="com.trackr"
+            android:action="com.github.u5151561.trackr.action.OPEN_TRANSIT_CODE"
+            android:targetPackage="com.github.u5151561.trackr"
             android:targetClass="com.trackr.MainActivity">
             <extra
                 android:name="extra_provider"
@@ -23,8 +23,8 @@
         android:shortcutShortLabel="@string/shortcut_unionpay_transit_code_short"
         android:shortcutLongLabel="@string/shortcut_unionpay_transit_code_long">
         <intent
-            android:action="com.trackr.action.OPEN_TRANSIT_CODE"
-            android:targetPackage="com.trackr"
+            android:action="com.github.u5151561.trackr.action.OPEN_TRANSIT_CODE"
+            android:targetPackage="com.github.u5151561.trackr"
             android:targetClass="com.trackr.MainActivity">
             <extra
                 android:name="extra_provider"
