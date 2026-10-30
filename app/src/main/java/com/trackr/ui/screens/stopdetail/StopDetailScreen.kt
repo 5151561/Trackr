@@ -67,6 +67,8 @@ import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.NearbyStopLineStatus
+import com.trackr.ui.components.common.BusArrivalBadge
+import com.trackr.ui.components.common.computeArrivalStatus
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -462,49 +464,22 @@ private fun StopLineDetailCard(
 
             // 第三行：实时到站状态徽标与详情
             val approachingBus = lineStatus.approachingBuses.firstOrNull()
-            val countdownText = when {
-                lineStatus.statusText.isNotBlank() -> lineStatus.statusText
-                approachingBus != null -> {
-                    val targetOrder = lineStatus.targetOrder
-                    val busOrder = approachingBus.order
-                    if (targetOrder > 0 && busOrder > 0) {
-                        val remainingStops = targetOrder - busOrder
-                        val etaPart = RouteProjectionMath.formatEtaText(approachingBus.etaSeconds)
-                        when {
-                            remainingStops == 0 && approachingBus.isArrived -> "已到站"
-                            remainingStops <= 0 -> "即将进站"
-                            etaPart.isNotBlank() -> "还有 $remainingStops 站 · $etaPart"
-                            else -> "还有 $remainingStops 站"
-                        }
-                    } else if (approachingBus.isArrived) {
-                        "已到站"
-                    } else if (approachingBus.etaSeconds > 0) {
-                        "即将进站 · ${RouteProjectionMath.formatEtaText(approachingBus.etaSeconds)}"
-                    } else {
-                        "在途行驶中"
-                    }
-                }
-                else -> "暂无在途车辆"
-            }
-
-            val isArrivedOrNear = countdownText.contains("已到站") || countdownText.contains("即将进站")
+            val arrivalStatus = computeArrivalStatus(
+                targetOrder = lineStatus.targetOrder,
+                approachingBus = approachingBus,
+                fallbackStatusText = "暂无在途车辆",
+                statusText = lineStatus.statusText
+            )
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = if (isArrivedOrNear) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                ) {
-                    Text(
-                        text = countdownText,
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                        color = if (isArrivedOrNear) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                    )
-                }
+                BusArrivalBadge(
+                    statusInfo = arrivalStatus,
+                    textStyle = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold)
+                )
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(

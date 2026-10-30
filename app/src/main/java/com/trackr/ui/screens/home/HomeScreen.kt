@@ -80,6 +80,9 @@ import androidx.compose.runtime.setValue
 import kotlinx.coroutines.launch
 import com.trackr.TrackrApp
 import com.trackr.ui.components.ScheduledRemindersBottomSheet
+import com.trackr.ui.components.common.BusArrivalBadge
+import com.trackr.ui.components.common.DataSourceBadge
+import com.trackr.ui.components.common.computeArrivalStatus
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -667,18 +670,7 @@ private fun FavoriteCard(
                     color = MaterialTheme.colorScheme.primary,
                     maxLines = 1
                 )
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = if (favorite.source == DataSourceType.CHELAILE) Color(0xFFE8F5E9) else Color(0xFFFFF3E0)
-                ) {
-                    Text(
-                        text = favorite.source.displayName,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = if (favorite.source == DataSourceType.CHELAILE) Color(0xFF2E7D32) else Color(0xFFE65100),
-                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
-                    )
-                }
+                DataSourceBadge(source = favorite.source)
             }
 
             Spacer(modifier = Modifier.height(4.dp))
@@ -704,44 +696,19 @@ private fun FavoriteCard(
             // 实时倒计时文案
             val lineStatus = realtimeStop?.lines?.firstOrNull { it.line.lineId == favorite.lineId }
             val approachingBus = lineStatus?.approachingBuses?.firstOrNull()
-            val etaText = when {
-                lineStatus != null && lineStatus.statusText.isNotBlank() -> lineStatus.statusText
-                approachingBus != null -> {
-                    val targetOrder = favorite.targetOrder
-                    val busOrder = approachingBus.order
-                    if (targetOrder > 0 && busOrder > 0) {
-                        val remaining = targetOrder - busOrder
-                        val etaPart = RouteProjectionMath.formatEtaText(approachingBus.etaSeconds)
-                        when {
-                            remaining == 0 && approachingBus.isArrived -> "已到站"
-                            remaining <= 0 -> "即将进站"
-                            etaPart.isNotBlank() -> "还有 $remaining 站 · $etaPart"
-                            else -> "还有 $remaining 站"
-                        }
-                    } else if (approachingBus.isArrived) {
-                        "已到站"
-                    } else if (approachingBus.etaSeconds > 0) {
-                        "即将进站 · ${RouteProjectionMath.formatEtaText(approachingBus.etaSeconds)}"
-                    } else {
-                        "在途行驶中"
-                    }
-                }
-                else -> "实时连接中…"
-            }
+            val arrivalStatus = computeArrivalStatus(
+                targetOrder = favorite.targetOrder,
+                approachingBus = approachingBus,
+                fallbackStatusText = "实时连接中…",
+                statusText = lineStatus?.statusText.orEmpty()
+            )
 
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f)
-            ) {
-                Text(
-                    text = etaText,
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+            BusArrivalBadge(
+                statusInfo = arrivalStatus,
+                containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f),
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                textStyle = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+            )
         }
     }
 }
@@ -960,43 +927,21 @@ private fun NearbyLineItemRow(
 
             // 倒计时文案徽标
             val approachingBus = lineStatus.approachingBuses.firstOrNull()
-            val countdownText = when {
-                lineStatus.statusText.isNotBlank() -> lineStatus.statusText
-                approachingBus != null -> {
-                    val targetOrder = lineStatus.targetOrder
-                    val busOrder = approachingBus.order
-                    if (targetOrder > 0 && busOrder > 0) {
-                        val remainingStops = targetOrder - busOrder
-                        val etaPart = RouteProjectionMath.formatEtaText(approachingBus.etaSeconds)
-                        when {
-                            remainingStops == 0 && approachingBus.isArrived -> "已到站"
-                            remainingStops <= 0 -> "即将进站"
-                            etaPart.isNotBlank() -> "还有 $remainingStops 站 · $etaPart"
-                            else -> "还有 $remainingStops 站"
-                        }
-                    } else if (approachingBus.isArrived) {
-                        "已到站"
-                    } else if (approachingBus.etaSeconds > 0) {
-                        "即将进站 · ${RouteProjectionMath.formatEtaText(approachingBus.etaSeconds)}"
-                    } else {
-                        "在途行驶中"
-                    }
-                }
-                else -> "暂无在途车辆"
-            }
+            val arrivalStatus = computeArrivalStatus(
+                targetOrder = lineStatus.targetOrder,
+                approachingBus = approachingBus,
+                fallbackStatusText = "暂无在途车辆",
+                statusText = lineStatus.statusText
+            )
 
-            val isArrivedOrNear = countdownText.contains("已到站") || countdownText.contains("即将进站")
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (isArrivedOrNear) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
-            ) {
-                Text(
-                    text = countdownText,
-                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                    color = if (isArrivedOrNear) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-            }
+            BusArrivalBadge(
+                statusInfo = arrivalStatus,
+                containerColor = if (arrivalStatus.isHighlighted) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surface
+                }
+            )
         }
     }
 }
@@ -1242,32 +1187,18 @@ private fun CityPickerBottomSheet(
                                         }
                                     }
                                     if (city.cityId.isNotBlank()) {
-                                        Surface(
+                                        DataSourceBadge(
+                                            source = DataSourceType.CHELAILE,
                                             shape = RoundedCornerShape(4.dp),
-                                            color = Color(0xFFE8F5E9)
-                                        ) {
-                                            Text(
-                                                text = "车来了",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = Color(0xFF2E7D32),
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                            )
-                                        }
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 1.dp)
+                                        )
                                     }
                                     if (!city.mygolbsCityCode.isNullOrBlank()) {
-                                        Surface(
+                                        DataSourceBadge(
+                                            source = DataSourceType.MYGOLBS,
                                             shape = RoundedCornerShape(4.dp),
-                                            color = Color(0xFFFFF3E0)
-                                        ) {
-                                            Text(
-                                                text = "掌上公交",
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Medium,
-                                                color = Color(0xFFE65100),
-                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                            )
-                                        }
+                                            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 1.dp)
+                                        )
                                     }
                                 }
                             }
@@ -1555,32 +1486,18 @@ private fun CityPickerBottomSheet(
                                                 }
                                             }
                                             if (city.cityId.isNotBlank()) {
-                                                Surface(
+                                                DataSourceBadge(
+                                                    source = DataSourceType.CHELAILE,
                                                     shape = RoundedCornerShape(4.dp),
-                                                    color = Color(0xFFE8F5E9)
-                                                ) {
-                                                    Text(
-                                                        text = "车来了",
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.Medium,
-                                                        color = Color(0xFF2E7D32),
-                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                    )
-                                                }
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 1.dp)
+                                                )
                                             }
                                             if (!city.mygolbsCityCode.isNullOrBlank()) {
-                                                Surface(
+                                                DataSourceBadge(
+                                                    source = DataSourceType.MYGOLBS,
                                                     shape = RoundedCornerShape(4.dp),
-                                                    color = Color(0xFFFFF3E0)
-                                                ) {
-                                                    Text(
-                                                        text = "掌上公交",
-                                                        fontSize = 10.sp,
-                                                        fontWeight = FontWeight.Medium,
-                                                        color = Color(0xFFE65100),
-                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                    )
-                                                }
+                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 1.dp)
+                                                )
                                             }
                                         }
                                     }

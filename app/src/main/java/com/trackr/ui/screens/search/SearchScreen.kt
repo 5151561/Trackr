@@ -83,6 +83,7 @@ import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusLineSummary
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.NearbyStop
+import com.trackr.ui.components.common.DataSourceBadge
 import com.trackr.ui.screens.home.HomeViewModel
 
 private val SEARCH_SUGGESTIONS = listOf("1路", "2路", "10路", "快速公交", "火车站", "人民广场", "地铁接驳线", "机场大巴")
@@ -408,18 +409,13 @@ private fun SearchLineItemCard(
                 }
 
                 // 数据源标识
-                Surface(
+                DataSourceBadge(
+                    source = summary.source,
                     shape = RoundedCornerShape(6.dp),
-                    color = if (summary.source == DataSourceType.CHELAILE) Color(0xFFE8F5E9) else Color(0xFFFFF3E0)
-                ) {
-                    Text(
-                        text = summary.source.displayName,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (summary.source == DataSourceType.CHELAILE) Color(0xFF2E7D32) else Color(0xFFE65100),
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
-                }
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
+                )
             }
 
             Spacer(modifier = Modifier.height(10.dp))
@@ -529,18 +525,13 @@ private fun SearchStopItemCard(
                         overflow = TextOverflow.Ellipsis
                     )
                     Spacer(modifier = Modifier.width(6.dp))
-                    Surface(
+                    DataSourceBadge(
+                        source = stop.source,
                         shape = RoundedCornerShape(4.dp),
-                        color = if (stop.source == DataSourceType.MYGOLBS) Color(0xFFFFF3E0) else Color(0xFFE8F5E9)
-                    ) {
-                        Text(
-                            text = stop.source.displayName,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = if (stop.source == DataSourceType.MYGOLBS) Color(0xFFE65100) else Color(0xFF2E7D32),
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                        )
-                    }
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 1.dp)
+                    )
                     if (stop.subwayLineNames.isNotEmpty()) {
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
