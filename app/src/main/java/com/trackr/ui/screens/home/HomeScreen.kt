@@ -35,6 +35,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsBus
@@ -70,7 +71,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.launch
+import com.trackr.TrackrApp
+import com.trackr.ui.components.ScheduledRemindersBottomSheet
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -104,6 +109,9 @@ fun HomeScreen(
 ) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val reminders by TrackrApp.instance.reminderRepository.reminders.collectAsStateWithLifecycle()
+    var showRemindersSheet by remember { mutableStateOf(false) }
+    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -111,7 +119,9 @@ fun HomeScreen(
             HomeTopBar(
                 city = state.currentCity,
                 engineMode = state.engineMode,
+                reminderCount = reminders.size,
                 onCityClick = { viewModel.setCityPickerOpen(true) },
+                onOpenReminders = { showRemindersSheet = true },
                 onSelectEngineMode = { mode -> viewModel.setEngineMode(mode) }
             )
         }
@@ -266,6 +276,34 @@ fun HomeScreen(
             onDismiss = { viewModel.setCityPickerOpen(false) }
         )
     }
+
+    // 定时通勤提醒管理面板
+    if (showRemindersSheet) {
+        ScheduledRemindersBottomSheet(
+            reminders = reminders,
+            onDismissRequest = { showRemindersSheet = false },
+            onToggleReminder = { id, enabled ->
+                coroutineScope.launch {
+                    TrackrApp.instance.reminderRepository.toggleReminder(id, enabled)
+                }
+            },
+            onDeleteReminder = { id ->
+                coroutineScope.launch {
+                    TrackrApp.instance.reminderRepository.deleteReminder(id)
+                }
+            },
+            onNavigateToLine = { reminder ->
+                onNavigateToLineDetail(
+                    reminder.cityId,
+                    reminder.lineId,
+                    reminder.targetOrder,
+                    reminder.targetStopId,
+                    reminder.dataSourceType,
+                    reminder.lineName
+                )
+            }
+        )
+    }
 }
 
 /**
@@ -275,7 +313,9 @@ fun HomeScreen(
 private fun HomeTopBar(
     city: TransitCity,
     engineMode: EngineMode,
+    reminderCount: Int = 0,
     onCityClick: () -> Unit,
+    onOpenReminders: () -> Unit,
     onSelectEngineMode: (EngineMode) -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
@@ -375,33 +415,50 @@ private fun HomeTopBar(
                 }
             }
 
-            // 城市选择胶囊按钮
-            Surface(
-                onClick = onCityClick,
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 城市选择胶囊按钮
+                Surface(
+                    onClick = onCityClick,
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Place,
+                            contentDescription = "城市",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = city.cityName,
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Icon(
+                            imageVector = Icons.Default.ArrowDropDown,
+                            contentDescription = "选择城市",
+                            modifier = Modifier.size(18.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                // 定时通勤提醒按钮
+                IconButton(
+                    onClick = onOpenReminders,
+                    modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Place,
-                        contentDescription = "城市",
-                        modifier = Modifier.size(16.dp),
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = city.cityName,
-                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Icon(
-                        imageVector = Icons.Default.ArrowDropDown,
-                        contentDescription = "选择城市",
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        imageVector = Icons.Default.Alarm,
+                        contentDescription = "定时通勤提醒",
+                        tint = if (reminderCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }

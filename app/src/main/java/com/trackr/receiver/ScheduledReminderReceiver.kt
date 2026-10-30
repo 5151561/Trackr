@@ -1,0 +1,276 @@
+package com.trackr.receiver
+
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.util.Log
+import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
+import com.trackr.MainActivity
+import com.trackr.TrackrApp
+import com.trackr.domain.model.BusLineDirection
+import com.trackr.domain.model.BusStop
+import com.trackr.domain.model.LineOperatingState
+import com.trackr.domain.model.ScheduledReminder
+import com.trackr.domain.model.TransitCity
+import com.trackr.service.BusTrackingService
+import com.trackr.util.ReminderScheduler
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+
+/**
+ * 定时通勤闹钟触发接收器
+ * 到点后台执行单次线路实时状态拉取，并在通知栏发送快报与跟车动作
+ */
+class ScheduledReminderReceiver : BroadcastReceiver() {
+
+    override fun onReceive(context: Context, intent: Intent) {
+        val action = intent.action
+        if (action != ACTION_TRIGGER_REMINDER && action != ACTION_START_TRACKING_NOW) {
+            return
+        }
+
+        val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID).orEmpty()
+        if (reminderId.isEmpty()) return
+
+        val app = context.applicationContext as? TrackrApp ?: return
+
+        if (action == ACTION_START_TRACKING_NOW) {
+            handleStartTrackingNow(context, reminderId, app)
+            return
+        }
+
+        val pendingResult = goAsync()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                handleReminderTrigger(context, reminderId, app)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error processing scheduled reminder $reminderId", e)
+            } finally {
+                pendingResult?.finish()
+            }
+        }
+    }
+
+    private suspend fun handleReminderTrigger(context: Context, reminderId: String, app: TrackrApp) {
+        val reminder = app.reminderRepository.getReminderById(reminderId) ?: return
+        if (!reminder.enabled) return
+
+        // 1. 处理下一次调度
+        if (reminder.isOneTime) {
+            // 一次性提醒触发后置为未启用
+            app.reminderRepository.toggleReminder(reminder.id, false)
+        } else {
+            // 周期性提醒重新安排下一个周期
+            ReminderScheduler.scheduleReminder(context, reminder)
+        }
+
+        // 2. 如果配置了自动开启跟车，直接拉起前台服务
+        if (reminder.autoStartLiveTracking) {
+            startTrackingForReminder(context, reminder)
+            return
+        }
+
+        // 3. 否则拉取单次实时公交数据并弹出通知卡片
+        val city = TransitCity(
+            cityId = reminder.cityId,
+            cityName = reminder.cityName,
+            mygolbsCityCode = reminder.mygolbsCityCode
+        )
+
+        val detailResult = withTimeoutOrNull(8_000L) {
+            app.repository.getLineDetail(
+                city = city,
+                lineId = reminder.lineId,
+                targetOrder = reminder.targetOrder,
+                stationId = reminder.targetStopId,
+                source = reminder.dataSourceType,
+                lineNameHint = reminder.lineName,
+                directionHint = reminder.direction
+            )
+        }
+
+        val summaryText: String
+        val contentText: String
+
+        if (detailResult != null && detailResult.isSuccess) {
+            val detail = detailResult.getOrNull()
+            if (detail != null) {
+                val candidateBuses = detail.buses.filter { it.order <= reminder.targetOrder }
+                val bestBus = candidateBuses.maxByOrNull { it.order.toFloat() + it.segmentProgress }
+
+                if (bestBus != null) {
+                    val stopsAway = (reminder.targetOrder - bestBus.order).coerceAtLeast(0)
+                    val eta = if (bestBus.etaSeconds > 0) {
+                        "${(bestBus.etaSeconds + 59) / 60} 分钟"
+                    } else {
+                        val estMinutes = (stopsAway * 2.5).toInt().coerceAtLeast(1)
+                        "约 $estMinutes 分钟"
+                    }
+
+                    summaryText = if (stopsAway == 0) {
+                        "即将进站"
+                    } else {
+                        "距目标站还有 $stopsAway 站 ($eta)"
+                    }
+
+                    val currentStopName = detail.stops.find { it.order == bestBus.order }?.name
+                    contentText = if (!currentStopName.isNullOrBlank()) {
+                        "最近车辆已到达【$currentStopName】，目标站：${reminder.targetStopName}"
+                    } else {
+                        "目标站：${reminder.targetStopName}，请注意出门候车"
+                    }
+                } else {
+                    summaryText = when (detail.operatingState) {
+                        LineOperatingState.WAITING -> "等待发车 (首班 ${detail.line.firstTime})"
+                        LineOperatingState.ENDED -> "今日运营已结束"
+                        LineOperatingState.SUSPENDED -> "线路临时停运"
+                        else -> "暂无在途车辆"
+                    }
+                    contentText = "开往 ${reminder.endStopName} · 目标站：${reminder.targetStopName}"
+                }
+            } else {
+                summaryText = "已到预定通勤时间"
+                contentText = "点击打开【${reminder.lineName}】查看实时到站动态"
+            }
+        } else {
+            summaryText = "已到预定通勤时间"
+            contentText = "点击打开【${reminder.lineName}】查看实时到站动态"
+        }
+
+        showReminderNotification(context, reminder, summaryText, contentText)
+    }
+
+    private fun showReminderNotification(
+        context: Context,
+        reminder: ScheduledReminder,
+        titleSummary: String,
+        content: String
+    ) {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+            ?: return
+
+        ensureNotificationChannel(context, notificationManager)
+
+        // 点击通知跳转线路详情
+        val openAppIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("extra_city_id", reminder.cityId)
+            putExtra("extra_line_id", reminder.lineId)
+            putExtra("extra_target_order", reminder.targetOrder)
+            putExtra("extra_stop_id", reminder.targetStopId)
+            putExtra("extra_source", reminder.dataSourceType.name)
+            putExtra("extra_line_name", reminder.lineName)
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            reminder.id.hashCode(),
+            openAppIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // 快捷按钮：开启实时追踪
+        val startTrackingIntent = Intent(context, ScheduledReminderReceiver::class.java).apply {
+            action = ACTION_START_TRACKING_NOW
+            putExtra(EXTRA_REMINDER_ID, reminder.id)
+        }
+        val startTrackingPendingIntent = PendingIntent.getBroadcast(
+            context,
+            reminder.id.hashCode() + 1,
+            startTrackingIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val iconRes = context.applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_dialog_info
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_SCHEDULED)
+            .setSmallIcon(iconRes)
+            .setContentTitle("🚌 [通勤早报] ${reminder.lineName} · $titleSummary")
+            .setContentText(content)
+            .setStyle(NotificationCompat.BigTextStyle().bigText("$content\n开往：${reminder.endStopName}"))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(contentPendingIntent)
+            .setAutoCancel(true)
+            .addAction(
+                iconRes,
+                "开启实时追踪",
+                startTrackingPendingIntent
+            )
+            .build()
+
+        notificationManager.notify(NOTIFICATION_BASE_ID + reminder.id.hashCode() % 10000, notification)
+    }
+
+    private fun handleStartTrackingNow(context: Context, reminderId: String, app: TrackrApp) {
+        val reminder = app.reminderRepository.getReminderById(reminderId) ?: return
+        startTrackingForReminder(context, reminder)
+
+        // 关闭快报通知
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        notificationManager?.cancel(NOTIFICATION_BASE_ID + reminder.id.hashCode() % 10000)
+    }
+
+    private fun startTrackingForReminder(context: Context, reminder: ScheduledReminder) {
+        val line = BusLineDirection(
+            lineId = reminder.lineId,
+            name = reminder.lineName,
+            lineNo = reminder.lineName,
+            direction = reminder.direction,
+            startStop = "",
+            endStop = reminder.endStopName,
+            firstTime = "",
+            lastTime = "",
+            source = reminder.dataSourceType,
+            mygolbsCityCode = reminder.mygolbsCityCode.orEmpty()
+        )
+        val targetStop = BusStop(
+            stopId = reminder.targetStopId,
+            name = reminder.targetStopName,
+            order = reminder.targetOrder
+        )
+        BusTrackingService.startTracking(
+            context = context,
+            cityId = reminder.cityId,
+            line = line,
+            targetStop = targetStop,
+            totalStops = reminder.totalStops,
+            alertThresholdStops = 2
+        )
+    }
+
+    private fun ensureNotificationChannel(context: Context, notificationManager: NotificationManager) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val existing = notificationManager.getNotificationChannel(CHANNEL_ID_SCHEDULED)
+            if (existing == null) {
+                val channel = NotificationChannel(
+                    CHANNEL_ID_SCHEDULED,
+                    CHANNEL_NAME_SCHEDULED,
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "定时推送用户关心的通勤公交到站状态"
+                    enableVibration(true)
+                    setShowBadge(true)
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+        }
+    }
+
+    companion object {
+        private const val TAG = "ScheduledReminderRx"
+
+        const val ACTION_TRIGGER_REMINDER = "com.trackr.action.TRIGGER_REMINDER"
+        const val ACTION_START_TRACKING_NOW = "com.trackr.action.START_TRACKING_NOW"
+        const val EXTRA_REMINDER_ID = "extra_reminder_id"
+
+        private const val CHANNEL_ID_SCHEDULED = "channel_transit_scheduled"
+        private const val CHANNEL_NAME_SCHEDULED = "通勤定时到站提醒"
+        private const val NOTIFICATION_BASE_ID = 20000
+    }
+}

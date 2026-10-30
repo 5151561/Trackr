@@ -34,6 +34,9 @@ class TrackrApp : Application() {
     lateinit var repository: ITransitRepository
         private set
 
+    lateinit var reminderRepository: com.trackr.data.repository.IScheduledReminderRepository
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -58,6 +61,10 @@ class TrackrApp : Application() {
         repository = TransitRepository(
             context = applicationContext,
             coordinator = coordinator
+        )
+
+        reminderRepository = com.trackr.data.repository.ScheduledReminderRepository(
+            context = applicationContext
         )
     }
 

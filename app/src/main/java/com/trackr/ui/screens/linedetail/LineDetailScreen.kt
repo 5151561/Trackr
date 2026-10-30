@@ -1,5 +1,6 @@
 package com.trackr.ui.screens.linedetail
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
@@ -86,6 +87,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -118,6 +122,10 @@ import com.trackr.ui.theme.busColors
 import com.trackr.ui.theme.expressiveRotateSpringSpec
 import com.trackr.ui.theme.expressiveSpringSpec
 import com.trackr.util.TransitCodeHelper
+import com.trackr.domain.model.ScheduledReminder
+import com.trackr.ui.components.ScheduledReminderDialog
+import kotlinx.coroutines.launch
+import java.util.UUID
 
 /**
  * 线路详情页面（Material Design 3 Expressive 规范）
@@ -137,6 +145,8 @@ fun LineDetailScreen(
 
     val lineDetail = uiState.lineDetail
     val selectedStop = uiState.selectedStop
+    val coroutineScope = rememberCoroutineScope()
+    var showReminderDialog by remember { mutableStateOf(false) }
 
     // 换向旋转弹簧动画
     val animatedFlipRotation by animateFloatAsState(
@@ -325,7 +335,8 @@ fun LineDetailScreen(
                                             alertThresholdStops = uiState.alertThresholdStops
                                         )
                                     }
-                                }
+                                },
+                                onOpenScheduledReminder = { showReminderDialog = true }
                             )
                         }
 
@@ -432,6 +443,46 @@ fun LineDetailScreen(
                     viewModel.setPreferredTransitCodeProvider(provider)
                 }
                 TransitCodeHelper.openTransitCode(context, provider)
+            }
+        )
+    }
+
+    // 6. 定时通勤提醒设置弹窗
+    if (showReminderDialog && lineDetail != null && selectedStop != null) {
+        ScheduledReminderDialog(
+            lineName = lineDetail.line.name,
+            endStopName = lineDetail.line.endStop,
+            targetStopName = selectedStop.name,
+            onDismissRequest = { showReminderDialog = false },
+            onConfirm = { hour, minute, daysOfWeek, autoStartTracking ->
+                showReminderDialog = false
+                val reminder = ScheduledReminder(
+                    id = UUID.randomUUID().toString(),
+                    hour = hour,
+                    minute = minute,
+                    daysOfWeek = daysOfWeek,
+                    cityId = viewModel.cityId,
+                    cityName = TrackrApp.instance.repository.selectedCity.value.cityName,
+                    lineId = lineDetail.line.lineId,
+                    lineName = lineDetail.line.name,
+                    direction = lineDetail.line.direction,
+                    endStopName = lineDetail.line.endStop,
+                    targetStopId = selectedStop.stopId,
+                    targetStopName = selectedStop.name,
+                    targetOrder = selectedStop.order,
+                    totalStops = lineDetail.stops.size,
+                    dataSourceType = lineDetail.line.source,
+                    mygolbsCityCode = lineDetail.line.mygolbsCityCode,
+                    autoStartLiveTracking = autoStartTracking
+                )
+                coroutineScope.launch {
+                    TrackrApp.instance.reminderRepository.saveReminder(reminder)
+                    Toast.makeText(
+                        context,
+                        "已设定通勤提醒：${reminder.formatTime()} (${reminder.formatRepeatSummary()})",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
         )
     }
@@ -574,6 +625,7 @@ private fun StationArrivalContent(
     onOpenBusList: () -> Unit,
     onSwitchOpposite: () -> Unit,
     onToggleTracking: () -> Unit,
+    onOpenScheduledReminder: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val busColors = MaterialTheme.busColors
@@ -806,28 +858,52 @@ private fun StationArrivalContent(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 主操作大按钮：开启/停止通知栏实时追踪
-            Button(
-                onClick = onToggleTracking,
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isTrackingActive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
+            // 操作按钮区：开启实时追踪与设定定时通勤
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = if (isTrackingActive) Icons.Rounded.NotificationsOff else Icons.Rounded.NotificationsActive,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (isTrackingActive) "正在通知栏追踪中 · 点击结束追踪" else "开启上车/到站通知栏实时追踪",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Button(
+                    onClick = onToggleTracking,
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isTrackingActive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    ),
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isTrackingActive) Icons.Rounded.NotificationsOff else Icons.Rounded.NotificationsActive,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isTrackingActive) "结束实时追踪" else "开启实时追踪",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                OutlinedButton(
+                    onClick = onOpenScheduledReminder,
+                    shape = RoundedCornerShape(14.dp),
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.AccessTime,
+                        contentDescription = "定时通勤",
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = "定时通勤",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
         }
 }
