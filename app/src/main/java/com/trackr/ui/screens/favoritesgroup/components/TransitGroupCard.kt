@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -73,6 +74,7 @@ fun TransitGroupCard(
     onAddCandidateLine: (legIndex: Int, lineName: String) -> Unit = { _, _ -> },
     onStartTracking: () -> Unit,
     onStopTracking: () -> Unit,
+    onReverseClick: () -> Unit = {},
     onSaveTemporary: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -113,32 +115,72 @@ fun TransitGroupCard(
                 // =========================================================================
                 val leg = group.legs.firstOrNull()
                 if (leg != null) {
-                    // 1. 头部标题与控制按钮
+                    // 1. 头部标题与紧凑操作按钮
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Top,
+                        verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = group.name,
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.testTag("group_title_${group.id}")
-                                )
-                            }
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = "${leg.fromStopName} ➔ ${leg.toStopName}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-
+                        Text(
+                            text = group.name,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("group_title_${group.id}")
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (group.isTemporary) {
+                                IconButton(
+                                    onClick = onSaveTemporary,
+                                    modifier = Modifier
+                                        .size(32.dp)
+                                        .testTag("btn_save_temp_${group.id}")
+                                ) {
+                                    Icon(imageVector = Icons.Default.BookmarkBorder, contentDescription = "转存", modifier = Modifier.size(18.dp))
+                                }
+                            }
+                            IconButton(
+                                onClick = onReverseClick,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .testTag("btn_reverse_${group.id}")
+                            ) {
+                                Icon(imageVector = Icons.Default.SwapHoriz, contentDescription = "生成返程", modifier = Modifier.size(18.dp))
+                            }
+                            IconButton(
+                                onClick = onEdit,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .testTag("btn_edit_${group.id}")
+                            ) {
+                                Icon(imageVector = Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(18.dp))
+                            }
+                            IconButton(
+                                onClick = onDelete,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .testTag("btn_delete_${group.id}")
+                            ) {
+                                Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "删除", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+
+                    // 行 2：行程摘要与追踪按钮
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
                             Surface(
                                 shape = RoundedCornerShape(6.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -150,24 +192,47 @@ fun TransitGroupCard(
                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                 )
                             }
-
-                            if (group.isTemporary) {
-                                TextButton(
-                                    onClick = onSaveTemporary,
-                                    contentPadding = PaddingValues(horizontal = 6.dp)
-                                ) {
-                                    Icon(imageVector = Icons.Default.BookmarkBorder, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(2.dp))
-                                    Text("转存", style = MaterialTheme.typography.labelSmall)
+                            val totalWalk = leg.walkingDistanceMeters
+                            val walkSuffix = if (totalWalk > 0) " · 步行 ${totalWalk}米" else ""
+                            Text(
+                                text = "${leg.fromStopName} ➔ ${leg.toStopName}$walkSuffix",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Surface(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .clickable {
+                                    if (isTrackingThisGroup) onStopTracking() else onStartTracking()
                                 }
+                                .testTag("btn_track_${group.id}"),
+                            shape = RoundedCornerShape(20.dp),
+                            color = if (isTrackingThisGroup) {
+                                MaterialTheme.colorScheme.errorContainer
+                            } else {
+                                MaterialTheme.colorScheme.primaryContainer
                             }
-
-                            IconButton(onClick = onEdit, modifier = Modifier.size(30.dp)) {
-                                Icon(imageVector = Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(16.dp))
-                            }
-
-                            IconButton(onClick = onDelete, modifier = Modifier.size(30.dp)) {
-                                Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "删除", modifier = Modifier.size(16.dp))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (isTrackingThisGroup) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                    contentDescription = null,
+                                    tint = if (isTrackingThisGroup) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = if (isTrackingThisGroup) "■ 结束追踪" else "▷ 开启追踪",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = if (isTrackingThisGroup) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                )
                             }
                         }
                     }
@@ -416,84 +481,119 @@ fun TransitGroupCard(
                         }
                     }
 
-                    // 4. 底部行动按钮
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        if (isTrackingThisGroup) {
-                            OutlinedButton(
-                                onClick = onStopTracking,
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Icon(imageVector = Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("结束追踪")
-                            }
-                        } else {
-                            Button(
-                                onClick = onStartTracking,
-                                shape = RoundedCornerShape(12.dp)
-                            ) {
-                                Icon(imageVector = Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp))
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("开启追踪")
-                            }
-                        }
-                    }
                 }
             } else {
                 // =========================================================================
                 // Mode B: 多段换乘时间轴卡片 (group.legs.size > 1)
                 // =========================================================================
-                // 1. 头部标题与追踪状态
+                // 1. 头部标题与紧凑操作按钮
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = group.name,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.testTag("group_title_${group.id}")
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = "换乘 ${group.legs.size - 1} 次 · 步行 ${group.legs.sumOf { it.walkingDistanceMeters }}米",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
+                    Text(
+                        text = group.name,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("group_title_${group.id}")
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (isTrackingThisGroup) {
-                            TextButton(
-                                onClick = onStopTracking,
-                                colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
-                            ) {
-                                Text("■ 结束追踪", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
-                            }
-                        } else {
-                            TextButton(onClick = onStartTracking) {
-                                Text("▷ 开启追踪", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
-                            }
-                        }
-
                         if (group.isTemporary) {
-                            IconButton(onClick = onSaveTemporary, modifier = Modifier.size(28.dp)) {
-                                Icon(imageVector = Icons.Default.BookmarkBorder, contentDescription = "转存", modifier = Modifier.size(16.dp))
+                            IconButton(
+                                onClick = onSaveTemporary,
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .testTag("btn_save_temp_${group.id}")
+                            ) {
+                                Icon(imageVector = Icons.Default.BookmarkBorder, contentDescription = "转存", modifier = Modifier.size(18.dp))
                             }
                         }
-                        IconButton(onClick = onEdit, modifier = Modifier.size(28.dp)) {
-                            Icon(imageVector = Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(16.dp))
+                        IconButton(
+                            onClick = onReverseClick,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("btn_reverse_${group.id}")
+                        ) {
+                            Icon(imageVector = Icons.Default.SwapHoriz, contentDescription = "生成返程", modifier = Modifier.size(18.dp))
                         }
-                        IconButton(onClick = onDelete, modifier = Modifier.size(28.dp)) {
-                            Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "删除", modifier = Modifier.size(16.dp))
+                        IconButton(
+                            onClick = onEdit,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("btn_edit_${group.id}")
+                        ) {
+                            Icon(imageVector = Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(18.dp))
+                        }
+                        IconButton(
+                            onClick = onDelete,
+                            modifier = Modifier
+                                .size(32.dp)
+                                .testTag("btn_delete_${group.id}")
+                        ) {
+                            Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "删除", modifier = Modifier.size(18.dp))
+                        }
+                    }
+                }
+
+                // 行 2：换乘及步行摘要与追踪按钮
+                val transferCount = group.legs.size - 1
+                val totalWalk = group.legs.sumOf { it.walkingDistanceMeters }
+                val summaryText = if (totalWalk > 0) {
+                    "换乘 $transferCount 次 · 步行 ${totalWalk}米"
+                } else {
+                    "换乘 $transferCount 次 · 同站换乘"
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = summaryText,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .clickable {
+                                if (isTrackingThisGroup) onStopTracking() else onStartTracking()
+                            }
+                            .testTag("btn_track_${group.id}"),
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (isTrackingThisGroup) {
+                            MaterialTheme.colorScheme.errorContainer
+                        } else {
+                            MaterialTheme.colorScheme.primaryContainer
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = if (isTrackingThisGroup) Icons.Default.Stop else Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                tint = if (isTrackingThisGroup) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = if (isTrackingThisGroup) "■ 结束追踪" else "▷ 开启追踪",
+                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = if (isTrackingThisGroup) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                            )
                         }
                     }
                 }
@@ -561,6 +661,13 @@ fun TransitGroupCard(
 
                         // 换乘中转节点
                         if (index < group.legs.size - 1) {
+                            val nextLeg = group.legs.getOrNull(index + 1)
+                            val walkMeters = nextLeg?.walkingDistanceMeters ?: leg.walkingDistanceMeters
+                            val transferLabel = if (walkMeters > 0) {
+                                "${leg.toStopName} (步行 ${walkMeters}米)"
+                            } else {
+                                "${leg.toStopName} (同站换乘)"
+                            }
                             Row(
                                 modifier = Modifier.padding(start = 4.dp),
                                 verticalAlignment = Alignment.CenterVertically
@@ -573,7 +680,7 @@ fun TransitGroupCard(
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
-                                    text = "${leg.toStopName} (步行 ${leg.walkingDistanceMeters}米)",
+                                    text = transferLabel,
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                                     color = Color(0xFF512DA8)
                                 )

@@ -136,7 +136,8 @@ class FavoritesGroupScreenTest {
 
         // 1. 验证标题栏及副标题摘要
         composeTestRule.onNodeWithText("我的收藏").assertIsDisplayed()
-        composeTestRule.onNodeWithText("已收纳 1 个同达方案与 0 个换乘组合").assertIsDisplayed()
+        composeTestRule.onNodeWithText("已收纳 2 个同达方案与 0 个换乘组合").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("btn_reverse_group_direct_1").assertIsDisplayed()
 
         // 2. 验证纯线路号码小图标胶囊展示 (无冗余“备选”字样)
         composeTestRule.onNodeWithTag("candidate_chip_320").assertIsDisplayed()
@@ -239,6 +240,55 @@ class FavoritesGroupScreenTest {
 
         val selected = viewModel.selectedLineKeys.value["group_transfer_1_0"]
         assertEquals("line_m375", selected)
+    }
+
+    @Test
+    fun multiLegTransferCard_rendersSameStationTransfer_whenWalkingIsZero() {
+        val sameStationTransferGroup = TransitGroup(
+            id = "group_same_station",
+            name = "万达金街 ➔ 西徐村",
+            category = GroupCategory.CUSTOM,
+            legs = listOf(
+                TransitLeg(
+                    legIndex = 0,
+                    fromStopName = "万达金街",
+                    toStopName = "西社小区",
+                    candidateLines = listOf(
+                        CandidateLine(cityId = "0532", lineId = "59", lineName = "59")
+                    ),
+                    walkingDistanceMeters = 0
+                ),
+                TransitLeg(
+                    legIndex = 1,
+                    fromStopName = "西社小区",
+                    toStopName = "西徐村",
+                    candidateLines = listOf(
+                        CandidateLine(cityId = "0532", lineId = "351", lineName = "351")
+                    ),
+                    walkingDistanceMeters = 0
+                )
+            )
+        )
+
+        val viewModel = createViewModel()
+        viewModel.saveGroup(sameStationTransferGroup)
+
+        composeTestRule.setContent {
+            FavoritesGroupScreen(
+                viewModel = viewModel,
+                onNavigateToLineDetail = { _, _, _, _, _, _ -> },
+                onNavigateToRoutePlan = {}
+            )
+        }
+        composeTestRule.waitForIdle()
+
+        // 1. 验证标题、同站换乘摘要及反向按钮
+        composeTestRule.onNodeWithText("万达金街 ➔ 西徐村").assertIsDisplayed()
+        composeTestRule.onNodeWithText("换乘 1 次 · 同站换乘").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("btn_reverse_group_same_station").assertIsDisplayed()
+
+        // 2. 验证中转节点显示 (同站换乘) 而不是 (步行 0米)
+        composeTestRule.onNodeWithText("西社小区 (同站换乘)").assertExists()
     }
 
     @Test

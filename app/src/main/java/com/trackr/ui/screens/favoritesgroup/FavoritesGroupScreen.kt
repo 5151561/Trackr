@@ -89,6 +89,7 @@ fun FavoritesGroupScreen(
     val favoriteGroups by viewModel.favoriteGroups.collectAsStateWithLifecycle()
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
     val selectedFavoriteGroupId by viewModel.selectedFavoriteGroupId.collectAsStateWithLifecycle()
+    val currentCity by viewModel.currentCity.collectAsStateWithLifecycle()
 
     val activeSession by viewModel.activeGroupSession.collectAsStateWithLifecycle()
     val realtimeSummaries by viewModel.legRealtimeSummary.collectAsStateWithLifecycle()
@@ -148,16 +149,6 @@ fun FavoritesGroupScreen(
                         Text("⚙️ 管理", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
                     }
                     IconButton(
-                        onClick = onNavigateToRoutePlan,
-                        modifier = Modifier.testTag("btn_route_plan_action")
-                    ) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.AltRoute,
-                            contentDescription = "路线规划",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    IconButton(
                         onClick = { showCreateGroupDialog = true },
                         modifier = Modifier.testTag("btn_add_group_action")
                     ) {
@@ -215,11 +206,7 @@ fun FavoritesGroupScreen(
 
                     // 自定义收藏分组
                     favoriteGroups.forEach { favGroup ->
-                        val count = allGroups.count {
-                            it.customGroupId == favGroup.id ||
-                                (favGroup.id == "commute" && it.category == GroupCategory.COMMUTE) ||
-                                (favGroup.id == "home" && (it.category == GroupCategory.COMMUTE || it.name.contains("家")))
-                        }
+                        val count = allGroups.count { viewModel.isGroupInFavoriteGroup(it, favGroup.id) }
                         FilterChip(
                             selected = selectedFavoriteGroupId == favGroup.id,
                             onClick = { viewModel.selectFavoriteGroup(favGroup.id) },
@@ -327,8 +314,8 @@ fun FavoritesGroupScreen(
                         onAddCandidateLine = { legIndex, lineName ->
                             val leg = group.legs.getOrNull(legIndex)
                             val newCandidate = CandidateLine(
-                                cityId = leg?.primaryLine?.cityId ?: "033",
-                                cityName = leg?.primaryLine?.cityName ?: "",
+                                cityId = leg?.primaryLine?.cityId ?: currentCity.cityId,
+                                cityName = leg?.primaryLine?.cityName ?: currentCity.cityName,
                                 lineId = "line_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(4)}",
                                 lineName = lineName.trim(),
                                 source = leg?.primaryLine?.source ?: DataSourceType.CHELAILE,
@@ -342,6 +329,7 @@ fun FavoritesGroupScreen(
                         },
                         onStartTracking = { viewModel.startGroupTracking(context, group) },
                         onStopTracking = { viewModel.stopGroupTracking(context) },
+                        onReverseClick = { viewModel.createReverseGroup(group) },
                         onSaveTemporary = { viewModel.saveOrConvertTemporaryGroup(group.id) },
                         onEdit = { editingGroup = group },
                         onDelete = { viewModel.deleteGroup(group.id) },
@@ -423,6 +411,8 @@ fun FavoritesGroupScreen(
         GroupEditDialog(
             initialGroup = target,
             favoriteGroups = favoriteGroups,
+            currentCity = currentCity,
+            defaultCustomGroupId = selectedFavoriteGroupId ?: "commute",
             onDismiss = {
                 showCreateGroupDialog = false
                 editingGroup = null

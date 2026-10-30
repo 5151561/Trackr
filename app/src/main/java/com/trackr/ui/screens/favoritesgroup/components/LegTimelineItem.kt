@@ -35,7 +35,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.CandidateLineRealtimeInfo
 import com.trackr.domain.model.TransitLeg
@@ -174,6 +176,8 @@ fun LegTimelineItem(
                         } else {
                             MaterialTheme.colorScheme.primary
                         },
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.testTag("leg_eta_text_$legIndex")
                     )
 
@@ -200,11 +204,14 @@ fun LegTimelineItem(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "候车站: ${leg.fromStopName} ➔ 在「${leg.toStopName}」下车",
-                    style = MaterialTheme.typography.bodySmall,
+                    text = "候车: ${leg.fromStopName} ➔ ${leg.toStopName} 下车",
+                    style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f)
                 )
+                Spacer(modifier = Modifier.width(8.dp))
                 Row(
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
@@ -218,7 +225,8 @@ fun LegTimelineItem(
                     Text(
                         text = "实时轨迹 >",
                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        softWrap = false
                     )
                 }
             }
