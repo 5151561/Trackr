@@ -197,6 +197,26 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun testAggregatedPrioritySwitching_immediatelyRefreshesNearbyStopsInAllMode() = runTest {
+        val stopCL = NearbyStop(stopId = "stop_cl", name = "车来了站点")
+        val stopMG = NearbyStop(stopId = "stop_mg", name = "掌上公交站点")
+        fakeRepository.nearbyStopsResult = Result.success(listOf(stopCL))
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals("车来了站点", viewModel.uiState.value.nearbyStops.firstOrNull()?.name)
+        assertEquals(com.trackr.domain.model.AggregatedSourcePriority.CHELAILE_FIRST, viewModel.uiState.value.aggregatedPriority)
+
+        // 切换聚合优先级前更新 mock 数据，模拟优先源变更后的数据
+        fakeRepository.nearbyStopsResult = Result.success(listOf(stopMG))
+        viewModel.setAggregatedPriority(com.trackr.domain.model.AggregatedSourcePriority.MYGOLBS_FIRST)
+        testScheduler.runCurrent()
+
+        assertEquals(com.trackr.domain.model.AggregatedSourcePriority.MYGOLBS_FIRST, viewModel.uiState.value.aggregatedPriority)
+        assertEquals("掌上公交站点", viewModel.uiState.value.nearbyStops.firstOrNull()?.name)
+    }
+
+    @Test
     fun testNearbyStopsCountChange_refreshesNearbyStops() = runTest {
         val stop1 = NearbyStop(stopId = "stop_1", name = "站点1")
         val stop2 = NearbyStop(stopId = "stop_2", name = "站点2")

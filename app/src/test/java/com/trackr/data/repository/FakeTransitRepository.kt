@@ -1,5 +1,6 @@
 package com.trackr.data.repository
 
+import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.DataSourceType
@@ -34,6 +35,13 @@ class FakeTransitRepository(
 
     override fun setEngineMode(mode: EngineMode) {
         _engineMode.value = mode
+    }
+
+    private val _aggregatedPriority = MutableStateFlow(AggregatedSourcePriority.CHELAILE_FIRST)
+    override val aggregatedPriority: StateFlow<AggregatedSourcePriority> = _aggregatedPriority.asStateFlow()
+
+    override fun setAggregatedPriority(priority: AggregatedSourcePriority) {
+        _aggregatedPriority.value = priority
     }
 
     private val _favorites = MutableStateFlow(initialFavorites)

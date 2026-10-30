@@ -2,6 +2,7 @@ package com.trackr.data.provider
 
 import com.trackr.data.provider.model.LineDetailRequest
 import com.trackr.data.provider.model.StopDetailRequest
+import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusLineSummary
@@ -147,6 +148,60 @@ class TransitProviderCoordinatorTest {
         val stopNames = result.stops.map { it.name }
         assertTrue(stopNames.contains("人民广场"))
         assertTrue(stopNames.contains("人民广场 (掌上公交)"))
+        assertTrue(stopNames.contains("五角场"))
+    }
+
+    @Test
+    fun testSearch_inAllMode_withMygolbsPriority_mergesAndAppendsChelaileSuffix() = runBlocking {
+        // Arrange
+        fakeChelaileProvider.searchResult = TransitSearchResult(
+            keyword = "1",
+            lines = listOf(
+                createSummary(name = "1路", source = DataSourceType.CHELAILE),
+                createSummary(name = "10路", source = DataSourceType.CHELAILE)
+            ),
+            stops = listOf(
+                NearbyStop(stopId = "cl_s1", name = "人民广场", isSubway = false)
+            )
+        )
+
+        fakeMygolbsProvider.searchResult = TransitSearchResult(
+            keyword = "1",
+            lines = listOf(
+                createSummary(name = "1路", source = DataSourceType.MYGOLBS),
+                createSummary(name = "2路", source = DataSourceType.MYGOLBS)
+            ),
+            stops = listOf(
+                NearbyStop(stopId = "mg:s1", name = "人民广场", isSubway = false),
+                NearbyStop(stopId = "mg:s2", name = "五角场", isSubway = false)
+            )
+        )
+
+        // Act (指定掌上公交优先)
+        val result = coordinator.search(
+            city = testCity,
+            keyword = "1",
+            mode = EngineMode.ALL,
+            priority = AggregatedSourcePriority.MYGOLBS_FIRST
+        )
+
+        // Assert: 掌上公交保留原名，车来了同名线路被追加 [车来了]
+        val lineNames = result.lines.map { it.name }
+        assertTrue(lineNames.contains("1路"))
+        assertTrue(lineNames.contains("1路 [车来了]"))
+        assertTrue(lineNames.contains("2路"))
+        assertTrue(lineNames.contains("10路"))
+
+        // 自然排序且主源排在前面：1路(MYGOLBS), 1路 [车来了](CHELAILE), 2路, 10路
+        assertEquals("1路", result.lines[0].name)
+        assertEquals(DataSourceType.MYGOLBS, result.lines[0].source)
+        assertEquals("1路 [车来了]", result.lines[1].name)
+        assertEquals(DataSourceType.CHELAILE, result.lines[1].source)
+
+        // 站点同名：掌上公交保留原名，车来了追加 (车来了)
+        val stopNames = result.stops.map { it.name }
+        assertTrue(stopNames.contains("人民广场"))
+        assertTrue(stopNames.contains("人民广场 (车来了)"))
         assertTrue(stopNames.contains("五角场"))
     }
 
@@ -456,6 +511,105 @@ class TransitProviderCoordinatorTest {
         assertEquals("掌上兜底站台", stops[0].name)
         assertEquals(1, fakeChelaileProvider.nearbyStopsCallCount)
         assertEquals(1, fakeMygolbsProvider.nearbyStopsCallCount)
+    }
+
+    @Test
+    fun testGetNearbyStops_withAllMode_mygolbsPriority_prefersMygolbsRadar() = runBlocking {
+        fakeChelaileProvider.nearbyStopsResult = listOf(
+            NearbyStop(stopId = "s_cl", name = "车来了站台")
+        )
+        fakeMygolbsProvider.nearbyStopsResult = listOf(
+            NearbyStop(stopId = "s_mg", name = "掌上优先站台")
+        )
+
+        val stops = coordinator.getNearbyStops(
+            city = testCity,
+            wgsLat = 31.23,
+            wgsLng = 121.47,
+            mode = EngineMode.ALL,
+            priority = AggregatedSourcePriority.MYGOLBS_FIRST
+        )
+
+        assertEquals(1, stops.size)
+        assertEquals("掌上优先站台", stops[0].name)
+        assertEquals(0, fakeChelaileProvider.nearbyStopsCallCount)
+        assertEquals(1, fakeMygolbsProvider.nearbyStopsCallCount)
+    }
+
+    @Test
+    fun testGetNearbyStops_withAllMode_mygolbsPriority_fallsBackToChelaileRadar() = runBlocking {
+        fakeMygolbsProvider.nearbyStopsResult = emptyList()
+        fakeChelaileProvider.nearbyStopsResult = listOf(
+            NearbyStop(stopId = "s_cl", name = "车来了降级站台")
+        )
+
+        val stops = coordinator.getNearbyStops(
+            city = testCity,
+            wgsLat = 31.23,
+            wgsLng = 121.47,
+            mode = EngineMode.ALL,
+            priority = AggregatedSourcePriority.MYGOLBS_FIRST
+        )
+
+        assertEquals(1, stops.size)
+        assertEquals("车来了降级站台", stops[0].name)
+        assertEquals(1, fakeMygolbsProvider.nearbyStopsCallCount)
+        assertEquals(1, fakeChelaileProvider.nearbyStopsCallCount)
+    }
+
+    @Test
+    fun testGetStopDetail_inAllMode_mygolbsPriority_prefersMygolbsAndFallsBackToChelaile() = runBlocking {
+        val dir = BusLineDirection(
+            lineId = "l1",
+            name = "1路",
+            startStop = "A",
+            endStop = "B",
+            source = DataSourceType.CHELAILE
+        )
+        fakeMygolbsProvider.stopDetailResult = emptyList()
+        fakeChelaileProvider.stopDetailResult = listOf(
+            NearbyStop(
+                stopId = "cl_s1",
+                name = "人民广场",
+                lines = listOf(
+                    NearbyStopLineStatus(
+                        line = dir,
+                        targetOrder = 1,
+                        targetStopId = "s1",
+                        targetStopName = "人民广场"
+                    )
+                )
+            )
+        )
+
+        val request = StopDetailRequest(stopId = "normal_id", stopName = "人民广场")
+        val result = coordinator.getStopDetail(
+            city = testCity,
+            request = request,
+            mode = EngineMode.ALL,
+            priority = AggregatedSourcePriority.MYGOLBS_FIRST
+        )
+
+        assertEquals(1, fakeMygolbsProvider.stopDetailCallCount)
+        assertEquals(1, fakeChelaileProvider.stopDetailCallCount)
+        assertEquals(1, result.size)
+        assertEquals("人民广场", result[0].name)
+    }
+
+    @Test
+    fun testResolveCityByLocation_withMygolbsPriority_prefersMygolbs() = runBlocking {
+        fakeMygolbsProvider.resolveCityResult = "杭州"
+        fakeChelaileProvider.resolveCityResult = "上海"
+
+        val resolved = coordinator.resolveCityByLocation(
+            wgsLat = 30.27,
+            wgsLng = 120.15,
+            priority = AggregatedSourcePriority.MYGOLBS_FIRST
+        )
+
+        assertEquals("杭州", resolved)
+        assertEquals(1, fakeMygolbsProvider.resolveCityCallCount)
+        assertEquals(0, fakeChelaileProvider.resolveCityCallCount)
     }
 }
 

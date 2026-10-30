@@ -115,18 +115,30 @@ object RouteProjectionMath {
      * 路线名称智能排序：纯数字线路按数值升序排在前面，带字母/汉字专线排在后面
      */
     fun compareLineNames(a: String, b: String): Int {
-        val cleanA = a.removeSuffix(" [掌上公交]").removeSuffix("[掌上公交]").trim()
-        val cleanB = b.removeSuffix(" [掌上公交]").removeSuffix("[掌上公交]").trim()
+        val cleanA = a.removeSuffix(" [掌上公交]").removeSuffix("[掌上公交]")
+            .removeSuffix(" [车来了]").removeSuffix("[车来了]").trim()
+        val cleanB = b.removeSuffix(" [掌上公交]").removeSuffix("[掌上公交]")
+            .removeSuffix(" [车来了]").removeSuffix("[车来了]").trim()
         val numA = cleanA.removeSuffix("路").toIntOrNull()
         val numB = cleanB.removeSuffix("路").toIntOrNull()
         return when {
             numA != null && numB != null -> {
                 val cmp = numA.compareTo(numB)
-                if (cmp != 0) cmp else a.compareTo(b)
+                if (cmp != 0) cmp else {
+                    // 若数字相同，基础名短的（无后缀）排在前面
+                    val lenCmp = a.length.compareTo(b.length)
+                    if (lenCmp != 0) lenCmp else a.compareTo(b)
+                }
             }
             numA != null -> -1
             numB != null -> 1
-            else -> a.compareTo(b)
+            else -> {
+                val cleanCmp = cleanA.compareTo(cleanB)
+                if (cleanCmp != 0) cleanCmp else {
+                    val lenCmp = a.length.compareTo(b.length)
+                    if (lenCmp != 0) lenCmp else a.compareTo(b)
+                }
+            }
         }
     }
 }

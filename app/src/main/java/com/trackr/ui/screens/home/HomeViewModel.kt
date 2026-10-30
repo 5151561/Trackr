@@ -14,6 +14,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.trackr.TrackrApp
 import com.trackr.data.repository.ITransitRepository
+import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.NearbyStop
@@ -55,7 +56,8 @@ data class HomeUiState(
     val isSearching: Boolean = false,
     val searchHistory: List<String> = emptyList(),
     val isRefreshing: Boolean = false,
-    val engineMode: EngineMode = EngineMode.ALL
+    val engineMode: EngineMode = EngineMode.ALL,
+    val aggregatedPriority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST
 ) {
     val filteredCities: List<TransitCity>
         get() {
@@ -169,6 +171,24 @@ class HomeViewModel(
                     val state = _uiState.value
                     loadNearbyStops(state.currentLat, state.currentLng)
                     refreshFavoritesRealtime()
+                }
+            }
+        }
+
+        // 观察聚合优先级设置变化
+        viewModelScope.launch {
+            repository.aggregatedPriority.collect { priority ->
+                val prevPriority = _uiState.value.aggregatedPriority
+                _uiState.update { it.copy(aggregatedPriority = priority) }
+                if (prevPriority != priority && _uiState.value.engineMode == EngineMode.ALL) {
+                    val currentQuery = _uiState.value.searchQuery
+                    if (currentQuery.isNotBlank()) {
+                        updateSearchQuery(currentQuery)
+                    } else {
+                        val state = _uiState.value
+                        loadNearbyStops(state.currentLat, state.currentLng)
+                        refreshFavoritesRealtime()
+                    }
                 }
             }
         }
@@ -614,6 +634,10 @@ class HomeViewModel(
 
     fun setEngineMode(mode: EngineMode) {
         repository.setEngineMode(mode)
+    }
+
+    fun setAggregatedPriority(priority: AggregatedSourcePriority) {
+        repository.setAggregatedPriority(priority)
     }
 
     fun toggleEngineMode() {

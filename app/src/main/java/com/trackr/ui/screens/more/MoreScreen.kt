@@ -1,5 +1,10 @@
 package com.trackr.ui.screens.more
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,6 +62,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.TransitCodeProvider
@@ -72,6 +78,7 @@ fun MoreScreen(
 ) {
     val context = LocalContext.current
     val engineMode by viewModel.engineMode.collectAsStateWithLifecycle()
+    val aggregatedPriority by viewModel.aggregatedPriority.collectAsStateWithLifecycle()
     val nearbyStopsCount by viewModel.nearbyStopsCount.collectAsStateWithLifecycle()
     val preferredTransitCode by viewModel.preferredTransitCode.collectAsStateWithLifecycle()
     val reminders by viewModel.reminders.collectAsStateWithLifecycle()
@@ -170,6 +177,54 @@ fun MoreScreen(
                                             )
                                         }
                                     )
+                                }
+                            }
+
+                            // 聚合优先级配置（仅在双引擎聚合模式下展开）
+                            AnimatedVisibility(
+                                visible = engineMode == EngineMode.ALL,
+                                enter = expandVertically() + fadeIn(),
+                                exit = shrinkVertically() + fadeOut()
+                            ) {
+                                Column {
+                                    Spacer(modifier = Modifier.height(14.dp))
+                                    Text(
+                                        text = "聚合优先级",
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = aggregatedPriority.description,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    val priorityOptions = listOf(
+                                        AggregatedSourcePriority.CHELAILE_FIRST to "车来了优先",
+                                        AggregatedSourcePriority.MYGOLBS_FIRST to "掌上公交优先"
+                                    )
+                                    SingleChoiceSegmentedButtonRow(
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        priorityOptions.forEachIndexed { index, (p, label) ->
+                                            SegmentedButton(
+                                                selected = aggregatedPriority == p,
+                                                onClick = { viewModel.setAggregatedPriority(p) },
+                                                shape = SegmentedButtonDefaults.itemShape(
+                                                    index = index,
+                                                    count = priorityOptions.size
+                                                ),
+                                                label = {
+                                                    Text(
+                                                        text = label,
+                                                        style = MaterialTheme.typography.labelMedium,
+                                                        fontWeight = if (aggregatedPriority == p) FontWeight.Bold else FontWeight.Normal
+                                                    )
+                                                }
+                                            )
+                                        }
+                                    }
                                 }
                             }
 

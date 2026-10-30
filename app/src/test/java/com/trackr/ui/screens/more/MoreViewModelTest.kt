@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import com.trackr.data.repository.FakeScheduledReminderRepository
 import com.trackr.data.repository.FakeTransitRepository
+import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.ScheduledReminder
 import com.trackr.domain.model.TransitCodeProvider
@@ -52,6 +53,7 @@ class MoreViewModelTest {
 
         // 验证统一 MoreUiState
         assertEquals(EngineMode.ALL, viewModel.uiState.value.engineMode)
+        assertEquals(AggregatedSourcePriority.CHELAILE_FIRST, viewModel.uiState.value.aggregatedPriority)
         assertEquals(4, viewModel.uiState.value.nearbyStopsCount)
         assertEquals(TransitCodeProvider.ASK_ALWAYS, viewModel.uiState.value.preferredTransitCode)
         assertTrue(viewModel.uiState.value.reminders.isEmpty())
@@ -66,6 +68,18 @@ class MoreViewModelTest {
         viewModel.setEngineMode(EngineMode.CHELAILE)
         assertEquals(EngineMode.CHELAILE, viewModel.engineMode.value)
         assertEquals(EngineMode.CHELAILE, fakeTransitRepository.engineMode.value)
+    }
+
+    @Test
+    fun testSetAggregatedPriority_updatesRepositoryAndState() = runTest {
+        assertEquals(AggregatedSourcePriority.CHELAILE_FIRST, viewModel.aggregatedPriority.value)
+        assertEquals(AggregatedSourcePriority.CHELAILE_FIRST, viewModel.uiState.value.aggregatedPriority)
+
+        viewModel.setAggregatedPriority(AggregatedSourcePriority.MYGOLBS_FIRST)
+        testScheduler.advanceUntilIdle()
+        assertEquals(AggregatedSourcePriority.MYGOLBS_FIRST, viewModel.aggregatedPriority.value)
+        assertEquals(AggregatedSourcePriority.MYGOLBS_FIRST, fakeTransitRepository.aggregatedPriority.value)
+        assertEquals(AggregatedSourcePriority.MYGOLBS_FIRST, viewModel.uiState.value.aggregatedPriority)
     }
 
     @Test

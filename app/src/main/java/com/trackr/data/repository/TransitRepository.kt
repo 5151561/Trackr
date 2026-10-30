@@ -9,6 +9,7 @@ import com.trackr.data.provider.model.StopDetailRequest
 import com.trackr.data.provider.mygolbs.MygolbsTransitProvider
 import com.trackr.data.remote.chelaile.ChelaileApiClient
 import com.trackr.data.remote.mygolbs.MygolbsApiClient
+import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusStop
@@ -72,6 +73,9 @@ class TransitRepository(
 
     private val _engineMode = MutableStateFlow(loadInitialEngineMode())
     override val engineMode: StateFlow<EngineMode> = _engineMode.asStateFlow()
+
+    private val _aggregatedPriority = MutableStateFlow(loadInitialAggregatedPriority())
+    override val aggregatedPriority: StateFlow<AggregatedSourcePriority> = _aggregatedPriority.asStateFlow()
 
     private val _favorites = MutableStateFlow(loadInitialFavorites())
     override val favorites: StateFlow<List<FavoriteStationLine>> = _favorites.asStateFlow()
@@ -153,6 +157,17 @@ class TransitRepository(
         return runCatching { EngineMode.valueOf(modeStr ?: EngineMode.ALL.name) }.getOrDefault(EngineMode.ALL)
     }
 
+    private fun loadInitialAggregatedPriority(): AggregatedSourcePriority {
+        val name = prefs.getString("aggregated_source_priority", AggregatedSourcePriority.CHELAILE_FIRST.name)
+        return runCatching { AggregatedSourcePriority.valueOf(name ?: AggregatedSourcePriority.CHELAILE_FIRST.name) }
+            .getOrDefault(AggregatedSourcePriority.CHELAILE_FIRST)
+    }
+
+    override fun setAggregatedPriority(priority: AggregatedSourcePriority) {
+        _aggregatedPriority.value = priority
+        prefs.edit().putString("aggregated_source_priority", priority.name).apply()
+    }
+
     override fun setEngineMode(mode: EngineMode) {
         _engineMode.value = mode
         prefs.edit().putString("engine_mode", mode.name).apply()
@@ -203,7 +218,7 @@ class TransitRepository(
     override suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): Result<TransitCity?> = runCatching {
         withContext(Dispatchers.IO) {
             // 1) 优先尝试雷达 Provider GPS 逆地理服务
-            var resolvedName: String? = coordinator.resolveCityByLocation(wgsLat, wgsLng)
+            var resolvedName: String? = coordinator.resolveCityByLocation(wgsLat, wgsLng, _aggregatedPriority.value)
 
             // 2) 若为空，尝试 Android 系统原生 Geocoder
             if (resolvedName.isNullOrBlank()) {
@@ -269,7 +284,7 @@ class TransitRepository(
         wgsLng: Double,
         limit: Int
     ): Result<List<NearbyStop>> = runCatching {
-        coordinator.getNearbyStops(city, wgsLat, wgsLng, limit, _engineMode.value)
+        coordinator.getNearbyStops(city, wgsLat, wgsLng, limit, _engineMode.value, _aggregatedPriority.value)
     }
 
     override suspend fun getStopDetail(
@@ -295,7 +310,7 @@ class TransitRepository(
             userLat = resolvedUserLat,
             userLng = resolvedUserLng
         )
-        coordinator.getStopDetail(city, request, _engineMode.value)
+        coordinator.getStopDetail(city, request, _engineMode.value, _aggregatedPriority.value)
     }
 
     override suspend fun search(
@@ -306,13 +321,18 @@ class TransitRepository(
     ): Result<TransitSearchResult> = runCatching {
         val resolvedUserLat = userLat ?: _userLocation.value?.first
         val resolvedUserLng = userLng ?: _userLocation.value?.second
-        coordinator.search(
+        val result = coordinator.search(
             city = city,
             keyword = keyword,
             mode = _engineMode.value,
             userLat = resolvedUserLat,
-            userLng = resolvedUserLng
+            userLng = resolvedUserLng,
+            priority = _aggregatedPriority.value
         )
+        if (result.lines.isNotEmpty() || result.stops.isNotEmpty()) {
+            addSearchHistory(keyword)
+        }
+        result
     }
 
     override suspend fun getLineDetail(
@@ -336,7 +356,7 @@ class TransitRepository(
             lineNameHint = lineNameHint,
             directionHint = directionHint
         )
-        val detail = coordinator.getLineDetail(city, request)
+        val detail = coordinator.getLineDetail(city, request, _aggregatedPriority.value)
 
         // 静态站表内存缓存维护
         val effectiveStops = if (detail.stops.isNotEmpty()) {
@@ -358,7 +378,7 @@ class TransitRepository(
         line: BusLineDirection,
         atTimeHHMM: String?
     ): Result<LineTimetable> = runCatching {
-        coordinator.getTimetable(city, line, atTimeHHMM)
+        coordinator.getTimetable(city, line, atTimeHHMM, _aggregatedPriority.value)
     }
 
     override suspend fun refreshFavoritesRealtime(): Result<Map<String, NearbyStop>> = runCatching {

@@ -2,6 +2,7 @@ package com.trackr.data.provider
 
 import com.trackr.data.provider.model.LineDetailRequest
 import com.trackr.data.provider.model.StopDetailRequest
+import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.DataSourceType
@@ -16,7 +17,7 @@ import kotlinx.coroutines.coroutineScope
 
 /**
  * 实时公交统一数据源分发与融合协调器
- * 负责根据 EngineMode 策略路由、双源城市列表融合、跨源降级与结果聚合
+ * 负责根据 EngineMode 与 AggregatedSourcePriority 策略路由、双源城市列表融合、跨源降级与结果聚合
  */
 class TransitProviderCoordinator(
     val providers: Map<DataSourceType, ITransitProvider>,
@@ -113,10 +114,16 @@ class TransitProviderCoordinator(
     }
 
     /**
-     * 逆地理定位：依次查询具备雷达能力的 Provider
+     * 逆地理定位：按数据源优先级依次查询具备雷达能力的 Provider
      */
-    suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): String? {
-        for (provider in providers.values) {
+    suspend fun resolveCityByLocation(
+        wgsLat: Double,
+        wgsLng: Double,
+        priority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST
+    ): String? {
+        val orderedProviders = priority.sourceOrder.mapNotNull { providers[it] } +
+                providers.values.filter { it.sourceType !in priority.sourceOrder }
+        for (provider in orderedProviders) {
             if (provider.supportsLocationRadar()) {
                 val resolved = runCatching { provider.resolveCityByLocation(wgsLat, wgsLng) }.getOrNull()
                 if (!resolved.isNullOrBlank()) {
@@ -128,21 +135,22 @@ class TransitProviderCoordinator(
     }
 
     /**
-     * 获取周边站点：根据 EngineMode 策略路由至支持位置雷达能力的 Provider
+     * 获取周边站点：根据 EngineMode 与 AggregatedSourcePriority 策略路由至支持位置雷达能力的 Provider
      */
     suspend fun getNearbyStops(
         city: TransitCity,
         wgsLat: Double,
         wgsLng: Double,
         limit: Int = 4,
-        mode: EngineMode = EngineMode.ALL
+        mode: EngineMode = EngineMode.ALL,
+        priority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST
     ): List<NearbyStop> {
         val targetProvider = when (mode) {
             EngineMode.CHELAILE -> providers[DataSourceType.CHELAILE]
             EngineMode.MYGOLBS -> providers[DataSourceType.MYGOLBS]
             EngineMode.ALL -> {
-                providers[DataSourceType.CHELAILE]?.takeIf { it.supportsLocationRadar() }
-                    ?: providers[DataSourceType.MYGOLBS]?.takeIf { it.supportsLocationRadar() }
+                providers[priority.primarySource]?.takeIf { it.supportsLocationRadar() }
+                    ?: providers[priority.secondarySource]?.takeIf { it.supportsLocationRadar() }
                     ?: providers.values.firstOrNull { it.supportsLocationRadar() }
             }
         }
@@ -152,9 +160,9 @@ class TransitProviderCoordinator(
             if (stops.isNotEmpty()) return stops
         }
 
-        // 双引擎模式下：若车来了未查到周边站点（如掌上公交独有城市），自动跨源降级至掌上公交雷达
+        // 双引擎模式下：若主优先源未查到周边站点，自动跨源降级至副优先源雷达
         if (mode == EngineMode.ALL) {
-            val fallbackProvider = providers[DataSourceType.MYGOLBS]?.takeIf { it.supportsLocationRadar() }
+            val fallbackProvider = providers[priority.secondarySource]?.takeIf { it.supportsLocationRadar() }
             if (fallbackProvider != null && fallbackProvider !== targetProvider) {
                 return runCatching { fallbackProvider.getNearbyStops(city, wgsLat, wgsLng, limit) }.getOrDefault(emptyList())
             }
@@ -164,14 +172,15 @@ class TransitProviderCoordinator(
     }
 
     /**
-     * 搜索：根据 EngineMode 策略路由单源或并发请求双源，由 SearchResultAggregator 统一聚合
+     * 搜索：根据 EngineMode 策略路由单源或并发请求双源，由 SearchResultAggregator 根据优先级统一聚合
      */
     suspend fun search(
         city: TransitCity,
         keyword: String,
         mode: EngineMode,
         userLat: Double? = null,
-        userLng: Double? = null
+        userLng: Double? = null,
+        priority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST
     ): TransitSearchResult = coroutineScope {
         val chelaileProvider = providers[DataSourceType.CHELAILE]
         val mygolbsProvider = providers[DataSourceType.MYGOLBS]
@@ -181,13 +190,13 @@ class TransitProviderCoordinator(
                 val res = chelaileProvider?.let {
                     runCatching { it.search(city, keyword, userLat, userLng) }.getOrNull()
                 }
-                aggregator.aggregate(keyword, mode, chelaileResult = res)
+                aggregator.aggregate(keyword, mode, chelaileResult = res, priority = priority)
             }
             EngineMode.MYGOLBS -> {
                 val res = mygolbsProvider?.let {
                     runCatching { it.search(city, keyword, userLat, userLng) }.getOrNull()
                 }
-                aggregator.aggregate(keyword, mode, mygolbsResult = res)
+                aggregator.aggregate(keyword, mode, mygolbsResult = res, priority = priority)
             }
             EngineMode.ALL -> {
                 val clDeferred = async {
@@ -204,28 +213,30 @@ class TransitProviderCoordinator(
                     keyword = keyword,
                     mode = mode,
                     chelaileResult = clDeferred.await(),
-                    mygolbsResult = mgDeferred.await()
+                    mygolbsResult = mgDeferred.await(),
+                    priority = priority
                 )
             }
         }
     }
 
     /**
-     * 站点详情：实现三级降级调度（特征识别 -> 主源查询含同源兜底 -> 跨源降级至掌上公交）
+     * 站点详情：实现三级降级调度（特征识别 -> 主源查询含同源兜底 -> 跨源降级至副优先源）
      */
     suspend fun getStopDetail(
         city: TransitCity,
         request: StopDetailRequest,
-        mode: EngineMode
+        mode: EngineMode,
+        priority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST
     ): List<NearbyStop> {
         val chelaileProvider = providers[DataSourceType.CHELAILE]
         val mygolbsProvider = providers[DataSourceType.MYGOLBS]
 
         // 显式命中掌上公交特征或当前引擎模式为掌上公交
-        val isMygolbs = mode == EngineMode.MYGOLBS ||
-                mygolbsProvider?.supportsStop(request) == true
+        val isExplicitMygolbs = mode == EngineMode.MYGOLBS ||
+                (mygolbsProvider?.supportsStop(request) == true && mode != EngineMode.CHELAILE)
 
-        if (isMygolbs) {
+        if (isExplicitMygolbs) {
             return mygolbsProvider?.getStopDetail(city, request).orEmpty()
         }
 
@@ -233,22 +244,25 @@ class TransitProviderCoordinator(
             return chelaileProvider?.getStopDetail(city, request).orEmpty()
         }
 
-        // EngineMode.ALL：优先调用车来了（内含阶段 1 主查询 + 物理站台并发补全与阶段 2 同源经纬度兜底）
-        val chelaileStops = chelaileProvider?.let {
+        // EngineMode.ALL：优先调用主源（根据 priority 设置）
+        val primaryProvider = providers[priority.primarySource]
+        val secondaryProvider = providers[priority.secondarySource]
+
+        val primaryStops = primaryProvider?.let {
             runCatching { it.getStopDetail(city, request) }.getOrNull()
         }.orEmpty()
 
-        if (chelaileStops.isNotEmpty()) {
-            return chelaileStops
+        if (primaryStops.isNotEmpty()) {
+            return primaryStops
         }
 
-        // 阶段 3：跨源降级至掌上公交
-        if (!request.stopName.isNullOrBlank() && mygolbsProvider != null) {
-            val mgStops = runCatching {
-                mygolbsProvider.getStopDetail(city, request)
+        // 阶段 3：跨源降级至副优先源
+        if (!request.stopName.isNullOrBlank() && secondaryProvider != null) {
+            val secondaryStops = runCatching {
+                secondaryProvider.getStopDetail(city, request)
             }.getOrNull().orEmpty()
-            if (mgStops.any { it.lines.isNotEmpty() }) {
-                return mgStops
+            if (secondaryStops.any { it.lines.isNotEmpty() }) {
+                return secondaryStops
             }
         }
 
@@ -256,35 +270,46 @@ class TransitProviderCoordinator(
     }
 
     /**
-     * 线路详情：根据请求显式 source 或 lineId 前缀特征精准路由
+     * 线路详情：根据请求显式 source 或 lineId 前缀特征精准路由，兜底遵循数据源优先级
      */
     suspend fun getLineDetail(
         city: TransitCity,
-        request: LineDetailRequest
+        request: LineDetailRequest,
+        priority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST
     ): BusLineDetail {
+        val defaultFallback = providers[priority.primarySource]
+            ?: providers[priority.secondarySource]
+            ?: providers.values.firstOrNull()
+
         val targetProvider = when {
             request.source != null -> providers[request.source]
             providers[DataSourceType.MYGOLBS]?.supportsLine(request.lineId) == true -> providers[DataSourceType.MYGOLBS]
             providers[DataSourceType.CHELAILE]?.supportsLine(request.lineId) == true -> providers[DataSourceType.CHELAILE]
-            else -> providers.values.firstOrNull { it.supportsLine(request.lineId) } ?: providers[DataSourceType.CHELAILE]
+            else -> providers.values.firstOrNull { it.supportsLine(request.lineId) } ?: defaultFallback
         } ?: throw IllegalStateException("No provider found for lineId: ${request.lineId}")
 
         return targetProvider.getLineDetail(city, request)
     }
 
     /**
-     * 运营时刻表：根据线路显式 source 或 lineId 前缀特征精准路由
+     * 运营时刻表：根据线路显式 source 或 lineId 前缀特征精准路由，兜底遵循数据源优先级
      */
     suspend fun getTimetable(
         city: TransitCity,
         line: BusLineDirection,
-        atTimeHHMM: String? = null
+        atTimeHHMM: String? = null,
+        priority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST
     ): LineTimetable {
+        val defaultFallback = providers[priority.primarySource]
+            ?: providers[priority.secondarySource]
+            ?: providers.values.firstOrNull()
+
         val targetProvider = when {
             line.source == DataSourceType.MYGOLBS || line.lineId.startsWith("mg:") -> providers[DataSourceType.MYGOLBS]
             line.source == DataSourceType.CHELAILE -> providers[DataSourceType.CHELAILE]
             providers[DataSourceType.MYGOLBS]?.supportsLine(line.lineId) == true -> providers[DataSourceType.MYGOLBS]
-            else -> providers[DataSourceType.CHELAILE] ?: providers.values.firstOrNull()
+            providers[DataSourceType.CHELAILE]?.supportsLine(line.lineId) == true -> providers[DataSourceType.CHELAILE]
+            else -> defaultFallback
         } ?: throw IllegalStateException("No provider found for timetable: ${line.lineId}")
 
         return targetProvider.getTimetable(city, line, atTimeHHMM)

@@ -1,5 +1,6 @@
 package com.trackr.data.repository
 
+import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.DataSourceType
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.StateFlow
 interface ITransitRepository {
     val selectedCity: StateFlow<TransitCity>
     val engineMode: StateFlow<EngineMode>
+    val aggregatedPriority: StateFlow<AggregatedSourcePriority>
     val favorites: StateFlow<List<FavoriteStationLine>>
     val activeTrackingSession: StateFlow<TrackingSessionState>
     val userLocation: StateFlow<Pair<Double, Double>?>
@@ -27,6 +29,7 @@ interface ITransitRepository {
     val nearbyStopsCount: StateFlow<Int>
 
     fun setEngineMode(mode: EngineMode)
+    fun setAggregatedPriority(priority: AggregatedSourcePriority)
     fun setNearbyStopsCount(count: Int)
     fun updateUserLocation(lat: Double, lng: Double)
     suspend fun selectCity(city: TransitCity)

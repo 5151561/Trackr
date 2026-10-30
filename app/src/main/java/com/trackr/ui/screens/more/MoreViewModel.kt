@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.trackr.TrackrApp
 import com.trackr.data.repository.IScheduledReminderRepository
 import com.trackr.data.repository.ITransitRepository
+import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.ScheduledReminder
 import com.trackr.domain.model.TransitCodeProvider
@@ -20,6 +21,7 @@ import kotlinx.coroutines.launch
  */
 data class MoreUiState(
     val engineMode: EngineMode = EngineMode.ALL,
+    val aggregatedPriority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST,
     val nearbyStopsCount: Int = 4,
     val preferredTransitCode: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
     val reminders: List<ScheduledReminder> = emptyList()
@@ -44,18 +46,21 @@ class MoreViewModel(
     )
 
     val engineMode: StateFlow<EngineMode> = repository.engineMode
+    val aggregatedPriority: StateFlow<AggregatedSourcePriority> = repository.aggregatedPriority
     val nearbyStopsCount: StateFlow<Int> = repository.nearbyStopsCount
     val preferredTransitCode: StateFlow<TransitCodeProvider> = repository.preferredTransitCodeProvider
     val reminders: StateFlow<List<ScheduledReminder>> = reminderRepository.reminders
 
     val uiState: StateFlow<MoreUiState> = combine(
         engineMode,
+        aggregatedPriority,
         nearbyStopsCount,
         preferredTransitCode,
         reminders
-    ) { mode, count, code, rems ->
+    ) { mode, priority, count, code, rems ->
         MoreUiState(
             engineMode = mode,
+            aggregatedPriority = priority,
             nearbyStopsCount = count,
             preferredTransitCode = code,
             reminders = rems
@@ -65,6 +70,7 @@ class MoreViewModel(
         started = SharingStarted.Eagerly,
         initialValue = MoreUiState(
             engineMode = repository.engineMode.value,
+            aggregatedPriority = repository.aggregatedPriority.value,
             nearbyStopsCount = repository.nearbyStopsCount.value,
             preferredTransitCode = repository.preferredTransitCodeProvider.value,
             reminders = reminderRepository.reminders.value
@@ -73,6 +79,10 @@ class MoreViewModel(
 
     fun setEngineMode(mode: EngineMode) {
         repository.setEngineMode(mode)
+    }
+
+    fun setAggregatedPriority(priority: AggregatedSourcePriority) {
+        repository.setAggregatedPriority(priority)
     }
 
     fun setNearbyStopsCount(count: Int) {

@@ -1,7 +1,9 @@
 package com.trackr.data.provider
 
 import com.trackr.domain.math.RouteProjectionMath
+import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.BusLineSummary
+import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.TransitSearchResult
@@ -9,7 +11,7 @@ import com.trackr.domain.model.isPureSubwayStation
 
 /**
  * 实时公交多源检索结果聚合器
- * 负责单源/多源结果合并、同名打标（[掌上公交] / (掌上公交)）、纯地铁过滤以及自然排序
+ * 负责单源/多源结果合并、同名打标（根据优先级为主源保留原名，副源追加 [掌上公交]/[车来了] 标识）、纯地铁过滤以及自然排序
  */
 class SearchResultAggregator {
 
@@ -17,7 +19,8 @@ class SearchResultAggregator {
         keyword: String,
         mode: EngineMode,
         chelaileResult: TransitSearchResult? = null,
-        mygolbsResult: TransitSearchResult? = null
+        mygolbsResult: TransitSearchResult? = null,
+        priority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST
     ): TransitSearchResult {
         val mergedLines = ArrayList<BusLineSummary>()
         val mergedStops = ArrayList<NearbyStop>()
@@ -36,32 +39,45 @@ class SearchResultAggregator {
                 }
             }
             EngineMode.ALL -> {
-                val clLines = chelaileResult?.lines.orEmpty()
-                val clStops = chelaileResult?.stops.orEmpty()
-                val mgLines = mygolbsResult?.lines.orEmpty()
-                val mgStops = mygolbsResult?.stops.orEmpty()
+                val primaryResult = if (priority.primarySource == DataSourceType.CHELAILE) chelaileResult else mygolbsResult
+                val secondaryResult = if (priority.primarySource == DataSourceType.CHELAILE) mygolbsResult else chelaileResult
+                val secondaryLineTag = if (priority.primarySource == DataSourceType.CHELAILE) " [掌上公交]" else " [车来了]"
+                val secondaryStopTag = if (priority.primarySource == DataSourceType.CHELAILE) " (掌上公交)" else " (车来了)"
 
-                // 合并线路：以车来了线路为基准，掌上公交同名线路追加 " [掌上公交]" 后缀并存展示
-                mergedLines.addAll(clLines)
-                val existingLineNames = clLines.map { it.name.trim() }.toSet()
-                for (mgLine in mgLines) {
-                    val rawName = mgLine.name.removeSuffix(" [掌上公交]").removeSuffix("[掌上公交]").trim()
+                val primaryLines = primaryResult?.lines.orEmpty()
+                val primaryStops = primaryResult?.stops.orEmpty()
+                val secondaryLines = secondaryResult?.lines.orEmpty()
+                val secondaryStops = secondaryResult?.stops.orEmpty()
+
+                fun cleanLineName(name: String): String =
+                    name.removeSuffix(" [掌上公交]").removeSuffix("[掌上公交]")
+                        .removeSuffix(" [车来了]").removeSuffix("[车来了]").trim()
+
+                fun cleanStopName(name: String): String =
+                    name.removeSuffix(" (掌上公交)").removeSuffix("(掌上公交)").removeSuffix("（掌上公交）")
+                        .removeSuffix(" (车来了)").removeSuffix("(车来了)").removeSuffix("（车来了）").trim()
+
+                // 主源线路优先放入
+                mergedLines.addAll(primaryLines)
+                val existingLineNames = primaryLines.map { cleanLineName(it.name) }.toSet()
+                for (sLine in secondaryLines) {
+                    val rawName = cleanLineName(sLine.name)
                     if (existingLineNames.contains(rawName)) {
-                        mergedLines.add(mgLine.copy(name = "$rawName [掌上公交]"))
+                        mergedLines.add(sLine.copy(name = "$rawName$secondaryLineTag"))
                     } else {
-                        mergedLines.add(mgLine)
+                        mergedLines.add(sLine)
                     }
                 }
 
-                // 合并站点：以车来了站点为基准，掌上公交同名站点追加 " (掌上公交)" 后缀并存展示
-                mergedStops.addAll(clStops)
-                val existingStopNames = clStops.map { it.name.trim() }.toSet()
-                for (mgStop in mgStops) {
-                    val rawName = mgStop.name.removeSuffix(" (掌上公交)").removeSuffix("(掌上公交)").removeSuffix("（掌上公交）").trim()
+                // 主源站点优先放入
+                mergedStops.addAll(primaryStops)
+                val existingStopNames = primaryStops.map { cleanStopName(it.name) }.toSet()
+                for (sStop in secondaryStops) {
+                    val rawName = cleanStopName(sStop.name)
                     if (existingStopNames.contains(rawName)) {
-                        mergedStops.add(mgStop.copy(name = "$rawName (掌上公交)"))
+                        mergedStops.add(sStop.copy(name = "$rawName$secondaryStopTag"))
                     } else {
-                        mergedStops.add(mgStop)
+                        mergedStops.add(sStop)
                     }
                 }
             }
@@ -70,9 +86,16 @@ class SearchResultAggregator {
         // 过滤纯地铁线路（第三方源无在途实时列车追踪数据）
         mergedLines.removeAll { it.isSubway || it.name.contains("地铁") }
 
-        // 按线路名自然排序
+        // 按线路名自然排序（同名同号时主源排在前面）
         mergedLines.sortWith { a, b ->
-            RouteProjectionMath.compareLineNames(a.name, b.name)
+            val cmp = RouteProjectionMath.compareLineNames(a.name, b.name)
+            if (cmp != 0) {
+                cmp
+            } else {
+                if (a.source == priority.primarySource && b.source != priority.primarySource) -1
+                else if (b.source == priority.primarySource && a.source != priority.primarySource) 1
+                else 0
+            }
         }
 
         // 过滤纯地铁站点（仅保留地面公交站点）

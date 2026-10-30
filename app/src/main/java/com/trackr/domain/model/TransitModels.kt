@@ -22,6 +22,33 @@ enum class EngineMode(val displayName: String, val shortLabel: String) {
 }
 
 /**
+ * 双引擎聚合模式下的数据源优先级
+ */
+@Serializable
+enum class AggregatedSourcePriority(
+    val primarySource: DataSourceType,
+    val secondarySource: DataSourceType,
+    val displayName: String,
+    val description: String
+) {
+    CHELAILE_FIRST(
+        primarySource = DataSourceType.CHELAILE,
+        secondarySource = DataSourceType.MYGOLBS,
+        displayName = "车来了优先",
+        description = "以车来了数据为基准，掌上公交作为互补与兜底"
+    ),
+    MYGOLBS_FIRST(
+        primarySource = DataSourceType.MYGOLBS,
+        secondarySource = DataSourceType.CHELAILE,
+        displayName = "掌上公交优先",
+        description = "以掌上公交数据为基准，车来了作为互补与兜底"
+    );
+
+    val sourceOrder: List<DataSourceType>
+        get() = listOf(primarySource, secondarySource)
+}
+
+/**
  * 城市实体（聚合车来了 cityId 与掌上公交 cityCode）
  */
 @Serializable
