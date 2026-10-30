@@ -10,6 +10,7 @@ import com.trackr.domain.model.LineOperatingState
 import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.NearbyStopLineStatus
+import com.trackr.domain.model.sanitizePlateOrFleetNo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -630,7 +631,7 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
             liveBuses.add(
                 LiveBus(
                     busId = busNumber,
-                    plateOrFleetNo = busNumber,
+                    plateOrFleetNo = sanitizePlateOrFleetNo(busNumber),
                     order = bOrder,
                     segmentProgress = segmentProgress,
                     isArrived = isArrived,

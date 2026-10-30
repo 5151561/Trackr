@@ -114,6 +114,7 @@ import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.LineTimetable
 import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.TransitCodeProvider
+import com.trackr.domain.model.sanitizePlateOrFleetNo
 import com.trackr.service.BusTrackingService
 import com.trackr.ui.components.ExpressiveRouteRail
 import com.trackr.ui.components.RouteRailLayoutMode
@@ -742,37 +743,53 @@ private fun StationArrivalContent(
                 // 车辆信息行：车牌、倒计时、预计到达钟点、速度
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val plateClean = sanitizePlateOrFleetNo(upcomingBus.plateOrFleetNo)
+                    val plateDisplay = plateClean.ifBlank {
+                        if (upcomingBus.isArrived) "已到站车辆" else "在途车辆"
+                    }
                     Text(
-                        text = upcomingBus.plateOrFleetNo,
+                        text = plateDisplay,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
 
-                    Text(
-                        text = RouteProjectionMath.formatEtaText(upcomingBus.etaSeconds, upcomingBus.isArrived),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = busColors.busArrivingAmber
-                    )
+                    Spacer(modifier = Modifier.width(8.dp))
 
-                    if (!upcomingBus.expectedArrivalTimeText.isNullOrEmpty()) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
                         Text(
-                            text = "${upcomingBus.expectedArrivalTimeText} 到",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            text = RouteProjectionMath.formatEtaText(upcomingBus.etaSeconds, upcomingBus.isArrived),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = busColors.busArrivingAmber,
+                            maxLines = 1
                         )
-                    }
 
-                    if (upcomingBus.speedKmh > 0) {
-                        Text(
-                            text = "${upcomingBus.speedKmh.toInt()} km/h",
-                            fontSize = 13.sp,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        if (!upcomingBus.expectedArrivalTimeText.isNullOrEmpty()) {
+                            Text(
+                                text = "${upcomingBus.expectedArrivalTimeText} 到",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
+
+                        if (upcomingBus.speedKmh > 0) {
+                            Text(
+                                text = "${upcomingBus.speedKmh.toInt()} km/h",
+                                fontSize = 13.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
+                            )
+                        }
                     }
                 }
 
@@ -1029,19 +1046,31 @@ private fun BusListContent(
                                 Spacer(modifier = Modifier.width(12.dp))
 
                                 Column(modifier = Modifier.weight(1f)) {
+                                    val cleanPlate = sanitizePlateOrFleetNo(bus.plateOrFleetNo)
+                                    val displayPlate = cleanPlate.ifBlank {
+                                        when {
+                                            isPassed -> "已过站车辆"
+                                            isAtStop -> "已到站车辆"
+                                            else -> "在途车辆"
+                                        }
+                                    }
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Text(
-                                            text = bus.plateOrFleetNo,
+                                            text = displayPlate,
                                             fontSize = 15.sp,
                                             fontWeight = FontWeight.Bold,
-                                            color = if (isPassed) busColors.busPassedGray else MaterialTheme.colorScheme.onSurface
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            color = if (isPassed) busColors.busPassedGray else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.weight(1f, fill = false)
                                         )
                                         if (bus.speedKmh > 0 && !isPassed) {
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Text(
                                                 text = "${bus.speedKmh.toInt()} km/h",
                                                 fontSize = 11.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                maxLines = 1
                                             )
                                         }
                                     }
@@ -1129,10 +1158,13 @@ private fun BusFollowContent(
                 }
                 Spacer(modifier = Modifier.width(4.dp))
                 Column(modifier = Modifier.weight(1f)) {
+                    val followedPlate = followedBus?.let { sanitizePlateOrFleetNo(it.plateOrFleetNo) }?.ifBlank { null }
                     Text(
-                        text = "单车跟随 · ${followedBus?.plateOrFleetNo ?: "指定车辆"}",
+                        text = "单车跟随 · ${followedPlate ?: "指定车辆"}",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(

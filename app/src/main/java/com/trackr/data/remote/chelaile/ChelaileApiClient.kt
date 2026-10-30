@@ -15,6 +15,7 @@ import com.trackr.domain.model.ProvinceCityCatalog
 import com.trackr.domain.model.TimetableSegment
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitSearchResult
+import com.trackr.domain.model.sanitizePlateOrFleetNo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -432,10 +433,14 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
                 for (k in 0 until stnStatesArr.length()) {
                     val b = stnStatesArr.getJSONObject(k)
                     val travelTime = b.optInt("travelTime", -1)
+                    val bBusId = b.optString("busId")
+                    val bPlate = sanitizePlateOrFleetNo(b.optString("licence")).ifBlank {
+                        sanitizePlateOrFleetNo(bBusId)
+                    }
                     liveBuses.add(
                         LiveBus(
-                            busId = b.optString("busId"),
-                            plateOrFleetNo = b.optString("busId"),
+                            busId = bBusId,
+                            plateOrFleetNo = bPlate,
                             order = b.optInt("order", 0),
                             etaSeconds = travelTime,
                             capacityLevel = b.optInt("capacity", 0),
@@ -555,10 +560,14 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
                 for (k in 0 until stnStatesArr.length()) {
                     val b = stnStatesArr.getJSONObject(k)
                     val travelTime = b.optInt("travelTime", -1)
+                    val bBusId = b.optString("busId")
+                    val bPlate = sanitizePlateOrFleetNo(b.optString("licence")).ifBlank {
+                        sanitizePlateOrFleetNo(bBusId)
+                    }
                     liveBuses.add(
                         LiveBus(
-                            busId = b.optString("busId"),
-                            plateOrFleetNo = b.optString("busId"),
+                            busId = bBusId,
+                            plateOrFleetNo = bPlate,
                             order = b.optInt("order", 0),
                             etaSeconds = travelTime,
                             capacityLevel = b.optInt("capacity", 0),
@@ -768,7 +777,10 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             val bLat = b.optDouble("lat", 0.0)
             val bLng = b.optDouble("lng", 0.0)
             val bSpeed = b.optDouble("speed", 0.0)
-            val plate = b.optString("licence").ifBlank { bId }
+            val rawLicence = b.optString("licence")
+            val plate = sanitizePlateOrFleetNo(rawLicence).ifBlank {
+                sanitizePlateOrFleetNo(bId)
+            }
             val nextStopName = b.optString("nextStationName").takeIf { it.isNotBlank() }
 
             val etaPair = etaMap[bId]

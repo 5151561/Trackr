@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.LiveBus
+import com.trackr.domain.model.sanitizePlateOrFleetNo
 import com.trackr.ui.theme.BusSemanticColors
 import com.trackr.ui.theme.busChipSpringSpec
 import com.trackr.ui.theme.busColors
@@ -86,16 +87,19 @@ enum class RouteRailLayoutMode {
 
 /**
  * 车牌简写转换函数：
- * 车牌号（如“桂K03853D”）在窄列宽走向条上提取核心号码（如“3853”），自编号（如“430”）保留
+ * 车牌号（如“桂K03853D”）在窄列宽走向条上提取核心号码（如“3853”），自编号（如“430”）保留；
+ * 若无有效车牌/自编号则显示“在途”。
  */
 fun formatBusChipShortText(plateOrFleetNo: String): String {
-    val hasChinese = plateOrFleetNo.any { it in '\u4e00'..'\u9fa5' }
+    val clean = sanitizePlateOrFleetNo(plateOrFleetNo)
+    if (clean.isBlank()) return "在途"
+    val hasChinese = clean.any { it in '\u4e00'..'\u9fa5' }
     return if (hasChinese) {
-        val alphanum = plateOrFleetNo.filter { it.isLetterOrDigit() }
+        val alphanum = clean.filter { it.isLetterOrDigit() }
         val suffix = alphanum.dropWhile { it.isLetter() }
-        suffix.trimStart('0').ifEmpty { plateOrFleetNo }
+        suffix.trimStart('0').ifEmpty { clean }
     } else {
-        plateOrFleetNo
+        clean
     }
 }
 

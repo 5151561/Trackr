@@ -119,7 +119,36 @@ data class LiveBus(
     val etaSeconds: Int = -1,
     val expectedArrivalTimeText: String? = null, // 如 "21:03"
     val nextStopName: String? = null
-)
+) {
+    /**
+     * 过滤系统内部机器哈希（如 40 位 SHA-1）后的友好展示名称
+     */
+    val friendlyPlate: String
+        get() = sanitizePlateOrFleetNo(plateOrFleetNo).ifBlank {
+            if (isArrived) "已到站车辆" else "在途车辆"
+        }
+}
+
+/**
+ * 车牌/自编号有效性过滤与清洗：
+ * 过滤掉系统内部生成的机器标识（如车来了的 32 位 MD5、40 位 SHA-1 内部 busId、UUID 等），
+ * 仅保留人类可读的真实车牌（如“沪A·D8866”）或车辆自编号（如“417”、“K102”）。
+ */
+fun sanitizePlateOrFleetNo(raw: String?): String {
+    if (raw.isNullOrBlank()) return ""
+    val trimmed = raw.trim()
+    val hasChinese = trimmed.any { it in '\u4e00'..'\u9fa5' }
+    if (hasChinese) {
+        return if (trimmed.length <= 12) trimmed else ""
+    }
+    // 无汉字时：判定是否为长机器标识（如 40 位 SHA-1、32 位 MD5、UUID、或长数字串）
+    val isMachineId = trimmed.length >= 10 || (trimmed.contains('-') && trimmed.length >= 8)
+    if (isMachineId) {
+        return ""
+    }
+    // 纯英文/数字/常见符号的自编号，控制在合理长度内
+    return if (trimmed.all { it.isLetterOrDigit() || it in "·- " }) trimmed else ""
+}
 
 /**
  * 完整线路详情（含站点序列、全线车辆、反向线路信息、运营状态）

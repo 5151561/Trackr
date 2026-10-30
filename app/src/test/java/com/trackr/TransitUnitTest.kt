@@ -8,8 +8,11 @@ import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.LineOperatingState
+import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.isPureSubwayStation
+import com.trackr.domain.model.sanitizePlateOrFleetNo
+import com.trackr.ui.components.formatBusChipShortText
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -293,6 +296,79 @@ class TransitUnitTest {
         assertEquals("玉林市", com.trackr.data.remote.mygolbs.MygolbsApiClient.normalizeCityName("玉林"))
         assertEquals("玉林市", com.trackr.data.remote.mygolbs.MygolbsApiClient.normalizeCityName("玉林市"))
         assertEquals("长宁县", com.trackr.data.remote.mygolbs.MygolbsApiClient.normalizeCityName("长宁县"))
+    }
+
+    @Test
+    fun testSanitizePlateOrFleetNo_filtersMachineHashAndKeepsValidPlate() {
+        // 40 位 SHA-1 内部哈希（如张江1路车来了返回的 busId）必须过滤为空字符串
+        assertEquals("", sanitizePlateOrFleetNo("d22101794720cd421783aa69b5cb240e4d68641d"))
+        assertEquals("", sanitizePlateOrFleetNo("bcefa94a2a7530d0c41660dbb195ddbbc41b4b42"))
+        assertEquals("", sanitizePlateOrFleetNo("5785ab7ebccd56bdd2adb2f4f1eda47e343cd719"))
+
+        // 32 位 MD5 内部哈希
+        assertEquals("", sanitizePlateOrFleetNo("c4ca4238a0b923820dcc509a6f75849b"))
+
+        // UUID
+        assertEquals("", sanitizePlateOrFleetNo("550e8400-e29b-41d4-a716-446655440000"))
+
+        // 正常中国车牌号（含汉字）应保留
+        assertEquals("沪A·D8866", sanitizePlateOrFleetNo("沪A·D8866"))
+        assertEquals("桂K03853D", sanitizePlateOrFleetNo("桂K03853D"))
+        assertEquals("京A12345", sanitizePlateOrFleetNo("京A12345"))
+
+        // 正常公交自编号（短纯数字或字母数字）应保留
+        assertEquals("417", sanitizePlateOrFleetNo("417"))
+        assertEquals("K102", sanitizePlateOrFleetNo("K102"))
+        assertEquals("038", sanitizePlateOrFleetNo("038"))
+
+        // 空串与 null 处理
+        assertEquals("", sanitizePlateOrFleetNo(null))
+        assertEquals("", sanitizePlateOrFleetNo(""))
+        assertEquals("", sanitizePlateOrFleetNo("   "))
+    }
+
+    @Test
+    fun testFormatBusChipShortText_preventsOverflowOnHash() {
+        // 遇到 40 位哈希时应降级展示为“在途”，防止挤爆走向条
+        assertEquals("在途", formatBusChipShortText("d22101794720cd421783aa69b5cb240e4d68641d"))
+        assertEquals("在途", formatBusChipShortText(""))
+
+        // 正常车牌号提取核心数字后缀
+        assertEquals("8866", formatBusChipShortText("沪A·D8866"))
+        assertEquals("3853D", formatBusChipShortText("桂K03853D"))
+
+        // 纯数字自编号保持不变
+        assertEquals("417", formatBusChipShortText("417"))
+        assertEquals("K102", formatBusChipShortText("K102"))
+    }
+
+    @Test
+    fun testLiveBusFriendlyPlate() {
+        // 40 位哈希构造的 LiveBus，friendlyPlate 应降级为“在途车辆”或“已到站车辆”
+        val busEnRoute = LiveBus(
+            busId = "d22101794720cd421783aa69b5cb240e4d68641d",
+            plateOrFleetNo = "d22101794720cd421783aa69b5cb240e4d68641d",
+            order = 5,
+            isArrived = false
+        )
+        assertEquals("在途车辆", busEnRoute.friendlyPlate)
+
+        val busArrived = LiveBus(
+            busId = "d22101794720cd421783aa69b5cb240e4d68641d",
+            plateOrFleetNo = "",
+            order = 5,
+            isArrived = true
+        )
+        assertEquals("已到站车辆", busArrived.friendlyPlate)
+
+        // 具有正常车牌时
+        val normalBus = LiveBus(
+            busId = "normal_1",
+            plateOrFleetNo = "沪A·D8866",
+            order = 3,
+            isArrived = false
+        )
+        assertEquals("沪A·D8866", normalBus.friendlyPlate)
     }
 
     @org.junit.Ignore("Online network probe test - skipped in automated unit testing")
