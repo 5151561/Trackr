@@ -17,21 +17,22 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * 小米澎湃OS 焦点通知 / 超级岛权限引导对话框
- * 仅在系统未授权焦点通知且用户打开实时在途追踪时提示
+ * 系统实时活动（状态栏胶囊 / 流体云 / 焦点通知）权限未授权时的引导对话框
  */
 @Composable
 fun FocusPermissionGuideDialog(
     onDismissRequest: () -> Unit,
     onContinueWithoutSettings: () -> Unit,
-    onGoToSettings: () -> Unit
+    onGoToSettings: () -> Unit,
+    title: String = "开启焦点通知（超级岛）",
+    deviceHint: String = "检测到您正在使用小米澎湃OS（Xiaomi HyperOS）。",
+    permissionName: String = "允许焦点通知"
 ) {
     AlertDialog(
         onDismissRequest = onDismissRequest,
@@ -54,7 +55,7 @@ fun FocusPermissionGuideDialog(
         },
         title = {
             Text(
-                text = "开启焦点通知（超级岛）",
+                text = title,
                 fontSize = 19.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -65,14 +66,14 @@ fun FocusPermissionGuideDialog(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "检测到您正在使用小米澎湃OS（Xiaomi HyperOS）。",
+                    text = deviceHint,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
-                    text = "开启「允许焦点通知」后，即可在屏幕挖孔两侧显示实时公交小胶囊，并在下拉时展开实时到站倒计时与站点进度。",
+                    text = "开启「$permissionName」后，即可在屏幕挖孔两侧显示实时公交小胶囊，并在下拉时展开实时到站倒计时与站点进度。",
                     fontSize = 13.sp,
                     lineHeight = 19.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant

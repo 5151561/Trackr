@@ -47,6 +47,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +61,8 @@ import com.trackr.TrackrApp
 import com.trackr.domain.model.ScheduledReminder
 import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.service.BusTrackingService
+import com.trackr.service.vendor.LiveUpdatePromotion
+import com.trackr.service.vendor.OppoFluidCloudAdapter
 import com.trackr.service.vendor.XiaomiFocusAdapter
 import com.trackr.ui.components.ExpressiveRouteRail
 import com.trackr.ui.components.FocusPermissionGuideDialog
@@ -80,6 +83,10 @@ import com.trackr.util.TransitCodeHelper
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+private enum class LiveUpdateGuideTarget {
+    XIAOMI_FOCUS,
+    PROMOTED_ONGOING
+}
 /**
  * 线路详情页面（Material Design 3 Expressive 规范）
  */
@@ -100,7 +107,7 @@ fun LineDetailScreen(
     val selectedStop = uiState.selectedStop
     val coroutineScope = rememberCoroutineScope()
     var showReminderDialog by remember { mutableStateOf(false) }
-    var showFocusGuideDialog by remember { mutableStateOf(false) }
+    var liveUpdateGuideTarget by rememberSaveable { mutableStateOf<LiveUpdateGuideTarget?>(null) }
 
     val isCurrentStationTracking = activeTracking.isActive &&
             activeTracking.lineId == lineDetail?.line?.lineId &&
@@ -251,10 +258,16 @@ fun LineDetailScreen(
                                         if (isCurrentStationTracking) {
                                             BusTrackingService.stopTracking(context)
                                         } else if (selectedStop != null) {
-                                            if (XiaomiFocusAdapter.isXiaomiRom() && !XiaomiFocusAdapter.canShowFocus(context)) {
-                                                showFocusGuideDialog = true
-                                            } else {
-                                                startCurrentTracking()
+                                            val xiaomiFocusBlocked = XiaomiFocusAdapter.isXiaomiRom() &&
+                                                    !XiaomiFocusAdapter.canShowFocus(context)
+                                            val promotionBlocked = !xiaomiFocusBlocked &&
+                                                    !LiveUpdatePromotion.canPromote(context)
+                                            when {
+                                                xiaomiFocusBlocked ->
+                                                    liveUpdateGuideTarget = LiveUpdateGuideTarget.XIAOMI_FOCUS
+                                                promotionBlocked ->
+                                                    liveUpdateGuideTarget = LiveUpdateGuideTarget.PROMOTED_ONGOING
+                                                else -> startCurrentTracking()
                                             }
                                         }
                                     },
@@ -437,19 +450,34 @@ fun LineDetailScreen(
         )
     }
 
-    // 7. 小米澎湃OS 焦点通知权限未授权引导弹窗
-    if (showFocusGuideDialog) {
+    // 7. 系统实时活动权限（小米焦点通知 / Android 16 置顶通知）未授权引导弹窗
+    val guideTarget = liveUpdateGuideTarget
+    if (guideTarget != null) {
+        val isXiaomi = guideTarget == LiveUpdateGuideTarget.XIAOMI_FOCUS
         FocusPermissionGuideDialog(
-            onDismissRequest = { showFocusGuideDialog = false },
+            onDismissRequest = { liveUpdateGuideTarget = null },
             onContinueWithoutSettings = {
-                showFocusGuideDialog = false
+                liveUpdateGuideTarget = null
                 startCurrentTracking()
             },
             onGoToSettings = {
-                showFocusGuideDialog = false
-                XiaomiFocusAdapter.openNotificationSettings(context)
+                liveUpdateGuideTarget = null
+                if (isXiaomi) {
+                    XiaomiFocusAdapter.openNotificationSettings(context)
+                } else {
+                    LiveUpdatePromotion.openPromotionSettings(context)
+                }
                 startCurrentTracking()
-            }
+            },
+            title = if (isXiaomi) "开启焦点通知（超级岛）" else "开启流体云 / 实时活动",
+            deviceHint = if (isXiaomi) {
+                "检测到您正在使用小米澎湃OS（Xiaomi HyperOS）。"
+            } else if (OppoFluidCloudAdapter.isColorOs()) {
+                "检测到您正在使用 OPPO ColorOS / 一加 / 真我 系统。"
+            } else {
+                "检测到您的系统支持 Android 16 实时活动（Live Updates）。"
+            },
+            permissionName = if (isXiaomi) "允许焦点通知" else "实时活动 / 置顶通知"
         )
     }
 }

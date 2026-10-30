@@ -60,7 +60,7 @@ class XiaomiFocusAdapterTest {
 
         val progress = paramV2.getJSONObject("progress")
         assertEquals(900, progress.getInt("max"))
-        assertTrue(progress.getInt("current") > 0)
+        assertEquals(550, progress.getInt("current"))
     }
 
     @Test
@@ -116,8 +116,8 @@ class XiaomiFocusAdapterTest {
         assertEquals(0, capsule.getInt("status"))
 
         val progress = paramV2.getJSONObject("progress")
-        assertEquals(300, progress.getInt("max"))
-        assertEquals(250, progress.getInt("current"))
+        assertEquals(900, progress.getInt("max"))
+        assertEquals(850, progress.getInt("current"))
     }
 
     @Test

@@ -22,8 +22,8 @@ class LiveProgressNotificationHelperTest {
     }
 
     @Test
-    fun testCalculateCurrentProgress_accurateHopMapping() {
-        // 目标候车站：第 10 站；追踪起始基准站：第 7 站。跨度为 3 站，maxProgress = 300
+    fun testCalculateCurrentProgress_matchesRemainingStops() {
+        // 目标候车站：第 10 站；基准为线路起点 → 目标站，共 9 个站间，maxProgress = 900
         val baseSession = TrackingSessionState(
             isActive = true,
             lineName = "49路",
@@ -32,54 +32,81 @@ class LiveProgressNotificationHelperTest {
             startTrackingOrder = 7
         )
 
-        // 1. 车辆在第 7 站刚出发开往第 8 站（progress=0.0）：连续位置 7.0，已完成 0 hop，进度必须为 0
+        // 1. 剩 3 站且刚驶离第 7 站（order=8, progress=0.0）：已完成 5 个站间 → 500/900
         val stateAtStart = baseSession.copy(
             currentBusOrder = 8,
             currentBusProgress = 0.0f,
             stopsRemaining = 3
         )
-        assertEquals(0, LiveProgressNotificationHelper.calculateCurrentProgress(stateAtStart))
+        assertEquals(500, LiveProgressNotificationHelper.calculateCurrentProgress(stateAtStart))
 
-        // 2. 车辆在第 7 站与第 8 站之间中点（progress=0.5）：连续位置 7.5，已完成 0.5 hop，进度必须为 50/300
+        // 2. 剩 2 站、行驶到第 7 与第 8 站中点：已完成 6.5 个站间 → 650/900
         val stateMidHop1 = baseSession.copy(
             currentBusOrder = 8,
             currentBusProgress = 0.5f,
             stopsRemaining = 2
         )
-        assertEquals(50, LiveProgressNotificationHelper.calculateCurrentProgress(stateMidHop1))
+        assertEquals(650, LiveProgressNotificationHelper.calculateCurrentProgress(stateMidHop1))
 
-        // 3. 车辆到达第 8 站停靠（progress=1.0）：连续位置 8.0，已完成 1 hop，进度必须为 100/300
+        // 3. 停靠第 8 站（progress=1.0）且剩 2 站：已完成 7 个站间 → 700/900
         val stateAtStop8 = baseSession.copy(
             currentBusOrder = 8,
             currentBusProgress = 1.0f,
             stopsRemaining = 2
         )
-        assertEquals(100, LiveProgressNotificationHelper.calculateCurrentProgress(stateAtStop8))
+        assertEquals(700, LiveProgressNotificationHelper.calculateCurrentProgress(stateAtStop8))
 
-        // 4. 车辆到达第 9 站停靠（progress=1.0）：连续位置 9.0，还差 1 站才到目标站，已完成 2 hops，进度必须严格为 200/300（绝不能提前满格）
+        // 4. 停靠第 9 站且剩 1 站：已完成 8 个站间 → 800/900（绝不能提前满格）
         val stateAtStop9 = baseSession.copy(
             currentBusOrder = 9,
             currentBusProgress = 1.0f,
             stopsRemaining = 1
         )
-        assertEquals(200, LiveProgressNotificationHelper.calculateCurrentProgress(stateAtStop9))
+        assertEquals(800, LiveProgressNotificationHelper.calculateCurrentProgress(stateAtStop9))
 
-        // 5. 车辆在第 9 站与第 10 站之间行驶（order=10, progress=0.6）：连续位置 9.6，已完成 2.6 hops，进度必须为 260/300
+        // 5. 第 9 与第 10 站之间行驶（order=10, progress=0.6）且剩 0 站：已完成 8.6 个站间 → 860/900
         val stateApproaching = baseSession.copy(
             currentBusOrder = 10,
             currentBusProgress = 0.6f,
             stopsRemaining = 0
         )
-        assertEquals(260, LiveProgressNotificationHelper.calculateCurrentProgress(stateApproaching))
+        assertEquals(860, LiveProgressNotificationHelper.calculateCurrentProgress(stateApproaching))
 
-        // 6. 车辆已到达目标站停靠（isArrived=true）：进度必须为满格 300/300
+        // 6. 车辆已到达目标站停靠（isArrived=true）：进度必须为满格 900/900
         val stateArrived = baseSession.copy(
             currentBusOrder = 10,
             currentBusProgress = 1.0f,
             stopsRemaining = 0,
             isBusArrivedAtStop = true
         )
-        assertEquals(300, LiveProgressNotificationHelper.calculateCurrentProgress(stateArrived))
+        assertEquals(900, LiveProgressNotificationHelper.calculateCurrentProgress(stateArrived))
+    }
+
+    @Test
+    fun testCalculateCurrentProgress_isMonotonicWithRemainingStops() {
+        val baseSession = TrackingSessionState(
+            isActive = true,
+            lineName = "788",
+            targetStopName = "珞雄路雄楚大道",
+            targetOrder = 11,
+            startTrackingOrder = 6
+        )
+
+        val remainingStops = listOf(6, 4, 2, 1, 0)
+        val progresses = remainingStops.map { remaining ->
+            LiveProgressNotificationHelper.calculateCurrentProgress(
+                baseSession.copy(
+                    currentBusOrder = 11 - remaining,
+                    currentBusProgress = 0.5f,
+                    stopsRemaining = remaining
+                )
+            )
+        }
+
+        progresses.zipWithNext().forEach { (previous, next) ->
+            assertTrue("剩余站数减少时进度必须单调递增：$progresses", next > previous)
+        }
+        assertEquals(350, progresses.first())
     }
 
     @Test
