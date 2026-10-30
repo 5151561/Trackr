@@ -16,3 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Trackr"
 include(":app")
+include(":core:designsystem")

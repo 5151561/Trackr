@@ -1,14 +1,9 @@
 package com.trackr.ui.components.common
 
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.contentColorFor
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -18,15 +13,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.trackr.core.designsystem.component.TrackrBottomSheet as CoreTrackrBottomSheet
 
 /**
  * 统一规范封装的 ModalBottomSheet 底部弹窗
- *
- * 统一特性：
- * - 顶部大圆角 (topStart = 24.dp, topEnd = 24.dp)
- * - 默认跳过半展开状态 (skipPartiallyExpanded = true)
- * - 默认自带安全边距处理 (导航栏 navigationBarsPadding + 软键盘 imePadding)
- * - 标准拖拽手柄规范
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Suppress("DEPRECATION")
@@ -44,7 +34,7 @@ fun TrackrBottomSheet(
     applySystemPaddings: Boolean = true,
     content: @Composable ColumnScope.() -> Unit
 ) {
-    ModalBottomSheet(
+    CoreTrackrBottomSheet(
         onDismissRequest = onDismissRequest,
         modifier = modifier,
         sheetState = sheetState,
@@ -53,19 +43,8 @@ fun TrackrBottomSheet(
         contentColor = contentColor,
         tonalElevation = tonalElevation,
         scrimColor = scrimColor,
-        dragHandle = dragHandle
-    ) {
-        if (applySystemPaddings) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .imePadding()
-            ) {
-                content()
-            }
-        } else {
-            content()
-        }
-    }
+        dragHandle = dragHandle,
+        applySystemPaddings = applySystemPaddings,
+        content = content
+    )
 }
