@@ -114,7 +114,7 @@ Trackr (BusOnRoad) 是一款专为通勤族打造的 Android 实时公交追踪�
 ## 🤝 致谢
 
 本项目在数据协议与接口分析中参考了以下开源项目：
-
+- [yulin-bus-activity](https://github.com/misakano7545/yulin-bus-activity):双平台 api 参考
 - [chelaile-mcp](https://github.com/PeanutSplash/chelaile-mcp)：车来了数据协议与参数参考。
 - [BusFleetTracker-GuiYang-Public-Transit](https://github.com/mage802/BusFleetTracker-GuiYang-Public-Transit)：贵阳公交数据分析与追踪实现参考。
 
