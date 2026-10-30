@@ -107,7 +107,7 @@ fun MoreScreen(
                 .consumeWindowInsets(paddingValues),
             contentPadding = PaddingValues(
                 top = paddingValues.calculateTopPadding() + 8.dp,
-                bottom = paddingValues.calculateBottomPadding() + 24.dp,
+                bottom = paddingValues.calculateBottomPadding() + 80.dp + 24.dp,
                 start = 16.dp,
                 end = 16.dp
             ),

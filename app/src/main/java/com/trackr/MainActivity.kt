@@ -11,6 +11,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -39,6 +42,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
@@ -219,6 +227,47 @@ fun TrackrNavApp(
     val isTopLevel = (selectedTab == "home" && currentKey is ScreenKey.Home) ||
         (selectedTab == "more" && currentKey is ScreenKey.More)
 
+    // 控制滑动时底部导航栏平滑收起与展开
+    var isNavigationBarVisible by rememberSaveable { mutableStateOf(true) }
+
+    // 切换 Tab 或从子页面返回根页面时，确保导航栏重置为显示状态
+    LaunchedEffect(isTopLevel, selectedTab) {
+        if (isTopLevel) {
+            isNavigationBarVisible = true
+        }
+    }
+
+    val nestedScrollConnection = remember(isTopLevel) {
+        object : NestedScrollConnection {
+            override fun onPostScroll(
+                consumed: Offset,
+                available: Offset,
+                source: NestedScrollSource
+            ): Offset {
+                if (isTopLevel) {
+                    // 手指向上推，浏览下方更多内容 -> 向下滑出隐藏导航栏
+                    if (consumed.y < -8f) {
+                        isNavigationBarVisible = false
+                    }
+                    // 手指向下拉，回看上方内容或在顶部下拉 -> 向上滑入显示导航栏
+                    else if (consumed.y > 8f || available.y > 8f) {
+                        isNavigationBarVisible = true
+                    }
+                }
+                return Offset.Zero
+            }
+        }
+    }
+
+    val navBarTranslationY by animateFloatAsState(
+        targetValue = if (isNavigationBarVisible) 0f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "navBarTranslationY"
+    )
+
     val saveableDecorator = rememberSaveableStateHolderNavEntryDecorator<androidx.navigation3.runtime.NavKey>()
     val viewModelStoreDecorator = rememberViewModelStoreNavEntryDecorator<androidx.navigation3.runtime.NavKey>()
     val entryDecorators = remember(saveableDecorator, viewModelStoreDecorator) {
@@ -226,6 +275,7 @@ fun TrackrNavApp(
     }
 
     Scaffold(
+        modifier = Modifier.nestedScroll(nestedScrollConnection),
         contentWindowInsets = WindowInsets(0.dp),
         bottomBar = {
             AnimatedVisibility(
@@ -239,7 +289,11 @@ fun TrackrNavApp(
                     animationSpec = tween(280)
                 ) + fadeOut(animationSpec = tween(200))
             ) {
-                NavigationBar {
+                NavigationBar(
+                    modifier = Modifier.graphicsLayer {
+                        translationY = navBarTranslationY * size.height
+                    }
+                ) {
                     NavigationBarItem(
                         selected = selectedTab == "home",
                         onClick = dropUnlessResumed {
@@ -283,7 +337,7 @@ fun TrackrNavApp(
                 }
             }
         }
-    ) { innerPadding ->
+    ) { _ ->
         NavDisplay(
             backStack = activeBackStack,
             onBack = {
@@ -294,9 +348,7 @@ fun TrackrNavApp(
                 }
             },
             entryDecorators = entryDecorators,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(bottom = innerPadding.calculateBottomPadding()),
+            modifier = Modifier.fillMaxSize(),
             transitionSpec = {
                 val isTopLevelSwitch = (initialState.key is ScreenKey.Home && targetState.key is ScreenKey.More) ||
                     (initialState.key is ScreenKey.More && targetState.key is ScreenKey.Home)

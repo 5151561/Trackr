@@ -136,7 +136,7 @@ fun HomeScreen(
                 .consumeWindowInsets(paddingValues),
             contentPadding = PaddingValues(
                 top = paddingValues.calculateTopPadding(),
-                bottom = paddingValues.calculateBottomPadding() + 28.dp
+                bottom = paddingValues.calculateBottomPadding() + 80.dp + 28.dp
             )
         ) {
             // 1. 若当前有正在运行的通知栏实时追踪，置顶显示呼吸动效卡片
