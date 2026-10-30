@@ -1241,7 +1241,7 @@ private fun CityPickerBottomSheet(
                                             )
                                         }
                                     }
-                                    if (city.mygolbsCityCode != null) {
+                                    if (city.cityId.isNotBlank() && !city.mygolbsCityCode.isNullOrBlank()) {
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
                                             color = Color(0xFFFFF3E0)
@@ -1539,7 +1539,7 @@ private fun CityPickerBottomSheet(
                                                     )
                                                 }
                                             }
-                                            if (city.mygolbsCityCode != null) {
+                                            if (city.cityId.isNotBlank() && !city.mygolbsCityCode.isNullOrBlank()) {
                                                 Surface(
                                                     shape = RoundedCornerShape(4.dp),
                                                     color = Color(0xFFFFF3E0)

@@ -77,13 +77,28 @@ data class TransitCity(
     fun matchesCity(other: TransitCity?): Boolean {
         if (other == null) return false
         if (this === other) return true
+
+        // 1. 若双方均具备非空的车来了 cityId，优先以严格 cityId 对比
         if (cityId.isNotBlank() && other.cityId.isNotBlank()) {
             return cityId == other.cityId
         }
-        if (!mygolbsCityCode.isNullOrBlank() && !other.mygolbsCityCode.isNullOrBlank()) {
-            return mygolbsCityCode == other.mygolbsCityCode
+
+        // 2. 至少一方缺失 cityId（如仅掌上公交支持的城市、或 GPS 逆地理推断出的城市对象）
+        // 核心依据：城市名称必须一致（归一化对比，如 "莆田" 与 "莆田市"）
+        val selfClean = ProvinceCityCatalog.cleanCityName(cityName)
+        val otherClean = ProvinceCityCatalog.cleanCityName(other.cityName)
+        if (selfClean.isBlank() || selfClean != otherClean) {
+            return false
         }
-        return cityName == other.cityName
+
+        // 3. 若名称归一化一致，且双方均有省份信息，则省份不能冲突（防止跨省同名县区误匹配）
+        val selfProv = province.ifBlank { ProvinceCityCatalog.inferProvince(cityName) }
+        val otherProv = other.province.ifBlank { ProvinceCityCatalog.inferProvince(other.cityName) }
+        if (selfProv.isNotBlank() && otherProv.isNotBlank() && selfProv != "其他" && otherProv != "其他") {
+            return selfProv == otherProv
+        }
+
+        return true
     }
 }
 

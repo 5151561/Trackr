@@ -388,6 +388,18 @@ class TransitUnitTest {
         assertTrue(yulin.matchesCity(yulinWithCityId))
         org.junit.Assert.assertFalse(yulin.matchesCity(ruijin))
         org.junit.Assert.assertFalse(yulin.matchesCity(shanghai))
+
+        // 验证掌上公交返回相同 code="0" 时，绝不误判为同一城市（防止长宁县、威远县等被误判为定位城市）
+        val putian = com.trackr.domain.model.TransitCity(cityId = "0594", cityName = "莆田", province = "福建", mygolbsCityCode = "0")
+        val changning = com.trackr.domain.model.TransitCity(cityId = "", cityName = "长宁县", province = "四川", mygolbsCityCode = "0")
+        val weiyuan = com.trackr.domain.model.TransitCity(cityId = "", cityName = "威远县", province = "四川", mygolbsCityCode = "0")
+        org.junit.Assert.assertFalse(changning.matchesCity(putian))
+        org.junit.Assert.assertFalse(weiyuan.matchesCity(putian))
+        org.junit.Assert.assertFalse(changning.matchesCity(weiyuan))
+
+        // 归一化城市名匹配（如“莆田市”与“莆田”）
+        val putianCity = com.trackr.domain.model.TransitCity(cityId = "", cityName = "莆田市", province = "福建", mygolbsCityCode = "0")
+        assertTrue(putian.matchesCity(putianCity))
     }
 
     @org.junit.Ignore("Online network probe test - skipped in automated unit testing")
