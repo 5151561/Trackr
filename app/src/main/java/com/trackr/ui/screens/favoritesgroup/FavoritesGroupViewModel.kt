@@ -59,11 +59,16 @@ class FavoritesGroupViewModel(
     private val amapSdkService: AmapSdkTransitService? = runCatching { AmapSdkTransitService(TrackrApp.instance) }.getOrNull(),
     private val prefs: SharedPreferences? = runCatching { TrackrApp.instance.getSharedPreferences("trackr_prefs", Context.MODE_PRIVATE) }.getOrNull(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
-    enableAutoRefresh: Boolean = true
+    enableAutoRefresh: Boolean = true,
+    private val enableAutoMigration: Boolean = true
 ) : ViewModel() {
 
     companion object {
         const val PREF_KEY_AMAP_KEY = "custom_amap_web_key"
+
+        /** 一次性数据迁移版本号，避免每次 ViewModel 重建都全量重跑迁移逻辑 */
+        const val PREF_KEY_MIGRATION_VERSION = "favorites_group_migration_version"
+        const val CURRENT_MIGRATION_VERSION = 2
     }
 
     private val _selectedCategory = MutableStateFlow<GroupCategory?>(null)
@@ -159,41 +164,8 @@ class FavoritesGroupViewModel(
         runCatching {
             AmapSdkManager.applyApiKey(TrackrApp.instance, _customAmapApiKey.value)
         }
-        viewModelScope.launch(ioDispatcher) {
-            val currentGroups = groupRepository.groups.value
-            for (g in currentGroups) {
-                var groupModified = false
-                var updated = g
-                if (updated.customGroupId == null && updated.category == GroupCategory.COMMUTE) {
-                    updated = updated.copy(customGroupId = "commute")
-                    groupModified = true
-                }
-                val hasSynthetic = updated.legs.any { leg ->
-                    leg.candidateLines.any { it.lineId.startsWith("line_") || it.fromStopOrder >= it.toStopOrder }
-                }
-                if (hasSynthetic) {
-                    updated = alignTransitGroupWithRealtimeSource(updated)
-                    groupModified = true
-                }
-                if (groupModified) {
-                    groupRepository.updateGroup(updated)
-                }
-            }
-
-            val latestGroups = groupRepository.groups.value
-            val commuteRoutes = latestGroups.filter { isGroupInFavoriteGroup(it, "commute") }
-            val homeRoutes = latestGroups.filter { isGroupInFavoriteGroup(it, "home") }
-            for (commute in commuteRoutes) {
-                val newOrigin = commute.destinationStopName
-                val newDest = commute.originStopName
-                val hasReverse = homeRoutes.any {
-                    it.originStopName == newOrigin && it.destinationStopName == newDest
-                }
-                if (!hasReverse && newOrigin.isNotBlank() && newDest.isNotBlank()) {
-                    val reversed = buildReverseTransitGroup(commute, targetGroupId = "home")
-                    groupRepository.addGroup(reversed)
-                }
-            }
+        if (enableAutoMigration) {
+            runDataMigrationIfNeeded()
         }
         if (enableAutoRefresh) {
             viewModelScope.launch {
@@ -202,6 +174,42 @@ class FavoritesGroupViewModel(
                 }
             }
         }
+    }
+
+    /**
+     * 一次性数据迁移：仅做不依赖网络的本地修复，并通过 [PREF_KEY_MIGRATION_VERSION] 保证只执行一次。
+     * 合成线路的实时对齐不在此处持久化，交由 [refreshRealtimeEta] 在运行时完成。
+     */
+    fun runDataMigrationIfNeeded(): Job = viewModelScope.launch(ioDispatcher) {
+        // prefs 为空（例如测试环境）时退化为每次都执行，不做版本短路
+        val migratedVersion = prefs?.getInt(PREF_KEY_MIGRATION_VERSION, 0) ?: 0
+        if (migratedVersion >= CURRENT_MIGRATION_VERSION) return@launch
+
+        // 1. 补齐遗留通勤分组的 customGroupId（纯本地判定，无网络请求）
+        val currentGroups = groupRepository.groups.value
+        for (g in currentGroups) {
+            if (g.customGroupId == null && g.category == GroupCategory.COMMUTE) {
+                groupRepository.updateGroup(g.copy(customGroupId = "commute"))
+            }
+        }
+
+        // 2. 为通勤路线补全缺失的返程（回家）路线
+        val latestGroups = groupRepository.groups.value
+        val homeRoutes = latestGroups.filter { isGroupInFavoriteGroup(it, "home") }
+        val commuteRoutes = latestGroups.filter { isGroupInFavoriteGroup(it, "commute") }
+        for (commute in commuteRoutes) {
+            val newOrigin = commute.destinationStopName
+            val newDest = commute.originStopName
+            val hasReverse = homeRoutes.any {
+                it.originStopName == newOrigin && it.destinationStopName == newDest
+            }
+            if (!hasReverse && newOrigin.isNotBlank() && newDest.isNotBlank()) {
+                val reversed = buildReverseTransitGroup(commute, targetGroupId = "home")
+                groupRepository.addGroup(reversed)
+            }
+        }
+
+        prefs?.edit()?.putInt(PREF_KEY_MIGRATION_VERSION, CURRENT_MIGRATION_VERSION)?.apply()
     }
 
     fun selectCategory(category: GroupCategory?) {
@@ -1350,12 +1358,24 @@ class FavoritesGroupViewModel(
                         val isFastest = (info.lineId == fastestLineId)
                         val finalInfo = info.copy(isFastest = isFastest)
 
-                        updatedCandidateMap["${group.id}_${leg.legIndex}_${candidate.lineId}"] = finalInfo
-                        updatedCandidateMap["${group.id}_${leg.legIndex}_${effective.lineId}"] = finalInfo
-                        updatedCandidateMap["${candidate.lineId}_${candidate.toStopOrder}"] = finalInfo
-                        updatedCandidateMap["${effective.lineId}_${effective.toStopOrder}"] = finalInfo
-                        updatedSummaryMap["${candidate.lineId}_${candidate.toStopOrder}"] = finalInfo.etaText
-                        updatedSummaryMap["${effective.lineId}_${effective.toStopOrder}"] = finalInfo.etaText
+                        val candidateLegKey = "${group.id}_${leg.legIndex}_${candidate.lineId}"
+                        val candidateLineKey = "${candidate.lineId}_${candidate.toStopOrder}"
+                        val sameLine = candidate.lineId == effective.lineId
+                        val sameOrder = candidate.toStopOrder == effective.toStopOrder
+
+                        // 始终保留原始 key，UI 侧会按原始候选项查询
+                        updatedCandidateMap[candidateLegKey] = finalInfo
+                        updatedCandidateMap[candidateLineKey] = finalInfo
+                        updatedSummaryMap[candidateLineKey] = finalInfo.etaText
+
+                        // 对齐后的 key 仅在真正不同时才额外写入，避免同 key 重复赋值
+                        if (!sameLine) {
+                            updatedCandidateMap["${group.id}_${leg.legIndex}_${effective.lineId}"] = finalInfo
+                        }
+                        if (!sameLine || !sameOrder) {
+                            updatedCandidateMap["${effective.lineId}_${effective.toStopOrder}"] = finalInfo
+                            updatedSummaryMap["${effective.lineId}_${effective.toStopOrder}"] = finalInfo.etaText
+                        }
                     }
                 }
             }

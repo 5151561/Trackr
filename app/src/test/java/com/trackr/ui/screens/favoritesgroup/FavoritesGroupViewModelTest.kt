@@ -512,4 +512,55 @@ class FavoritesGroupViewModelTest {
         assertEquals("青岛火车站", reversed?.legs?.first()?.toStopName)
         assertEquals(1, reversed?.legs?.first()?.candidateLines?.first()?.direction)
     }
+
+    @Test
+    fun testRunDataMigration_migratesLegacyCommuteOnceAndRecordsVersion() = runTest {
+        val migrationPrefs = context.getSharedPreferences("migration_prefs", Context.MODE_PRIVATE)
+        migrationPrefs.edit().clear().commit()
+
+        // 遗留数据：通勤分类但没有 customGroupId
+        val legacyCommute = TransitGroup(
+            id = "legacy_commute",
+            name = "家 ➔ 公司",
+            category = GroupCategory.COMMUTE,
+            legs = listOf(TransitLeg(legIndex = 0, fromStopName = "家", toStopName = "公司"))
+        )
+        groupRepository.addGroup(legacyCommute)
+        testScheduler.runCurrent()
+
+        fun newViewModel() = FavoritesGroupViewModel(
+            groupRepository = groupRepository,
+            transitRepository = fakeTransitRepository,
+            coordinator = null,
+            prefs = migrationPrefs,
+            ioDispatcher = mainDispatcherRule.testDispatcher,
+            enableAutoRefresh = false,
+            enableAutoMigration = false
+        )
+
+        val viewModel = newViewModel()
+        viewModel.runDataMigrationIfNeeded().join()
+        testScheduler.advanceUntilIdle()
+
+        // 迁移补齐 customGroupId 并生成反向回家路线
+        val migrated = groupRepository.getGroupById("legacy_commute")
+        assertNotNull(migrated)
+        assertEquals("commute", migrated?.customGroupId)
+        assertEquals(2, viewModel.groups.value.size)
+        assertEquals(GroupCategory.COMMUTE, migrated?.category)
+        assertEquals(
+            FavoritesGroupViewModel.CURRENT_MIGRATION_VERSION,
+            migrationPrefs.getInt(FavoritesGroupViewModel.PREF_KEY_MIGRATION_VERSION, 0)
+        )
+
+        // 再写入一条新的遗留数据，已记录版本后不再重复迁移
+        groupRepository.addGroup(legacyCommute.copy(id = "legacy_commute_2"))
+        testScheduler.runCurrent()
+        val secondViewModel = newViewModel()
+        secondViewModel.runDataMigrationIfNeeded().join()
+        testScheduler.advanceUntilIdle()
+
+        assertNull(groupRepository.getGroupById("legacy_commute_2")?.customGroupId)
+        assertEquals(3, secondViewModel.groups.value.size)
+    }
 }
