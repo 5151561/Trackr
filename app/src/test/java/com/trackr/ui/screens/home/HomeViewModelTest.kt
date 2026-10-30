@@ -7,6 +7,7 @@ import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusLineSummary
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.FavoriteStationLine
+import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitSearchResult
 import com.trackr.util.MainDispatcherRule
@@ -14,6 +15,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -172,6 +174,57 @@ class HomeViewModelTest {
         viewModel.setEngineMode(com.trackr.domain.model.EngineMode.ALL)
         testScheduler.runCurrent()
         assertEquals(com.trackr.domain.model.EngineMode.ALL, viewModel.uiState.value.engineMode)
+    }
+
+    @Test
+    fun testEngineModeSwitching_immediatelyRefreshesNearbyStops() = runTest {
+        val stopA = NearbyStop(stopId = "stop_a", name = "站点A")
+        val stopB = NearbyStop(stopId = "stop_b", name = "站点B")
+        fakeRepository.nearbyStopsResult = Result.success(listOf(stopA))
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals("站点A", viewModel.uiState.value.nearbyStops.firstOrNull()?.name)
+
+        // 切换引擎模式前更新 mock 数据，模拟切换后数据源的数据
+        fakeRepository.nearbyStopsResult = Result.success(listOf(stopB))
+        viewModel.setEngineMode(com.trackr.domain.model.EngineMode.CHELAILE)
+        testScheduler.runCurrent()
+
+        // 验证无需重启，周边站点即刻被重新拉取并更新为站点B
+        assertEquals("站点B", viewModel.uiState.value.nearbyStops.firstOrNull()?.name)
+    }
+
+    @Test
+    fun testFilteredCities_filtersByEngineMode() = runTest {
+        val clCity = TransitCity(cityId = "034", cityName = "上海", mygolbsCityCode = null)
+        val mgCity = TransitCity(cityId = "", cityName = "玉林", mygolbsCityCode = "450900")
+        val bothCity = TransitCity(cityId = "051", cityName = "深圳", mygolbsCityCode = "440300")
+        fakeRepository.supportedCitiesResult = Result.success(listOf(clCity, mgCity, bothCity))
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        // 1. ALL 模式包含全部
+        viewModel.setEngineMode(com.trackr.domain.model.EngineMode.ALL)
+        testScheduler.runCurrent()
+        assertEquals(3, viewModel.uiState.value.filteredCities.size)
+
+        // 2. MYGOLBS 模式只包含有 mygolbsCityCode 的城市 (mgCity, bothCity)
+        viewModel.setEngineMode(com.trackr.domain.model.EngineMode.MYGOLBS)
+        testScheduler.runCurrent()
+        val mgList = viewModel.uiState.value.filteredCities
+        assertEquals(2, mgList.size)
+        assertTrue(mgList.any { it.cityName == "玉林" })
+        assertTrue(mgList.any { it.cityName == "深圳" })
+
+        // 3. CHELAILE 模式只包含有 cityId 的城市 (clCity, bothCity)
+        viewModel.setEngineMode(com.trackr.domain.model.EngineMode.CHELAILE)
+        testScheduler.runCurrent()
+        val clList = viewModel.uiState.value.filteredCities
+        assertEquals(2, clList.size)
+        assertTrue(clList.any { it.cityName == "上海" })
+        assertTrue(clList.any { it.cityName == "深圳" })
     }
 
     @Test

@@ -11,6 +11,9 @@ import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.NearbyStopLineStatus
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 import okhttp3.OkHttpClient
@@ -392,6 +395,96 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
                 namesakeStId = stopId,
                 source = DataSourceType.MYGOLBS
             )
+        }
+    }
+
+    /**
+     * 逆地理城市反查（CMD=108）：根据经纬度反查所在城市名
+     */
+    suspend fun reverseGeocodeCityName(wgsLat: Double, wgsLng: Double): String? = withContext(Dispatchers.IO) {
+        if (wgsLat <= 0.0 || wgsLng <= 0.0) return@withContext null
+        try {
+            val json = callApi(
+                mapOf(
+                    "CMD" to "108",
+                    "LAT" to wgsLat.toString(),
+                    "LNG" to wgsLng.toString(),
+                    "MYLAT" to wgsLat.toString(),
+                    "MYLNG" to wgsLng.toString()
+                )
+            )
+            val cityName = json.optString("msg").trim()
+            if (cityName.isNotBlank() && cityName != "error") {
+                cityName
+            } else null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * 探测周边公交站点（CMD=106）：根据经纬度获取附近站点列表并并发拉取实时到站
+     */
+    suspend fun getNearbyStops(
+        cityName: String,
+        wgsLat: Double,
+        wgsLng: Double,
+        limit: Int = 4
+    ): List<NearbyStop> = withContext(Dispatchers.IO) {
+        val normalizedCity = normalizeCityName(cityName)
+        try {
+            val json = callApi(
+                mapOf(
+                    "CMD" to "106",
+                    "CITYNAME" to normalizedCity,
+                    "LAT" to wgsLat.toString(),
+                    "LNG" to wgsLng.toString(),
+                    "MYLAT" to wgsLat.toString(),
+                    "MYLNG" to wgsLng.toString()
+                )
+            )
+            val dataArr = json.optJSONArray("data") ?: return@withContext emptyList()
+            val rawStationList = ArrayList<Triple<String, Double, Double>>() // name, lat, lng
+            val distMap = HashMap<String, Int>()
+
+            for (i in 0 until dataArr.length()) {
+                val item = dataArr.optJSONObject(i) ?: continue
+                val name = item.optString("name").trim()
+                if (name.isBlank()) continue
+                // 过滤纯地铁站点
+                if (name.contains("（地铁站）") || name.contains("(地铁站)") || name.endsWith("地铁站")) continue
+
+                val lat = item.optDouble("lat", 0.0)
+                val lng = item.optDouble("lon", 0.0)
+                val dis = item.optInt("dis", 0)
+
+                rawStationList.add(Triple(name, lat, lng))
+                if (dis > 0) {
+                    distMap[name] = dis
+                }
+                if (rawStationList.size >= limit) break
+            }
+
+            if (rawStationList.isEmpty()) {
+                return@withContext emptyList()
+            }
+
+            // 并发调用 getStopLines (CMD=105) 补齐停靠线路与实时在途数据
+            coroutineScope {
+                rawStationList.map { (name, lat, lng) ->
+                    async {
+                        val stop = getStopLines(normalizedCity, name)
+                        stop.copy(
+                            wgsLat = if (lat > 0.0) lat else stop.wgsLat,
+                            wgsLng = if (lng > 0.0) lng else stop.wgsLng,
+                            distanceMeters = distMap[name] ?: stop.distanceMeters,
+                            source = DataSourceType.MYGOLBS
+                        )
+                    }
+                }.awaitAll()
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 

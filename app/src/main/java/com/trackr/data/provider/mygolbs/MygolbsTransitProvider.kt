@@ -34,7 +34,7 @@ class MygolbsTransitProvider(
                 request.namesakeStId?.startsWith("mg:") == true
     }
 
-    override fun supportsLocationRadar(): Boolean = false
+    override fun supportsLocationRadar(): Boolean = true
 
     override suspend fun getSupportedCities(): List<TransitCity> {
         val cityMap = mygolbsClient.getCities()
@@ -48,7 +48,9 @@ class MygolbsTransitProvider(
         }
     }
 
-    override suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): String? = null
+    override suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): String? {
+        return mygolbsClient.reverseGeocodeCityName(wgsLat, wgsLng)
+    }
 
     override suspend fun search(
         city: TransitCity,
@@ -87,7 +89,9 @@ class MygolbsTransitProvider(
         wgsLat: Double,
         wgsLng: Double,
         limit: Int
-    ): List<NearbyStop> = emptyList()
+    ): List<NearbyStop> {
+        return mygolbsClient.getNearbyStops(city.cityName, wgsLat, wgsLng, limit)
+    }
 
     override suspend fun getStopDetail(
         city: TransitCity,

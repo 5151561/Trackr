@@ -143,6 +143,16 @@ class TransitRepository(
     override fun setEngineMode(mode: EngineMode) {
         _engineMode.value = mode
         prefs.edit().putString("engine_mode", mode.name).apply()
+        // 若当前城市缺少掌上公交编码，尝试从缓存城市列表中补齐
+        val currCity = _selectedCity.value
+        if (currCity.mygolbsCityCode.isNullOrBlank() && cachedCities.isNotEmpty()) {
+            val matched = cachedCities.firstOrNull {
+                ProvinceCityCatalog.cleanCityName(it.cityName) == ProvinceCityCatalog.cleanCityName(currCity.cityName)
+            }
+            if (matched?.mygolbsCityCode?.isNotBlank() == true) {
+                _selectedCity.value = currCity.copy(mygolbsCityCode = matched.mygolbsCityCode)
+            }
+        }
     }
 
     private fun saveFavorites(favs: List<FavoriteStationLine>) {
@@ -246,7 +256,7 @@ class TransitRepository(
         wgsLng: Double,
         limit: Int
     ): Result<List<NearbyStop>> = runCatching {
-        coordinator.getNearbyStops(city, wgsLat, wgsLng, limit)
+        coordinator.getNearbyStops(city, wgsLat, wgsLng, limit, _engineMode.value)
     }
 
     override suspend fun getStopDetail(

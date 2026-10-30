@@ -128,17 +128,39 @@ class TransitProviderCoordinator(
     }
 
     /**
-     * 获取周边站点：路由至支持位置雷达能力的 Provider
+     * 获取周边站点：根据 EngineMode 策略路由至支持位置雷达能力的 Provider
      */
     suspend fun getNearbyStops(
         city: TransitCity,
         wgsLat: Double,
         wgsLng: Double,
-        limit: Int = 4
+        limit: Int = 4,
+        mode: EngineMode = EngineMode.ALL
     ): List<NearbyStop> {
-        val radarProvider = providers[DataSourceType.CHELAILE]?.takeIf { it.supportsLocationRadar() }
-            ?: providers.values.firstOrNull { it.supportsLocationRadar() }
-        return radarProvider?.getNearbyStops(city, wgsLat, wgsLng, limit).orEmpty()
+        val targetProvider = when (mode) {
+            EngineMode.CHELAILE -> providers[DataSourceType.CHELAILE]
+            EngineMode.MYGOLBS -> providers[DataSourceType.MYGOLBS]
+            EngineMode.ALL -> {
+                providers[DataSourceType.CHELAILE]?.takeIf { it.supportsLocationRadar() }
+                    ?: providers[DataSourceType.MYGOLBS]?.takeIf { it.supportsLocationRadar() }
+                    ?: providers.values.firstOrNull { it.supportsLocationRadar() }
+            }
+        }
+
+        if (targetProvider != null && targetProvider.supportsLocationRadar()) {
+            val stops = runCatching { targetProvider.getNearbyStops(city, wgsLat, wgsLng, limit) }.getOrDefault(emptyList())
+            if (stops.isNotEmpty()) return stops
+        }
+
+        // 双引擎模式下：若车来了未查到周边站点（如掌上公交独有城市），自动跨源降级至掌上公交雷达
+        if (mode == EngineMode.ALL) {
+            val fallbackProvider = providers[DataSourceType.MYGOLBS]?.takeIf { it.supportsLocationRadar() }
+            if (fallbackProvider != null && fallbackProvider !== targetProvider) {
+                return runCatching { fallbackProvider.getNearbyStops(city, wgsLat, wgsLng, limit) }.getOrDefault(emptyList())
+            }
+        }
+
+        return emptyList()
     }
 
     /**

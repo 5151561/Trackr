@@ -59,9 +59,14 @@ data class HomeUiState(
 ) {
     val filteredCities: List<TransitCity>
         get() {
-            if (citySearchQuery.isBlank()) return cities
+            val baseList = when (engineMode) {
+                EngineMode.MYGOLBS -> cities.filter { !it.mygolbsCityCode.isNullOrBlank() }
+                EngineMode.CHELAILE -> cities.filter { it.cityId.isNotBlank() }
+                EngineMode.ALL -> cities
+            }
+            if (citySearchQuery.isBlank()) return baseList
             val q = citySearchQuery.trim().lowercase()
-            return cities.filter {
+            return baseList.filter {
                 it.cityName.lowercase().contains(q) ||
                 it.pinyin.lowercase().contains(q) ||
                 (it.province.ifBlank { ProvinceCityCatalog.inferProvince(it.cityName) }).lowercase().contains(q)
@@ -148,10 +153,15 @@ class HomeViewModel(
         // 观察当前引擎运行模式
         viewModelScope.launch {
             repository.engineMode.collect { mode ->
+                val prevMode = _uiState.value.engineMode
                 _uiState.update { it.copy(engineMode = mode) }
                 val currentQuery = _uiState.value.searchQuery
                 if (currentQuery.isNotBlank()) {
                     updateSearchQuery(currentQuery)
+                } else if (prevMode != mode) {
+                    val state = _uiState.value
+                    loadNearbyStops(state.currentLat, state.currentLng)
+                    refreshFavoritesRealtime()
                 }
             }
         }

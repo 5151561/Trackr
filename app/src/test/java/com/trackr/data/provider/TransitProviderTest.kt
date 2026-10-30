@@ -471,7 +471,7 @@ class TransitProviderTest {
         val provider = MygolbsTransitProvider(client)
 
         assertEquals(DataSourceType.MYGOLBS, provider.sourceType)
-        assertFalse(provider.supportsLocationRadar())
+        assertTrue(provider.supportsLocationRadar())
 
         assertTrue(provider.supportsLine("mg:0:玉林:1路:0"))
         assertFalse(provider.supportsLine("cl_123"))
@@ -651,5 +651,77 @@ class TransitProviderTest {
         assertEquals("1路", result.lines[0].name)
         assertEquals(1, result.stops.size)
         assertEquals("一中", result.stops[0].name)
+    }
+
+    @Test
+    fun testMygolbsProvider_getNearbyStopsAndReverseGeocode() = runBlocking {
+        val interceptor = Interceptor { chain ->
+            val request = chain.request()
+            val body = extractRequestBody(request)
+
+            when {
+                body.contains("CMD=108") -> {
+                    mockResponse(request, """{"status": "1", "msg": "上海市"}""")
+                }
+                body.contains("CMD=106") -> {
+                    val jsonStops = """
+                    {
+                      "status": 1,
+                      "data": [
+                        {
+                          "name": "人民广场（地铁站）",
+                          "lat": "31.232",
+                          "lon": "121.475",
+                          "dis": 100
+                        },
+                        {
+                          "name": "人民广场",
+                          "lat": "31.231",
+                          "lon": "121.476",
+                          "dis": 200
+                        }
+                      ]
+                    }
+                    """.trimIndent()
+                    mockResponse(request, jsonStops)
+                }
+                body.contains("CMD=105") -> {
+                    val jsonLines = """
+                    {
+                      "status": "1",
+                      "data": [
+                        {
+                          "lineName": "108路",
+                          "upperOrDown": "1",
+                          "from": "起点",
+                          "to": "终点",
+                          "neartext": "2站到达"
+                        }
+                      ]
+                    }
+                    """.trimIndent()
+                    mockResponse(request, jsonLines)
+                }
+                else -> mockResponse(request, """{"status": "1", "data": []}""")
+            }
+        }
+
+        val okHttpClient = OkHttpClient.Builder().addInterceptor(interceptor).build()
+        val mygolbsClient = MygolbsApiClient(okHttpClient)
+        val provider = MygolbsTransitProvider(mygolbsClient)
+
+        // 1. 验证逆地理反查城市
+        val city = provider.resolveCityByLocation(31.23, 121.47)
+        assertEquals("上海市", city)
+
+        // 2. 验证周边站点过滤地铁并补齐实时线路
+        val stops = provider.getNearbyStops(testCity, 31.23, 121.47, 4)
+        assertEquals(1, stops.size)
+        assertEquals("人民广场", stops[0].name)
+        assertEquals(200, stops[0].distanceMeters)
+        assertEquals(DataSourceType.MYGOLBS, stops[0].source)
+        assertEquals(1, stops[0].lines.size)
+        assertEquals("108路", stops[0].lines[0].line.name)
+        assertEquals("2站到达", stops[0].lines[0].statusText)
     }
 }

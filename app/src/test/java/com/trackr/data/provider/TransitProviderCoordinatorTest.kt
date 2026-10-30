@@ -74,7 +74,7 @@ class TransitProviderCoordinatorTest {
 
         fakeMygolbsProvider = FakeTestTransitProvider(
             sourceType = DataSourceType.MYGOLBS,
-            supportsRadar = false,
+            supportsRadar = true,
             lineSupportPredicate = { it.startsWith("mg:") },
             stopSupportPredicate = {
                 it.stopId?.startsWith("mg:") == true ||
@@ -424,6 +424,38 @@ class TransitProviderCoordinatorTest {
         assertEquals(1, stops.size)
         assertEquals("站台A", stops[0].name)
         assertEquals(1, fakeChelaileProvider.nearbyStopsCallCount)
+    }
+
+    @Test
+    fun testGetNearbyStops_withMygolbsMode_routesToMygolbsRadar() = runBlocking {
+        fakeChelaileProvider.nearbyStopsResult = listOf(
+            NearbyStop(stopId = "s1", name = "站台A")
+        )
+        fakeMygolbsProvider.nearbyStopsResult = listOf(
+            NearbyStop(stopId = "s_mg", name = "掌上站台B")
+        )
+
+        val stops = coordinator.getNearbyStops(testCity, 31.23, 121.47, mode = EngineMode.MYGOLBS)
+
+        assertEquals(1, stops.size)
+        assertEquals("掌上站台B", stops[0].name)
+        assertEquals(0, fakeChelaileProvider.nearbyStopsCallCount)
+        assertEquals(1, fakeMygolbsProvider.nearbyStopsCallCount)
+    }
+
+    @Test
+    fun testGetNearbyStops_withAllMode_chelaileEmpty_fallsBackToMygolbsRadar() = runBlocking {
+        fakeChelaileProvider.nearbyStopsResult = emptyList()
+        fakeMygolbsProvider.nearbyStopsResult = listOf(
+            NearbyStop(stopId = "s_mg", name = "掌上兜底站台")
+        )
+
+        val stops = coordinator.getNearbyStops(testCity, 31.23, 121.47, mode = EngineMode.ALL)
+
+        assertEquals(1, stops.size)
+        assertEquals("掌上兜底站台", stops[0].name)
+        assertEquals(1, fakeChelaileProvider.nearbyStopsCallCount)
+        assertEquals(1, fakeMygolbsProvider.nearbyStopsCallCount)
     }
 }
 
