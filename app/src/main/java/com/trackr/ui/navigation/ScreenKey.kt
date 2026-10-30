@@ -10,6 +10,9 @@ sealed interface ScreenKey : NavKey {
     data object Home : ScreenKey
 
     @Serializable
+    data object RoutePlan : ScreenKey
+
+    @Serializable
     data object FavoritesGroup : ScreenKey
 
     @Serializable

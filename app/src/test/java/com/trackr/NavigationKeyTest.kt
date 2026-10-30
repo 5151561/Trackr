@@ -21,6 +21,14 @@ class NavigationKeyTest {
     }
 
     @Test
+    fun testScreenKey_routePlanSerialization() {
+        val key: ScreenKey = ScreenKey.RoutePlan
+        val serialized = json.encodeToString(key)
+        val deserialized = json.decodeFromString<ScreenKey>(serialized)
+        assertEquals(ScreenKey.RoutePlan, deserialized)
+    }
+
+    @Test
     fun testScreenKey_searchSerialization() {
         val key: ScreenKey = ScreenKey.Search
         val serialized = json.encodeToString(key)

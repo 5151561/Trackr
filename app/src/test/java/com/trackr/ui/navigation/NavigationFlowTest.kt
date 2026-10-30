@@ -160,6 +160,49 @@ class NavigationFlowTest {
     }
 
     @Test
+    fun testFourTabGlobalScaffold_switchingAndReselectPopsToRoot() {
+        val homeStack = mutableListOf<ScreenKey>(ScreenKey.Home)
+        val routeStack = mutableListOf<ScreenKey>(ScreenKey.RoutePlan)
+        val groupStack = mutableListOf<ScreenKey>(ScreenKey.FavoritesGroup)
+        val moreStack = mutableListOf<ScreenKey>(ScreenKey.More)
+        var selectedTab = "home"
+
+        // Navigate within RoutePlan tab
+        selectedTab = "route"
+        val sampleLineDetail = ScreenKey.LineDetail(cityId = "0755", lineId = "line_320", lineName = "320路")
+        routeStack.add(sampleLineDetail)
+        assertEquals(2, routeStack.size)
+        assertEquals(sampleLineDetail, routeStack.last())
+
+        // Switch to FavoritesGroup tab
+        selectedTab = "group"
+        groupStack.add(sampleLineDetail)
+        assertEquals(2, groupStack.size)
+
+        // Switch back to RoutePlan: child screen preserved
+        selectedTab = "route"
+        assertEquals(sampleLineDetail, routeStack.last())
+
+        // Re-select RoutePlan tab: pops to root
+        while (routeStack.size > 1) {
+            routeStack.removeLastOrNull()
+        }
+        assertEquals(1, routeStack.size)
+        assertEquals(ScreenKey.RoutePlan, routeStack.last())
+
+        // Switch back to FavoritesGroup: child screen preserved
+        selectedTab = "group"
+        assertEquals(sampleLineDetail, groupStack.last())
+
+        // Re-select FavoritesGroup tab: pops to root
+        while (groupStack.size > 1) {
+            groupStack.removeLastOrNull()
+        }
+        assertEquals(1, groupStack.size)
+        assertEquals(ScreenKey.FavoritesGroup, groupStack.last())
+    }
+
+    @Test
     fun testOneOffDeepLinkConsumption_preventsDuplicateReplay() {
         var pendingDeepLink: PendingDeepLink? = PendingDeepLink(
             cityId = "021",

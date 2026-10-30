@@ -29,6 +29,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -78,6 +79,7 @@ import com.trackr.ui.screens.linedetail.LineDetailViewModel
 import com.trackr.ui.screens.more.AboutScreen
 import com.trackr.ui.screens.more.MoreScreen
 import com.trackr.ui.screens.more.MoreViewModel
+import com.trackr.ui.screens.routeplan.RoutePlanScreen
 import com.trackr.ui.screens.search.SearchScreen
 import com.trackr.ui.screens.stopdetail.StopDetailScreen
 import com.trackr.ui.screens.stopdetail.StopDetailViewModel
@@ -167,12 +169,14 @@ fun TrackrNavApp(
 ) {
     val context = LocalContext.current
     val homeBackStack = rememberNavBackStack(ScreenKey.Home)
+    val routePlanBackStack = rememberNavBackStack(ScreenKey.RoutePlan)
     val groupBackStack = rememberNavBackStack(ScreenKey.FavoritesGroup)
     val moreBackStack = rememberNavBackStack(ScreenKey.More)
     var selectedTab by rememberSaveable { mutableStateOf("home") }
 
     val activeBackStack = when (selectedTab) {
         "home" -> homeBackStack
+        "route" -> routePlanBackStack
         "group" -> groupBackStack
         else -> moreBackStack
     }
@@ -295,6 +299,7 @@ fun TrackrNavApp(
 
     val currentKey = activeBackStack.lastOrNull()
     val isTopLevel = (selectedTab == "home" && currentKey is ScreenKey.Home) ||
+        (selectedTab == "route" && currentKey is ScreenKey.RoutePlan) ||
         (selectedTab == "group" && currentKey is ScreenKey.FavoritesGroup) ||
         (selectedTab == "more" && currentKey is ScreenKey.More)
 
@@ -386,6 +391,25 @@ fun TrackrNavApp(
                         label = { Text("首页") }
                     )
                     NavigationBarItem(
+                        selected = selectedTab == "route",
+                        onClick = dropUnlessResumed {
+                            if (selectedTab == "route") {
+                                while (routePlanBackStack.size > 1) {
+                                    routePlanBackStack.removeLastOrNull()
+                                }
+                            } else {
+                                selectedTab = "route"
+                            }
+                        },
+                        icon = {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.AltRoute,
+                                contentDescription = "路线规划"
+                            )
+                        },
+                        label = { Text("路线规划") }
+                    )
+                    NavigationBarItem(
                         selected = selectedTab == "group",
                         onClick = dropUnlessResumed {
                             if (selectedTab == "group") {
@@ -398,11 +422,11 @@ fun TrackrNavApp(
                         },
                         icon = {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Filled.AltRoute,
-                                contentDescription = "路线组"
+                                imageVector = Icons.Default.Star,
+                                contentDescription = "收藏"
                             )
                         },
-                        label = { Text("路线组") }
+                        label = { Text("收藏") }
                     )
                     NavigationBarItem(
                         selected = selectedTab == "more",
@@ -440,8 +464,8 @@ fun TrackrNavApp(
             entryDecorators = entryDecorators,
             modifier = Modifier.fillMaxSize(),
             transitionSpec = {
-                val isTopLevelSwitch = (initialState.key is ScreenKey.Home || initialState.key is ScreenKey.FavoritesGroup || initialState.key is ScreenKey.More) &&
-                    (targetState.key is ScreenKey.Home || targetState.key is ScreenKey.FavoritesGroup || targetState.key is ScreenKey.More)
+                val isTopLevelSwitch = (initialState.key is ScreenKey.Home || initialState.key is ScreenKey.RoutePlan || initialState.key is ScreenKey.FavoritesGroup || initialState.key is ScreenKey.More) &&
+                    (targetState.key is ScreenKey.Home || targetState.key is ScreenKey.RoutePlan || targetState.key is ScreenKey.FavoritesGroup || targetState.key is ScreenKey.More)
                 if (isTopLevelSwitch) {
                     fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
                 } else {
@@ -450,8 +474,8 @@ fun TrackrNavApp(
                 }
             },
             popTransitionSpec = {
-                val isTopLevelSwitch = (initialState.key is ScreenKey.Home || initialState.key is ScreenKey.FavoritesGroup || initialState.key is ScreenKey.More) &&
-                    (targetState.key is ScreenKey.Home || targetState.key is ScreenKey.FavoritesGroup || targetState.key is ScreenKey.More)
+                val isTopLevelSwitch = (initialState.key is ScreenKey.Home || initialState.key is ScreenKey.RoutePlan || initialState.key is ScreenKey.FavoritesGroup || initialState.key is ScreenKey.More) &&
+                    (targetState.key is ScreenKey.Home || targetState.key is ScreenKey.RoutePlan || targetState.key is ScreenKey.FavoritesGroup || targetState.key is ScreenKey.More)
                 if (isTopLevelSwitch) {
                     fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
                 } else {
@@ -505,9 +529,34 @@ fun TrackrNavApp(
                     )
                 }
 
+                entry<ScreenKey.RoutePlan> {
+                    RoutePlanScreen(
+                        viewModel = favoritesGroupViewModel,
+                        onNavigateToFavorites = dropUnlessResumed {
+                            selectedTab = "group"
+                        },
+                        onNavigateToLineDetail = dropUnlessResumed { cityId, lineId, targetOrder, stopId, source, lineName ->
+                            val key = ScreenKey.LineDetail(
+                                cityId = cityId,
+                                lineId = lineId,
+                                targetOrder = targetOrder,
+                                stopId = stopId,
+                                source = source,
+                                lineName = lineName
+                            )
+                            if (activeBackStack.lastOrNull() != key) {
+                                activeBackStack.add(key)
+                            }
+                        }
+                    )
+                }
+
                 entry<ScreenKey.FavoritesGroup> {
                     FavoritesGroupScreen(
                         viewModel = favoritesGroupViewModel,
+                        onNavigateToRoutePlan = dropUnlessResumed {
+                            selectedTab = "route"
+                        },
                         onNavigateBack = if (activeBackStack.size > 1) {
                             dropUnlessResumed {
                                 activeBackStack.removeLastOrNull()
