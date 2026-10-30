@@ -29,6 +29,7 @@ import com.trackr.ui.screens.home.HomeScreen
 import com.trackr.ui.screens.home.HomeViewModel
 import com.trackr.ui.screens.linedetail.LineDetailScreen
 import com.trackr.ui.screens.linedetail.LineDetailViewModel
+import com.trackr.ui.screens.more.AboutScreen
 import com.trackr.ui.screens.more.MoreScreen
 import com.trackr.ui.screens.more.MoreViewModel
 import com.trackr.ui.screens.search.SearchScreen
@@ -779,6 +780,38 @@ class ScreenshotGeneratorTest {
         composeTestRule.waitForIdle()
         composeTestRule.mainClock.advanceTimeBy(1000)
         saveScreenshot("10_more_screen_dark.png")
+    }
+
+    @Test
+    fun generateAboutScreenLightScreenshot() {
+        composeTestRule.setContent {
+            TrackrTheme(darkTheme = false) {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    AboutScreen(
+                        onNavigateBack = {}
+                    )
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(1000)
+        saveScreenshot("11_about_screen_light.png")
+    }
+
+    @Test
+    fun generateAboutScreenDarkScreenshot() {
+        composeTestRule.setContent {
+            TrackrTheme(darkTheme = true) {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    AboutScreen(
+                        onNavigateBack = {}
+                    )
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(1000)
+        saveScreenshot("12_about_screen_dark.png")
     }
 
     private fun setupMoreViewModel(): MoreViewModel {
