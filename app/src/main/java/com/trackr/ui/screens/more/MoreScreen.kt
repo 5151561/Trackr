@@ -15,35 +15,44 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LargeTopAppBar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -52,6 +61,7 @@ import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.ui.components.ScheduledRemindersBottomSheet
+import com.trackr.util.TransitCodeHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,36 +70,35 @@ fun MoreScreen(
     onNavigateToAbout: () -> Unit,
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit
 ) {
+    val context = LocalContext.current
     val engineMode by viewModel.engineMode.collectAsStateWithLifecycle()
     val nearbyStopsCount by viewModel.nearbyStopsCount.collectAsStateWithLifecycle()
     val preferredTransitCode by viewModel.preferredTransitCode.collectAsStateWithLifecycle()
     val reminders by viewModel.reminders.collectAsStateWithLifecycle()
 
-    var showRemindersSheet by remember { mutableStateOf(false) }
-    var engineMenuExpanded by remember { mutableStateOf(false) }
-    var transitCodeMenuExpanded by remember { mutableStateOf(false) }
+    // 采用 rememberSaveable 确保配置变更（旋转/折叠展开）时不丢失弹窗状态
+    var showRemindersSheet by rememberSaveable { mutableStateOf(false) }
+
+    // 向上滑动时标题栏平滑向上收起为单行栏，向下拉时展开
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                color = MaterialTheme.colorScheme.surface
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+            LargeTopAppBar(
+                title = {
                     Text(
                         text = "更多",
-                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
-                        color = MaterialTheme.colorScheme.onSurface
+                        fontWeight = FontWeight.Bold
                     )
-                }
-            }
+                },
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surfaceContainer
+                )
+            )
         }
     ) { paddingValues ->
         LazyColumn(
@@ -102,180 +111,126 @@ fun MoreScreen(
                 start = 16.dp,
                 end = 16.dp
             ),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            item {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                ) {
-                    Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)) {
-                        // 1. 数据源切换选单
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { engineMenuExpanded = true }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
+            // 1. 数据与引擎设置分组 (Data & Engine)
+            item(key = "data_engine_section", contentType = "more_section") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "数据与检索",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            // 1.1 实时数据源切换
                             Text(
-                                text = "数据源",
-                                style = MaterialTheme.typography.bodyLarge,
+                                text = "实时数据源",
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-
-                            Box {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(
-                                        text = when (engineMode) {
-                                            EngineMode.ALL -> "全部"
-                                            EngineMode.CHELAILE -> "车来了"
-                                            EngineMode.MYGOLBS -> "掌上公交"
-                                        },
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowDropDown,
-                                        contentDescription = "选择数据源",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                DropdownMenu(
-                                    expanded = engineMenuExpanded,
-                                    onDismissRequest = { engineMenuExpanded = false }
-                                ) {
-                                    DropdownMenuItem(
-                                        text = { Text("全部") },
-                                        onClick = {
-                                            viewModel.setEngineMode(EngineMode.ALL)
-                                            engineMenuExpanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("车来了") },
-                                        onClick = {
-                                            viewModel.setEngineMode(EngineMode.CHELAILE)
-                                            engineMenuExpanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("掌上公交") },
-                                        onClick = {
-                                            viewModel.setEngineMode(EngineMode.MYGOLBS)
-                                            engineMenuExpanded = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-
-                        // 2. 默认乘车码选单
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { transitCodeMenuExpanded = true }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
+                            Spacer(modifier = Modifier.height(2.dp))
                             Text(
-                                text = "默认乘车码",
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface
+                                text = "聚合模式下智能互补两大数据源，获得最优到站精度",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
-                            Box {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            val engineOptions = listOf(
+                                EngineMode.ALL to "全部(聚合)",
+                                EngineMode.CHELAILE to "车来了",
+                                EngineMode.MYGOLBS to "掌上公交"
+                            )
+                            SingleChoiceSegmentedButtonRow(
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                engineOptions.forEachIndexed { index, (mode, label) ->
+                                    SegmentedButton(
+                                        selected = engineMode == mode,
+                                        onClick = { viewModel.setEngineMode(mode) },
+                                        shape = SegmentedButtonDefaults.itemShape(
+                                            index = index,
+                                            count = engineOptions.size
+                                        ),
+                                        label = {
+                                            Text(
+                                                text = label,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = if (engineMode == mode) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(16.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // 1.2 附近站点搜索上限
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(
-                                        text = when (preferredTransitCode) {
-                                            TransitCodeProvider.ASK_ALWAYS -> "每次询问"
-                                            TransitCodeProvider.ALIPAY -> "支付宝"
-                                            TransitCodeProvider.UNIONPAY -> "云闪付"
-                                        },
-                                        style = MaterialTheme.typography.bodyMedium,
+                                        text = "附近站点搜索上限",
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "首页就近检索的车站数量",
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
-                                    Icon(
-                                        imageVector = Icons.Default.ArrowDropDown,
-                                        contentDescription = "选择默认乘车码",
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
                                 }
 
-                                DropdownMenu(
-                                    expanded = transitCodeMenuExpanded,
-                                    onDismissRequest = { transitCodeMenuExpanded = false }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer
                                 ) {
-                                    DropdownMenuItem(
-                                        text = { Text("每次询问") },
-                                        onClick = {
-                                            viewModel.setPreferredTransitCode(TransitCodeProvider.ASK_ALWAYS)
-                                            transitCodeMenuExpanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("支付宝") },
-                                        onClick = {
-                                            viewModel.setPreferredTransitCode(TransitCodeProvider.ALIPAY)
-                                            transitCodeMenuExpanded = false
-                                        }
-                                    )
-                                    DropdownMenuItem(
-                                        text = { Text("云闪付") },
-                                        onClick = {
-                                            viewModel.setPreferredTransitCode(TransitCodeProvider.UNIONPAY)
-                                            transitCodeMenuExpanded = false
-                                        }
+                                    Text(
+                                        text = "$nearbyStopsCount 个",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                 }
                             }
-                        }
 
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-
-                        // 3. 附近站点数量调节（仅加减按钮，最大 16）
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text(
-                                    text = "附近站点数量",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "最多 16 个",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            Spacer(modifier = Modifier.height(8.dp))
 
                             Row(
+                                modifier = Modifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
                             ) {
                                 IconButton(
                                     onClick = { if (nearbyStopsCount > 1) viewModel.setNearbyStopsCount(nearbyStopsCount - 1) },
                                     enabled = nearbyStopsCount > 1,
                                     modifier = Modifier.size(36.dp)
                                 ) {
-                                    Icon(Icons.Default.Remove, contentDescription = "减少")
+                                    Icon(Icons.Default.Remove, contentDescription = "减少站点数量")
                                 }
 
-                                Text(
-                                    text = "$nearbyStopsCount",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    modifier = Modifier.widthIn(min = 24.dp)
+                                Slider(
+                                    value = nearbyStopsCount.toFloat(),
+                                    onValueChange = { viewModel.setNearbyStopsCount(it.toInt()) },
+                                    valueRange = 1f..16f,
+                                    steps = 14,
+                                    modifier = Modifier.weight(1f)
                                 )
 
                                 IconButton(
@@ -283,66 +238,243 @@ fun MoreScreen(
                                     enabled = nearbyStopsCount < 16,
                                     modifier = Modifier.size(36.dp)
                                 ) {
-                                    Icon(Icons.Default.Add, contentDescription = "增加")
+                                    Icon(Icons.Default.Add, contentDescription = "增加站点数量")
                                 }
                             }
                         }
+                    }
+                }
+            }
 
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            // 2. 出行辅助与工具分组 (Transit Assistance & Tools)
+            item(key = "transit_tools_section", contentType = "more_section") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "出行辅助与工具",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
 
-                        // 4. 定时通知入口
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { showRemindersSheet = true }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Column {
-                                Text(
-                                    text = "定时通知",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = if (reminders.isNotEmpty()) "${reminders.size} 个提醒" else "未设置",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "查看定时通知",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
-
-                        // 5. 关于入口
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { onNavigateToAbout() }
-                                .padding(vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(16.dp)) {
+                            // 2.1 默认乘车码切换
                             Text(
-                                text = "关于",
-                                style = MaterialTheme.typography.bodyLarge,
+                                text = "默认乘车码",
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
-
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
-                                contentDescription = "打开关于",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(18.dp)
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "快捷方式或扫码乘车时优先唤起的乘车码平台",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            val transitCodeOptions = listOf(
+                                TransitCodeProvider.ASK_ALWAYS to "每次询问",
+                                TransitCodeProvider.ALIPAY to "支付宝",
+                                TransitCodeProvider.UNIONPAY to "云闪付"
+                            )
+                            SingleChoiceSegmentedButtonRow(
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                transitCodeOptions.forEachIndexed { index, (provider, label) ->
+                                    SegmentedButton(
+                                        selected = preferredTransitCode == provider,
+                                        onClick = { viewModel.setPreferredTransitCode(provider) },
+                                        shape = SegmentedButtonDefaults.itemShape(
+                                            index = index,
+                                            count = transitCodeOptions.size
+                                        ),
+                                        label = {
+                                            Text(
+                                                text = label,
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = if (preferredTransitCode == provider) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                        }
+                                    )
+                                }
+                            }
+
+                            if (preferredTransitCode != TransitCodeProvider.ASK_ALWAYS) {
+                                Spacer(modifier = Modifier.height(10.dp))
+                                FilledTonalButton(
+                                    onClick = { TransitCodeHelper.openTransitCode(context, preferredTransitCode) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(12.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.QrCode2,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = when (preferredTransitCode) {
+                                            TransitCodeProvider.ALIPAY -> "测试打开支付宝乘车码"
+                                            TransitCodeProvider.UNIONPAY -> "测试打开云闪付乘车码"
+                                            else -> "测试打开乘车码"
+                                        },
+                                        style = MaterialTheme.typography.labelLarge
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // 2.2 定时通勤提醒入口
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { showRemindersSheet = true }
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Alarm,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(14.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "定时通勤提醒",
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "在设定时间自动开启常驻通知追踪线路",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(8.dp))
+
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (reminders.isNotEmpty()) {
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    } else {
+                                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                                    }
+                                ) {
+                                    Text(
+                                        text = if (reminders.isNotEmpty()) "${reminders.size} 个提醒" else "未设置",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (reminders.isNotEmpty()) {
+                                            MaterialTheme.colorScheme.onSecondaryContainer
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(4.dp))
+
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "查看定时通知",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. 关于与支持分组 (About & Support)
+            item(key = "about_support_section", contentType = "more_section") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "关于与支持",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(horizontal = 4.dp)
+                    )
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                        )
+                    ) {
+                        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { onNavigateToAbout() }
+                                    .padding(vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    shape = CircleShape,
+                                    color = MaterialTheme.colorScheme.tertiaryContainer,
+                                    modifier = Modifier.size(40.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Info,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+
+                                Spacer(modifier = Modifier.width(14.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "关于应用与开源致谢",
+                                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "版本声明、开源协议与代码仓库",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                    contentDescription = "打开关于",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
                         }
                     }
                 }

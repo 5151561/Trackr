@@ -10,6 +10,7 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.test.core.app.ApplicationProvider
+import com.trackr.data.repository.FakeScheduledReminderRepository
 import com.trackr.data.repository.FakeTransitRepository
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
@@ -19,6 +20,7 @@ import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.NearbyStopLineStatus
+import com.trackr.domain.model.ScheduledReminder
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitSearchResult
@@ -27,6 +29,8 @@ import com.trackr.ui.screens.home.HomeScreen
 import com.trackr.ui.screens.home.HomeViewModel
 import com.trackr.ui.screens.linedetail.LineDetailScreen
 import com.trackr.ui.screens.linedetail.LineDetailViewModel
+import com.trackr.ui.screens.more.MoreScreen
+import com.trackr.ui.screens.more.MoreViewModel
 import com.trackr.ui.screens.search.SearchScreen
 import com.trackr.ui.screens.stopdetail.StopDetailScreen
 import com.trackr.ui.screens.stopdetail.StopDetailViewModel
@@ -735,5 +739,91 @@ class ScreenshotGeneratorTest {
         composeTestRule.waitForIdle()
         composeTestRule.mainClock.advanceTimeBy(1000)
         saveScreenshot("06_search_screen.png")
+    }
+
+    @Test
+    fun generateMoreScreenLightScreenshot() {
+        val vm = setupMoreViewModel()
+
+        composeTestRule.setContent {
+            TrackrTheme(darkTheme = false) {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    MoreScreen(
+                        viewModel = vm,
+                        onNavigateToAbout = {},
+                        onNavigateToLineDetail = { _, _, _, _, _, _ -> }
+                    )
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(1000)
+        saveScreenshot("09_more_screen_light.png")
+    }
+
+    @Test
+    fun generateMoreScreenDarkScreenshot() {
+        val vm = setupMoreViewModel()
+
+        composeTestRule.setContent {
+            TrackrTheme(darkTheme = true) {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    MoreScreen(
+                        viewModel = vm,
+                        onNavigateToAbout = {},
+                        onNavigateToLineDetail = { _, _, _, _, _, _ -> }
+                    )
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(1000)
+        saveScreenshot("10_more_screen_dark.png")
+    }
+
+    private fun setupMoreViewModel(): MoreViewModel {
+        val fakeRepo = FakeTransitRepository(initialCity = shanghai)
+        val initialReminders = listOf(
+            ScheduledReminder(
+                id = "rem_morning",
+                enabled = true,
+                hour = 8,
+                minute = 15,
+                cityId = "034",
+                cityName = "上海",
+                lineId = "sh_71",
+                lineName = "71路中运量",
+                direction = 0,
+                endStopName = "申昆路枢纽站",
+                targetStopId = "s5",
+                targetStopName = "陕西北路",
+                targetOrder = 5,
+                autoStartLiveTracking = true
+            ),
+            ScheduledReminder(
+                id = "rem_evening",
+                enabled = true,
+                hour = 18,
+                minute = 30,
+                cityId = "034",
+                cityName = "上海",
+                lineId = "sh_20",
+                lineName = "20路 [百年电车]",
+                direction = 0,
+                endStopName = "中山公园",
+                targetStopId = "s_ja",
+                targetStopName = "静安寺",
+                targetOrder = 7,
+                autoStartLiveTracking = false
+            )
+        )
+        val fakeReminderRepo = FakeScheduledReminderRepository(initialReminders = initialReminders)
+        val vm = MoreViewModel(
+            application = app,
+            repository = fakeRepo,
+            reminderRepository = fakeReminderRepo
+        )
+        mainDispatcherRule.testDispatcher.scheduler.advanceUntilIdle()
+        return vm
     }
 }

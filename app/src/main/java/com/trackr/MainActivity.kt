@@ -10,6 +10,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -34,6 +43,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.entryProvider
@@ -185,11 +195,21 @@ fun TrackrNavApp(
     Scaffold(
         contentWindowInsets = WindowInsets(0.dp),
         bottomBar = {
-            if (isTopLevel) {
+            AnimatedVisibility(
+                visible = isTopLevel,
+                enter = slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = tween(280)
+                ) + fadeIn(animationSpec = tween(200)),
+                exit = slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = tween(280)
+                ) + fadeOut(animationSpec = tween(200))
+            ) {
                 NavigationBar {
                     NavigationBarItem(
                         selected = currentKey is ScreenKey.Home,
-                        onClick = {
+                        onClick = dropUnlessResumed {
                             if (currentKey !is ScreenKey.Home) {
                                 while (backStack.size > 1) {
                                     backStack.removeLastOrNull()
@@ -209,7 +229,7 @@ fun TrackrNavApp(
                     )
                     NavigationBarItem(
                         selected = currentKey is ScreenKey.More,
-                        onClick = {
+                        onClick = dropUnlessResumed {
                             if (currentKey !is ScreenKey.More) {
                                 if (backStack.lastOrNull() is ScreenKey.Home) {
                                     backStack.add(ScreenKey.More)
@@ -245,6 +265,30 @@ fun TrackrNavApp(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(bottom = innerPadding.calculateBottomPadding()),
+            transitionSpec = {
+                val isTopLevelSwitch = (initialState.key is ScreenKey.Home && targetState.key is ScreenKey.More) ||
+                    (initialState.key is ScreenKey.More && targetState.key is ScreenKey.Home)
+                if (isTopLevelSwitch) {
+                    fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
+                } else {
+                    (slideInHorizontally(initialOffsetX = { it }, animationSpec = tween(300)) + fadeIn(animationSpec = tween(300))) togetherWith
+                        (slideOutHorizontally(targetOffsetX = { -it / 3 }, animationSpec = tween(300)) + fadeOut(animationSpec = tween(300)))
+                }
+            },
+            popTransitionSpec = {
+                val isTopLevelSwitch = (initialState.key is ScreenKey.Home && targetState.key is ScreenKey.More) ||
+                    (initialState.key is ScreenKey.More && targetState.key is ScreenKey.Home)
+                if (isTopLevelSwitch) {
+                    fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
+                } else {
+                    (slideInHorizontally(initialOffsetX = { -it / 3 }, animationSpec = tween(300)) + fadeIn(animationSpec = tween(300))) togetherWith
+                        (slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(300)) + fadeOut(animationSpec = tween(300)))
+                }
+            },
+            predictivePopTransitionSpec = { _ ->
+                (slideInHorizontally(initialOffsetX = { -it / 3 }, animationSpec = tween(300)) + fadeIn(animationSpec = tween(300))) togetherWith
+                    (slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(300)) + fadeOut(animationSpec = tween(300)))
+            },
             entryProvider = entryProvider {
                     entry<ScreenKey.Home> {
                         HomeScreen(
@@ -274,7 +318,7 @@ fun TrackrNavApp(
                                     )
                                 )
                             },
-                            onNavigateToSearch = {
+                            onNavigateToSearch = dropUnlessResumed {
                                 backStack.add(ScreenKey.Search)
                             }
                         )
@@ -283,7 +327,7 @@ fun TrackrNavApp(
                     entry<ScreenKey.Search> {
                         SearchScreen(
                             viewModel = homeViewModel,
-                            onNavigateBack = { backStack.removeLastOrNull() },
+                            onNavigateBack = dropUnlessResumed { backStack.removeLastOrNull() },
                             onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
                                 backStack.add(
                                     ScreenKey.LineDetail(
@@ -332,7 +376,7 @@ fun TrackrNavApp(
 
                         LineDetailScreen(
                             viewModel = detailViewModel,
-                            onNavigateBack = { backStack.removeLastOrNull() }
+                            onNavigateBack = dropUnlessResumed { backStack.removeLastOrNull() }
                         )
                     }
 
@@ -357,7 +401,7 @@ fun TrackrNavApp(
 
                         StopDetailScreen(
                             viewModel = stopDetailViewModel,
-                            onNavigateBack = { backStack.removeLastOrNull() },
+                            onNavigateBack = dropUnlessResumed { backStack.removeLastOrNull() },
                             onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
                                 backStack.add(
                                     ScreenKey.LineDetail(
@@ -377,7 +421,7 @@ fun TrackrNavApp(
                         val moreViewModel: MoreViewModel = viewModel()
                         MoreScreen(
                             viewModel = moreViewModel,
-                            onNavigateToAbout = { backStack.add(ScreenKey.About) },
+                            onNavigateToAbout = dropUnlessResumed { backStack.add(ScreenKey.About) },
                             onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
                                 backStack.add(
                                     ScreenKey.LineDetail(
@@ -395,7 +439,7 @@ fun TrackrNavApp(
 
                     entry<ScreenKey.About> {
                         AboutScreen(
-                            onNavigateBack = { backStack.removeLastOrNull() }
+                            onNavigateBack = dropUnlessResumed { backStack.removeLastOrNull() }
                         )
                     }
                 }

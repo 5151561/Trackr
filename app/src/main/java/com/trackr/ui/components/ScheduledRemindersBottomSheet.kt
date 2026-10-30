@@ -126,7 +126,11 @@ fun ScheduledRemindersBottomSheet(
                     modifier = Modifier.fillMaxWidth(),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(reminders, key = { it.id }) { reminder ->
+                    items(
+                        items = reminders,
+                        key = { it.id },
+                        contentType = { "scheduled_reminder" }
+                    ) { reminder ->
                         Card(
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(
