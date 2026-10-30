@@ -465,13 +465,23 @@ private fun StopLineDetailCard(
             val countdownText = when {
                 lineStatus.statusText.isNotBlank() -> lineStatus.statusText
                 approachingBus != null -> {
-                    val remainingStops = lineStatus.targetOrder - approachingBus.order
-                    if (remainingStops == 0 && approachingBus.isArrived) {
+                    val targetOrder = lineStatus.targetOrder
+                    val busOrder = approachingBus.order
+                    if (targetOrder > 0 && busOrder > 0) {
+                        val remainingStops = targetOrder - busOrder
+                        val etaPart = RouteProjectionMath.formatEtaText(approachingBus.etaSeconds)
+                        when {
+                            remainingStops == 0 && approachingBus.isArrived -> "已到站"
+                            remainingStops <= 0 -> "即将进站"
+                            etaPart.isNotBlank() -> "还有 $remainingStops 站 · $etaPart"
+                            else -> "还有 $remainingStops 站"
+                        }
+                    } else if (approachingBus.isArrived) {
                         "已到站"
-                    } else if (remainingStops <= 0) {
-                        "即将进站"
+                    } else if (approachingBus.etaSeconds > 0) {
+                        "即将进站 · ${RouteProjectionMath.formatEtaText(approachingBus.etaSeconds)}"
                     } else {
-                        "还有 $remainingStops 站 · ${RouteProjectionMath.formatEtaText(approachingBus.etaSeconds)}"
+                        "在途行驶中"
                     }
                 }
                 else -> "暂无在途车辆"

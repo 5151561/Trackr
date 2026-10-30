@@ -427,27 +427,9 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
                 val li = linesArr.getJSONObject(j)
                 val lineObj = li.optJSONObject("line") ?: JSONObject()
                 val targetStn = li.optJSONObject("targetStation") ?: JSONObject()
-
+                val targetStationOrder = targetStn.optInt("order", 0)
                 val stnStatesArr = li.optJSONArray("stnStates") ?: JSONArray()
-                val liveBuses = ArrayList<LiveBus>()
-                for (k in 0 until stnStatesArr.length()) {
-                    val b = stnStatesArr.getJSONObject(k)
-                    val travelTime = b.optInt("travelTime", -1)
-                    val bBusId = b.optString("busId")
-                    val bPlate = sanitizePlateOrFleetNo(b.optString("licence")).ifBlank {
-                        sanitizePlateOrFleetNo(bBusId)
-                    }
-                    liveBuses.add(
-                        LiveBus(
-                            busId = bBusId,
-                            plateOrFleetNo = bPlate,
-                            order = b.optInt("order", 0),
-                            etaSeconds = travelTime,
-                            capacityLevel = b.optInt("capacity", 0),
-                            distanceToTargetMeters = if (b.has("distanceToDest")) b.optInt("distanceToDest") else null
-                        )
-                    )
-                }
+                val liveBuses = parseStnStates(stnStatesArr, targetStationOrder)
 
                 val dir = BusLineDirection(
                     lineId = lineObj.optString("lineId"),
@@ -554,27 +536,9 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
                 val li = linesArr.getJSONObject(j)
                 val lineObj = li.optJSONObject("line") ?: JSONObject()
                 val targetStn = li.optJSONObject("targetStation") ?: JSONObject()
-
+                val targetStationOrder = targetStn.optInt("order", 0)
                 val stnStatesArr = li.optJSONArray("stnStates") ?: JSONArray()
-                val liveBuses = ArrayList<LiveBus>()
-                for (k in 0 until stnStatesArr.length()) {
-                    val b = stnStatesArr.getJSONObject(k)
-                    val travelTime = b.optInt("travelTime", -1)
-                    val bBusId = b.optString("busId")
-                    val bPlate = sanitizePlateOrFleetNo(b.optString("licence")).ifBlank {
-                        sanitizePlateOrFleetNo(bBusId)
-                    }
-                    liveBuses.add(
-                        LiveBus(
-                            busId = bBusId,
-                            plateOrFleetNo = bPlate,
-                            order = b.optInt("order", 0),
-                            etaSeconds = travelTime,
-                            capacityLevel = b.optInt("capacity", 0),
-                            distanceToTargetMeters = if (b.has("distanceToDest")) b.optInt("distanceToDest") else null
-                        )
-                    )
-                }
+                val liveBuses = parseStnStates(stnStatesArr, targetStationOrder)
 
                 val dir = BusLineDirection(
                     lineId = lineObj.optString("lineId"),
@@ -628,6 +592,59 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
             )
         }
         result
+    }
+
+    private fun parseStnStates(stnStatesArr: JSONArray, targetStationOrder: Int): List<LiveBus> {
+        val liveBuses = ArrayList<LiveBus>()
+        for (k in 0 until stnStatesArr.length()) {
+            val b = stnStatesArr.getJSONObject(k)
+            val travelTime = b.optInt("travelTime", -1)
+            val bBusId = b.optString("busId")
+            val bPlate = sanitizePlateOrFleetNo(b.optString("licence")).ifBlank {
+                sanitizePlateOrFleetNo(bBusId)
+            }
+            val stopsAway = b.optInt("value", -1)
+            val state = b.optInt("state", 0)
+            val distanceToDest = if (b.has("distanceToDest")) b.optInt("distanceToDest") else null
+
+            // 过滤完全无有效到站信息的占位空车对象
+            val hasValidInfo = stopsAway >= 0 || travelTime >= 0 || (distanceToDest != null && distanceToDest > 0)
+            if (!hasValidInfo && stnStatesArr.length() > 1) {
+                continue
+            }
+
+            // 换算 1-based 全线站序：
+            // 车来了 stnStates 中，value 表示距目标站还剩几站 (0=进站/到站, 1=还有1站, 2=还有2站)
+            // b.optInt("order") 在 stnStates 内部通常为 0，不能直接作为全线站点序号
+            val busOrder = when {
+                stopsAway >= 0 && targetStationOrder > 0 -> (targetStationOrder - stopsAway).coerceAtLeast(1)
+                b.optInt("order", 0) > 0 -> b.optInt("order", 0)
+                targetStationOrder > 0 -> targetStationOrder
+                else -> 0
+            }
+
+            val isArrived = state == 1 || (stopsAway == 0 && (travelTime in 0..20 || (distanceToDest != null && distanceToDest <= 50)))
+
+            liveBuses.add(
+                LiveBus(
+                    busId = bBusId,
+                    plateOrFleetNo = bPlate,
+                    order = busOrder,
+                    etaSeconds = travelTime,
+                    capacityLevel = b.optInt("capacity", 0),
+                    distanceToTargetMeters = distanceToDest,
+                    isArrived = isArrived
+                )
+            )
+        }
+
+        liveBuses.sortWith(
+            compareBy<LiveBus> { !it.isArrived }
+                .thenBy { if (targetStationOrder > 0 && it.order > 0) (targetStationOrder - it.order).coerceAtLeast(0) else 999 }
+                .thenBy { if (it.etaSeconds >= 0) it.etaSeconds else Int.MAX_VALUE }
+        )
+
+        return liveBuses
     }
 
     /**

@@ -426,6 +426,97 @@ class TransitProviderTest {
     }
 
     @Test
+    fun testChelaileProvider_stnStatesValueAndOrderMapping() = runBlocking {
+        val interceptor = Interceptor { chain ->
+            val request = chain.request()
+            val jsonHomePage = """
+            {
+              "jsonr": {
+                "data": {
+                  "nearSts": [
+                    {
+                      "sn": "延安东路西藏中路",
+                      "sId": "s_14",
+                      "physicalStId": "p_14",
+                      "lat": 31.23,
+                      "lng": 121.47,
+                      "lines": [
+                        {
+                          "line": {
+                            "lineId": "l_454",
+                            "name": "454路",
+                            "shortDesc": ""
+                          },
+                          "targetStation": {
+                            "order": 14,
+                            "sId": "s_14",
+                            "sn": "延安东路西藏中路"
+                          },
+                          "stnStates": [
+                            {
+                              "busId": "ghost_bus",
+                              "order": 0,
+                              "travelTime": -1,
+                              "value": -1
+                            },
+                            {
+                              "busId": "bus_454_1",
+                              "licence": "沪A-4541",
+                              "order": 0,
+                              "travelTime": 420,
+                              "value": 1,
+                              "state": 0,
+                              "distanceToDest": 530
+                            },
+                            {
+                              "busId": "bus_454_2",
+                              "licence": "沪A-4542",
+                              "order": 0,
+                              "travelTime": 900,
+                              "value": 5,
+                              "state": 0,
+                              "distanceToDest": 3200
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+            """.trimIndent()
+            mockResponse(request, jsonHomePage)
+        }
+
+        val okHttpClient = OkHttpClient.Builder().addInterceptor(interceptor).build()
+        val chelaileClient = ChelaileApiClient(okHttpClient)
+        val provider = ChelaileTransitProvider(chelaileClient)
+
+        val stops = provider.getNearbyStops(testCity, 31.23, 121.47, 1)
+        assertEquals(1, stops.size)
+        val lineStatus = stops[0].lines[0]
+        assertEquals(14, lineStatus.targetOrder)
+
+        // 验证空车对象已被过滤，且按紧迫度排序，第一辆为还有1站的 bus_454_1
+        assertEquals(2, lineStatus.approachingBuses.size)
+        val firstBus = lineStatus.approachingBuses[0]
+        assertEquals("bus_454_1", firstBus.busId)
+        // 目标站序14，距目标站还剩1站，车辆当前站序必须为 14 - 1 = 13
+        assertEquals(13, firstBus.order)
+        assertEquals(420, firstBus.etaSeconds)
+        assertFalse(firstBus.isArrived)
+
+        // 验证 UI 倒计时计算逻辑：剩余站数严格为 14 - 13 = 1 站（绝不是 14 站）
+        val remainingStops = lineStatus.targetOrder - firstBus.order
+        assertEquals(1, remainingStops)
+
+        val secondBus = lineStatus.approachingBuses[1]
+        assertEquals("bus_454_2", secondBus.busId)
+        assertEquals(9, secondBus.order) // 14 - 5 = 9
+    }
+
+    @Test
     fun testChelaileProvider_getTimetable() = runBlocking {
         val interceptor = Interceptor { chain ->
             val request = chain.request()
