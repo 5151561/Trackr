@@ -15,14 +15,13 @@ import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.ui.components.RouteRailLayoutMode
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
+import com.trackr.ui.util.CountdownPollingStrategy
+import com.trackr.ui.util.PollingCoordinator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -76,13 +75,22 @@ class LineDetailViewModel(
 
     private var currentLineId: String = initialLineId
     private var currentSource: DataSourceType = initialSource
-    private var autoPollingEnabled: Boolean = enableAutoPolling
-    private var pollingJob: Job? = null
-    private var countdownJob: Job? = null
-    private val pollingLock = Any()
+
+    internal val pollingCoordinator = PollingCoordinator(
+        scope = viewModelScope,
+        strategy = CountdownPollingStrategy(
+            intervalSeconds = 10,
+            onTick = { remaining ->
+                _uiState.update { it.copy(refreshCountdownSeconds = remaining) }
+            }
+        ),
+        initialEnabled = enableAutoPolling
+    ) {
+        loadLineDetail(isInitial = false)
+    }
 
     val isPollingActive: Boolean
-        get() = pollingJob?.isActive == true || countdownJob?.isActive == true
+        get() = pollingCoordinator.isPollingActive
 
     init {
         // 监听收藏夹变动
@@ -99,11 +107,8 @@ class LineDetailViewModel(
             }
         }
 
-        // 加载初始线路数据并启动轮询
+        // 加载初始线路数据
         loadLineDetail(isInitial = true)
-        if (enableAutoPolling) {
-            resumePolling()
-        }
     }
 
     /**
@@ -194,57 +199,28 @@ class LineDetailViewModel(
      * 设置轮询是否激活（生命周期感知或显式开关）
      */
     fun setPollingActive(active: Boolean) {
-        synchronized(pollingLock) {
-            autoPollingEnabled = active
-            if (active) {
-                resumePolling()
-            } else {
-                pausePolling()
-            }
-        }
+        pollingCoordinator.setActive(active)
     }
 
     /**
      * 暂停后台轮询，安全取消当前轮询 Job
      */
     fun pausePolling() {
-        synchronized(pollingLock) {
-            countdownJob?.cancel()
-            countdownJob = null
-            pollingJob?.cancel()
-            pollingJob = null
-        }
+        pollingCoordinator.pause()
     }
 
     /**
      * 恢复/启动 10 秒自动轮询与倒计时指示（幂等控制）
      */
     fun resumePolling() {
-        synchronized(pollingLock) {
-            if (!autoPollingEnabled) return
-            if (isPollingActive) return
-
-            pollingJob = viewModelScope.launch {
-                while (isActive) {
-                    delay(1000L)
-                    val current = _uiState.value.refreshCountdownSeconds
-                    if (current <= 1) {
-                        _uiState.update { it.copy(refreshCountdownSeconds = 10) }
-                        // 触发刷新
-                        loadLineDetail(isInitial = false)
-                    } else {
-                        _uiState.update { it.copy(refreshCountdownSeconds = current - 1) }
-                    }
-                }
-            }
-        }
+        pollingCoordinator.resume()
     }
 
     /**
      * 手动立即刷新
      */
     fun refreshNow() {
-        _uiState.update { it.copy(refreshCountdownSeconds = 10) }
+        pollingCoordinator.restartCountdown(10)
         loadLineDetail(isInitial = false)
     }
 
