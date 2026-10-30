@@ -1160,11 +1160,11 @@ private fun CityPickerBottomSheet(
                 ) {
                     items(
                         items = matchingCities,
-                        key = { it.cityId },
+                        key = { it.uniqueKey },
                         contentType = { "matching_city" }
                     ) { city ->
                         val prov = city.province.ifBlank { ProvinceCityCatalog.inferProvince(city.cityName) }
-                        val isCurrent = city.cityId == currentCity.cityId
+                        val isCurrent = city.matchesCity(currentCity)
                         Surface(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1228,7 +1228,7 @@ private fun CityPickerBottomSheet(
                                             )
                                         }
                                     }
-                                    if (city.cityId == locatedCity?.cityId) {
+                                    if (city.matchesCity(locatedCity)) {
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
                                             color = MaterialTheme.colorScheme.tertiaryContainer
@@ -1331,11 +1331,11 @@ private fun CityPickerBottomSheet(
                 ) {
                     items(
                         items = hotCities,
-                        key = { "hot_${it.cityId}" },
+                        key = { "hot_${it.uniqueKey}" },
                         contentType = { "hot_city" }
                     ) { city ->
                         FilterChip(
-                            selected = city.cityId == currentCity.cityId,
+                            selected = city.matchesCity(currentCity),
                             onClick = { onSelectCity(city) },
                             label = { Text(city.cityName) }
                         )
@@ -1473,10 +1473,10 @@ private fun CityPickerBottomSheet(
                         ) {
                             items(
                                 items = provinceCities,
-                                key = { it.cityId },
+                                key = { it.uniqueKey },
                                 contentType = { "province_city" }
                             ) { city ->
-                                val isCurrent = city.cityId == currentCity.cityId
+                                val isCurrent = city.matchesCity(currentCity)
                                 Surface(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -1526,7 +1526,7 @@ private fun CityPickerBottomSheet(
                                                     )
                                                 }
                                             }
-                                            if (city.cityId == locatedCity?.cityId) {
+                                            if (city.matchesCity(locatedCity)) {
                                                 Surface(
                                                     shape = RoundedCornerShape(4.dp),
                                                     color = MaterialTheme.colorScheme.tertiaryContainer

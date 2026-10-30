@@ -60,7 +60,32 @@ data class TransitCity(
     val isHot: Boolean = false,
     val mygolbsCityCode: String? = null,
     val province: String = ""
-)
+) {
+    /**
+     * 城市全局唯一标识（用于 Compose 列表 key，防止仅支持单数据源时 cityId 为空导致 key 重复崩溃）
+     */
+    val uniqueKey: String
+        get() = when {
+            cityId.isNotBlank() -> "cl_${cityId}_$cityName"
+            !mygolbsCityCode.isNullOrBlank() -> "mg_${mygolbsCityCode}_$cityName"
+            else -> "name_$cityName"
+        }
+
+    /**
+     * 判断是否为同一个城市（支持车来了/掌上公交跨数据源聚合匹配）
+     */
+    fun matchesCity(other: TransitCity?): Boolean {
+        if (other == null) return false
+        if (this === other) return true
+        if (cityId.isNotBlank() && other.cityId.isNotBlank()) {
+            return cityId == other.cityId
+        }
+        if (!mygolbsCityCode.isNullOrBlank() && !other.mygolbsCityCode.isNullOrBlank()) {
+            return mygolbsCityCode == other.mygolbsCityCode
+        }
+        return cityName == other.cityName
+    }
+}
 
 /**
  * 线路运营状态

@@ -113,7 +113,7 @@ class HomeViewModel(
                 if (state.currentCity.cityId == city.cityId && state.currentCity.cityName == city.cityName) {
                     return@collect
                 }
-                val isSameAsLocated = state.locatedCity?.cityId == city.cityId
+                val isSameAsLocated = city.matchesCity(state.locatedCity)
                 if (isSameAsLocated) {
                     _uiState.update {
                         it.copy(
@@ -551,7 +551,7 @@ class HomeViewModel(
     fun selectCity(city: TransitCity) {
         viewModelScope.launch {
             val state = _uiState.value
-            val isLocated = city.cityId == state.locatedCity?.cityId
+            val isLocated = city.matchesCity(state.locatedCity)
             val coords = if (isLocated) {
                 Pair(state.currentLat, state.currentLng)
             } else {

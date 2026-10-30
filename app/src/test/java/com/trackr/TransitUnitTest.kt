@@ -371,6 +371,25 @@ class TransitUnitTest {
         assertEquals("沪A·D8866", normalBus.friendlyPlate)
     }
 
+    @Test
+    fun testTransitCity_uniqueKeyAndMatchesCity() {
+        val shanghai = com.trackr.domain.model.TransitCity(cityId = "034", cityName = "上海", mygolbsCityCode = "310000")
+        val yulin = com.trackr.domain.model.TransitCity(cityId = "", cityName = "玉林", mygolbsCityCode = "450900")
+        val ruijin = com.trackr.domain.model.TransitCity(cityId = "", cityName = "瑞金", mygolbsCityCode = "360781")
+        val customOther = com.trackr.domain.model.TransitCity(cityId = "", cityName = "未知县", mygolbsCityCode = null)
+
+        // 验证即使 cityId 均为空，每个城市的 uniqueKey 也保持唯一且非空，避免 LazyColumn key 重复崩溃
+        val keys = listOf(shanghai, yulin, ruijin, customOther).map { it.uniqueKey }
+        assertEquals(4, keys.distinct().size)
+        assertTrue(keys.none { it.isBlank() })
+
+        // 验证城市匹配逻辑
+        val yulinWithCityId = com.trackr.domain.model.TransitCity(cityId = "999", cityName = "玉林", mygolbsCityCode = "450900")
+        assertTrue(yulin.matchesCity(yulinWithCityId))
+        org.junit.Assert.assertFalse(yulin.matchesCity(ruijin))
+        org.junit.Assert.assertFalse(yulin.matchesCity(shanghai))
+    }
+
     @org.junit.Ignore("Online network probe test - skipped in automated unit testing")
     @Test
     fun testInspectStopDetailOnline() {
