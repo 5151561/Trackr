@@ -124,6 +124,7 @@ import com.amap.api.maps.TextureMapView
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.LatLngBounds
 import com.amap.api.maps.model.MarkerOptions
+import com.amap.api.maps.model.MyLocationStyle
 import com.amap.api.maps.model.PolylineOptions
 import com.trackr.BuildConfig
 import com.trackr.data.remote.amap.AmapSdkManager
@@ -131,8 +132,10 @@ import com.trackr.data.remote.amap.AmapTipItem
 import com.trackr.data.remote.amap.AmapTransitSchemeResult
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.GroupCategory
+import com.trackr.domain.model.ProvinceCityCatalog
 import com.trackr.domain.model.TransitGroup
 import com.trackr.ui.screens.favoritesgroup.FavoritesGroupViewModel
+import com.trackr.util.CoordTransform
 import com.trackr.util.SignatureUtils
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -166,6 +169,22 @@ fun RoutePlanScreen(
     val customApiKey by viewModel.customAmapApiKey.collectAsStateWithLifecycle()
     val customWebApiKey by viewModel.customAmapWebApiKey.collectAsStateWithLifecycle()
     val favoriteGroups by viewModel.favoriteGroups.collectAsStateWithLifecycle()
+    val currentCity by viewModel.currentCity.collectAsStateWithLifecycle()
+    val userLocationWgs by viewModel.userLocation.collectAsStateWithLifecycle()
+
+    // 系统定位是 WGS-84，高德地图需要 GCJ-02；两者在国内相差 300~600 米
+    val myLocationGcj = remember(userLocationWgs) {
+        userLocationWgs?.let { (lat, lng) ->
+            val (gcjLat, gcjLng) = CoordTransform.wgs84ToGcj02(lat, lng)
+            LatLng(gcjLat, gcjLng)
+        }
+    }
+    // 定位不可用时的兜底视角：当前城市中心。未收录的城市宁可不动相机，
+    // 也不能回落到某个内置城市（否则用户会被搬到毫不相干的地方）。
+    val cityCenterLatLng = remember(currentCity.cityName) {
+        ProvinceCityCatalog.findCityCenterCoordinates(currentCity.cityName)
+            ?.let { (lat, lng) -> LatLng(lat, lng) }
+    }
 
     var originText by rememberSaveable { mutableStateOf("") }
     var destText by rememberSaveable { mutableStateOf("") }
@@ -279,6 +298,8 @@ fun RoutePlanScreen(
             AmapRealVectorMapView(
                 selectedScheme = currentScheme,
                 customApiKey = customApiKey,
+                myLocation = myLocationGcj,
+                cityCenter = cityCenterLatLng,
                 recenterTrigger = recenterTrigger,
                 retryToken = mapRetryToken,
                 onMapLoaded = { mapLoadTimeout = null },
@@ -1933,6 +1954,8 @@ fun MapDiagnosticsDialog(
 /**
  * 真实高德 3D 矢量地图视图 (TextureMapView)
  *
+ * @param myLocation 当前设备定位，**必须已转换为 GCJ-02**；用于无方案时的取景，null 表示暂无定位
+ * @param cityCenter 当前城市中心（GCJ-02）；定位不可用时的取景兜底，null 时保持相机不动
  * @param retryToken 变化时强制重建地图实例（Key 变更、用户点“重试”）
  * @param onMapLoaded 底图首次就绪回调
  * @param onLoadTimeout 底图超时未就绪回调（软失败，外层以浮层提示，不销毁地图）
@@ -1942,6 +1965,8 @@ fun MapDiagnosticsDialog(
 fun AmapRealVectorMapView(
     selectedScheme: AmapTransitSchemeResult?,
     customApiKey: String?,
+    myLocation: LatLng? = null,
+    cityCenter: LatLng? = null,
     recenterTrigger: Int = 0,
     retryToken: Int = 0,
     modifier: Modifier = Modifier,
@@ -1954,6 +1979,11 @@ fun AmapRealVectorMapView(
     var aMapInstance by remember { mutableStateOf<AMap?>(null) }
     var mapViewInstance by remember { mutableStateOf<TextureMapView?>(null) }
     var isMapLoaded by remember(customApiKey, retryToken) { mutableStateOf(false) }
+    // onCreate 必须等 view 真正挂到 window 之后才能调：
+    // 在 AndroidView.factory 里调用时 view 还没有 parent、没有 windowToken，
+    // 高德 SDK 的初始化会卡在"等窗口"状态——引擎能读相机，但底图永远不渲染、
+    // onMapLoaded 永不回调、所有 moveCamera 被静默丢弃（表现就是黑屏）。
+    var mapCreated by remember(customApiKey, retryToken) { mutableStateOf(false) }
 
     key(customApiKey, retryToken) {
         AndroidView(
@@ -1962,19 +1992,42 @@ fun AmapRealVectorMapView(
                 AmapSdkManager.applyApiKey(ctx, customApiKey, force = true)
                 runCatching {
                     TextureMapView(ctx).apply {
-                        onCreate(null)
                         mapViewInstance = this
-                        val aMap = this.map
-                        aMapInstance = aMap
+                        addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
+                            override fun onViewAttachedToWindow(v: android.view.View) {
+                                // post 一帧，等窗口/尺寸稳定后再走 SDK 生命周期，与官方 Demo 一致
+                                v.post {
+                                    if (mapCreated) return@post
+                                    runCatching {
+                                        onCreate(null)
+                                        val aMap = map
+                                        aMapInstance = aMap
 
-                        aMap.setOnMapLoadedListener { isMapLoaded = true }
+                                        aMap.uiSettings.apply {
+                                            isZoomControlsEnabled = false
+                                            isCompassEnabled = false
+                                            isScaleControlsEnabled = true
+                                            isMyLocationButtonEnabled = false
+                                        }
 
-                        aMap.uiSettings.apply {
-                            isZoomControlsEnabled = false
-                            isCompassEnabled = false
-                            isScaleControlsEnabled = true
-                            isMyLocationButtonEnabled = false
-                        }
+                                        aMap.setOnMapLoadedListener {
+                                            isMapLoaded = true
+                                            runCatching {
+                                                aMap.myLocationStyle = MyLocationStyle()
+                                                    .myLocationType(MyLocationStyle.LOCATION_TYPE_SHOW)
+                                                    .interval(4000L)
+                                                    .showMyLocation(true)
+                                                aMap.isMyLocationEnabled = true
+                                            }
+                                        }
+
+                                        mapCreated = true
+                                    }
+                                }
+                            }
+
+                            override fun onViewDetachedFromWindow(v: android.view.View) = Unit
+                        })
                     }
                 }.getOrElse { throwable ->
                     // 原生库加载失败（常见于 x86/x86_64 模拟器）会在这里抛出，交由外层降级。
@@ -2011,8 +2064,10 @@ fun AmapRealVectorMapView(
     val isMapDestroyed = remember(mapViewInstance) { mutableStateOf(false) }
     val isMapResumed = remember(mapViewInstance) { mutableStateOf(false) }
 
-    DisposableEffect(lifecycleOwner, mapViewInstance) {
+    DisposableEffect(lifecycleOwner, mapViewInstance, mapCreated) {
         val mapView = mapViewInstance ?: return@DisposableEffect onDispose {}
+        // onCreate 还没执行（view 尚未 attach），此时不能 onResume
+        if (!mapCreated) return@DisposableEffect onDispose {}
 
         fun resumeOnce() {
             if (!isMapDestroyed.value && !isMapResumed.value) {
@@ -2058,8 +2113,15 @@ fun AmapRealVectorMapView(
         }
     }
 
-    LaunchedEffect(selectedScheme, recenterTrigger, aMapInstance) {
+    // 绘制层：只在「方案变化 / 用户点重置」时重绘，不能把 myLocation 作为 key——
+    // 定位每 60 秒刷新一次，否则用户拖动的视角会被反复 fit bounds 拉回去。
+    //
+    // isMapLoaded 必须在 key 里：高德在 GL 引擎尚未创建时收到相机动画消息会在
+    // AMapDelegateImp 里抛 NPE（GLMapEngine.isInMapAnimation on null），
+    // 表现为偶发黑屏。所以底图首帧就绪前不做 clear / animateCamera。
+    LaunchedEffect(selectedScheme, aMapInstance, isMapLoaded, recenterTrigger) {
         val aMap = aMapInstance ?: return@LaunchedEffect
+        if (!isMapLoaded) return@LaunchedEffect
         aMap.clear()
 
         if (selectedScheme != null) {
@@ -2146,13 +2208,35 @@ fun AmapRealVectorMapView(
                     }
                 }
             }
-        } else {
-            aMap.animateCamera(
-                CameraUpdateFactory.newLatLngZoom(
-                    LatLng(22.5431, 114.0579),
-                    14f
-                )
-            )
         }
+    }
+
+    // 取景层：负责"首次进入/点击重置"时的相机位置。
+    // 优先级：我的定位 > 当前城市中心 > 不动（绝不硬编码某个城市，否则外地用户会"被搬去"别的城市）。
+    var hasCenteredOnce by remember(aMapInstance) { mutableStateOf(false) }
+    var centeredWithMyLocation by remember(aMapInstance) { mutableStateOf(false) }
+    var handledRecenterTrigger by remember(aMapInstance) { mutableIntStateOf(0) }
+    LaunchedEffect(aMapInstance, isMapLoaded, selectedScheme, myLocation, cityCenter, recenterTrigger) {
+        val aMap = aMapInstance ?: return@LaunchedEffect
+        // 底图未就绪时调 animateCamera 会让高德内部 GLMapEngine 空指针，等首帧后再取景
+        if (!isMapLoaded) return@LaunchedEffect
+        // 有算路方案时由方案自己 fit bounds，不抢相机
+        if (selectedScheme != null) {
+            hasCenteredOnce = true
+            handledRecenterTrigger = recenterTrigger
+            return@LaunchedEffect
+        }
+        val isUserRecenter = recenterTrigger != handledRecenterTrigger
+        // 定位迟到（先按城市中心取景，之后才拿到 GPS）时补一次跟随
+        val isFirstUserFix = myLocation != null && !centeredWithMyLocation
+        if (hasCenteredOnce && !isUserRecenter && !isFirstUserFix) return@LaunchedEffect
+
+        val target = myLocation ?: cityCenter ?: return@LaunchedEffect
+        hasCenteredOnce = true
+        handledRecenterTrigger = recenterTrigger
+        if (myLocation != null) centeredWithMyLocation = true
+        aMap.animateCamera(
+            CameraUpdateFactory.newLatLngZoom(target, if (myLocation != null) 15f else 12f)
+        )
     }
 }

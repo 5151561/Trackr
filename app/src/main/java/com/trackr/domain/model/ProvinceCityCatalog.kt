@@ -342,18 +342,29 @@ object ProvinceCityCatalog {
     }
 
     /**
-     * 获取城市中心的标准 WGS-84 经纬度坐标，未收录时默认返回上海市中心人民广场
+     * 查询城市中心坐标，**未收录时返回 null**。
+     *
+     * 与 [getCityCenterCoordinates] 的区别：后者对未收录城市会回落到固定城市中心，
+     * 用于"总得给个值"的场景（如距离排序兜底）；而地图取景绝不能用这种假值——
+     * 否则用户会被直接送到毫不相干的城市。需要真实坐标时用这个方法。
      */
-    fun getCityCenterCoordinates(cityName: String): Pair<Double, Double> {
+    fun findCityCenterCoordinates(cityName: String): Pair<Double, Double>? {
         val clean = cleanCityName(cityName)
+        if (clean.isBlank()) return null
         CITY_COORDINATES[clean]?.let { return it }
-
         for ((city, coords) in CITY_COORDINATES) {
             if (clean.contains(city) || city.contains(clean)) {
                 return coords
             }
         }
-        return Pair(31.2304, 121.4737)
+        return null
+    }
+
+    /**
+     * 获取城市中心的标准 WGS-84 经纬度坐标，未收录时默认返回上海市中心人民广场
+     */
+    fun getCityCenterCoordinates(cityName: String): Pair<Double, Double> {
+        return findCityCenterCoordinates(cityName) ?: Pair(31.2304, 121.4737)
     }
 
     /**

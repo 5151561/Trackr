@@ -30,6 +30,7 @@ import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
 import com.trackr.service.TransferAutoSwitchManager
+import com.trackr.util.CoordTransform
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -85,6 +86,9 @@ class FavoritesGroupViewModel(
     val favoriteGroups: StateFlow<List<FavoriteGroup>> = groupRepository.favoriteGroups
 
     val currentCity: StateFlow<TransitCity> = transitRepository.selectedCity
+
+    /** 当前设备定位（WGS-84，由首页定位链路写入），供地图初始视角使用 */
+    val userLocation: StateFlow<Pair<Double, Double>?> = transitRepository.userLocation
 
     fun isGroupInFavoriteGroup(group: TransitGroup, favGroupId: String): Boolean {
         return when (favGroupId) {
@@ -366,7 +370,11 @@ class FavoritesGroupViewModel(
         return try {
             val searchRes = coord.search(city, keyword, EngineMode.CHELAILE)
             val stopTips = searchRes.stops.map { stop ->
-                val loc = if (stop.wgsLat != 0.0 && stop.wgsLng != 0.0) "${stop.wgsLng},${stop.wgsLat}" else ""
+                // 车来了站点坐标是 WGS-84，传给高德算路前转成 GCJ-02
+                val loc = if (stop.wgsLat != 0.0 && stop.wgsLng != 0.0) {
+                    val (gcjLat, gcjLng) = CoordTransform.wgs84ToGcj02(stop.wgsLat, stop.wgsLng)
+                    "$gcjLng,$gcjLat"
+                } else ""
                 AmapTipItem(
                     name = stop.name,
                     district = city.cityName,
@@ -445,19 +453,21 @@ class FavoritesGroupViewModel(
                     val nearby = runCatching {
                         transitRepository.getNearbyStops(city, resolvedLat, resolvedLng, 1).getOrNull()?.firstOrNull()
                     }.getOrNull()
+                    // 系统定位是 WGS-84，高德算路要求 GCJ-02，必须显式转换后再拼参数
+                    val (originGcjLat, originGcjLng) = CoordTransform.wgs84ToGcj02(resolvedLat, resolvedLng)
                     effectiveOrigin = if (nearby != null) {
                         AmapTipItem(
                             name = "我的位置(${nearby.name})",
                             district = city.cityName,
                             address = nearby.name,
-                            location = "$resolvedLng,$resolvedLat"
+                            location = "$originGcjLng,$originGcjLat"
                         )
                     } else {
                         AmapTipItem(
                             name = "我的位置",
                             district = city.cityName,
                             address = "当前定位",
-                            location = "$resolvedLng,$resolvedLat"
+                            location = "$originGcjLng,$originGcjLat"
                         )
                     }
                 }
