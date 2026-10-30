@@ -24,6 +24,7 @@ data class MoreUiState(
     val aggregatedPriority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST,
     val nearbyStopsCount: Int = 4,
     val preferredTransitCode: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
+    val isLiveNotificationEnabled: Boolean = true,
     val reminders: List<ScheduledReminder> = emptyList()
 )
 
@@ -49,6 +50,7 @@ class MoreViewModel(
     val aggregatedPriority: StateFlow<AggregatedSourcePriority> = repository.aggregatedPriority
     val nearbyStopsCount: StateFlow<Int> = repository.nearbyStopsCount
     val preferredTransitCode: StateFlow<TransitCodeProvider> = repository.preferredTransitCodeProvider
+    val isLiveNotificationEnabled: StateFlow<Boolean> = repository.isLiveNotificationEnabled
     val reminders: StateFlow<List<ScheduledReminder>> = reminderRepository.reminders
 
     val uiState: StateFlow<MoreUiState> = combine(
@@ -56,14 +58,17 @@ class MoreViewModel(
         aggregatedPriority,
         nearbyStopsCount,
         preferredTransitCode,
+        isLiveNotificationEnabled,
         reminders
-    ) { mode, priority, count, code, rems ->
+    ) { args: Array<Any?> ->
+        @Suppress("UNCHECKED_CAST")
         MoreUiState(
-            engineMode = mode,
-            aggregatedPriority = priority,
-            nearbyStopsCount = count,
-            preferredTransitCode = code,
-            reminders = rems
+            engineMode = args[0] as EngineMode,
+            aggregatedPriority = args[1] as AggregatedSourcePriority,
+            nearbyStopsCount = args[2] as Int,
+            preferredTransitCode = args[3] as TransitCodeProvider,
+            isLiveNotificationEnabled = args[4] as Boolean,
+            reminders = args[5] as List<ScheduledReminder>
         )
     }.stateIn(
         scope = viewModelScope,
@@ -73,9 +78,14 @@ class MoreViewModel(
             aggregatedPriority = repository.aggregatedPriority.value,
             nearbyStopsCount = repository.nearbyStopsCount.value,
             preferredTransitCode = repository.preferredTransitCodeProvider.value,
+            isLiveNotificationEnabled = repository.isLiveNotificationEnabled.value,
             reminders = reminderRepository.reminders.value
         )
     )
+
+    fun setLiveNotificationEnabled(enabled: Boolean) {
+        repository.setLiveNotificationEnabled(enabled)
+    }
 
     fun setEngineMode(mode: EngineMode) {
         repository.setEngineMode(mode)

@@ -146,4 +146,22 @@ class MoreViewModelTest {
         testScheduler.runCurrent()
         assertTrue(viewModel.reminders.value.isEmpty())
     }
+
+    @Test
+    fun testLiveNotificationEnabled_toggle() = runTest {
+        assertTrue(viewModel.isLiveNotificationEnabled.value)
+        assertTrue(viewModel.uiState.value.isLiveNotificationEnabled)
+
+        viewModel.setLiveNotificationEnabled(false)
+        testScheduler.runCurrent()
+
+        assertFalse(viewModel.isLiveNotificationEnabled.value)
+        assertFalse(viewModel.uiState.value.isLiveNotificationEnabled)
+
+        viewModel.setLiveNotificationEnabled(true)
+        testScheduler.runCurrent()
+
+        assertTrue(viewModel.isLiveNotificationEnabled.value)
+        assertTrue(viewModel.uiState.value.isLiveNotificationEnabled)
+    }
 }

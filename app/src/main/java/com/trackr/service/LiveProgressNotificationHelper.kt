@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.TrackingSessionState
+import com.trackr.service.vendor.XiaomiFocusAdapter
 
 /**
  * 负责构建常驻实时公交进度通知，深度适配 Android 16 / Core-KTX 1.19.0 的 NotificationCompat.ProgressStyle 实时活动
@@ -168,15 +169,19 @@ object LiveProgressNotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(context, CHANNEL_ID_LIVE_PROGRESS)
+        val isLiveEnabled = try {
+            com.trackr.TrackrApp.instance.repository.isLiveNotificationEnabled.value
+        } catch (_: Exception) {
+            true
+        }
+
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID_LIVE_PROGRESS)
             .setSmallIcon(context.applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_dialog_info)
             .setContentTitle(title)
             .setContentText(contentText)
             .setSubText("候车追踪 · 第${state.targetOrder}站")
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setRequestPromotedOngoing(true)
-            .setShortCriticalText(shortCriticalText)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setProgress(maxProgress, currentProgress, false)
@@ -192,7 +197,15 @@ object LiveProgressNotificationHelper {
                 "结束追踪",
                 stopPendingIntent
             )
-            .build()
+
+        if (isLiveEnabled) {
+            builder.setRequestPromotedOngoing(true)
+            builder.setShortCriticalText(shortCriticalText)
+            // 注入小米 HyperOS 焦点通知 / 超级岛协议参数
+            XiaomiFocusAdapter.attachFocusParams(builder, state)
+        }
+
+        return builder.build()
     }
 
     /**

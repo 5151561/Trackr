@@ -27,8 +27,10 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material3.Card
@@ -46,6 +48,7 @@ import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -66,6 +69,7 @@ import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.TransitCodeProvider
+import com.trackr.service.vendor.XiaomiFocusAdapter
 import com.trackr.ui.components.ScheduledRemindersBottomSheet
 import com.trackr.util.TransitCodeHelper
 
@@ -81,6 +85,7 @@ fun MoreScreen(
     val aggregatedPriority by viewModel.aggregatedPriority.collectAsStateWithLifecycle()
     val nearbyStopsCount by viewModel.nearbyStopsCount.collectAsStateWithLifecycle()
     val preferredTransitCode by viewModel.preferredTransitCode.collectAsStateWithLifecycle()
+    val isLiveNotificationEnabled by viewModel.isLiveNotificationEnabled.collectAsStateWithLifecycle()
     val reminders by viewModel.reminders.collectAsStateWithLifecycle()
 
     // 采用 rememberSaveable 确保配置变更（旋转/折叠展开）时不丢失弹窗状态
@@ -460,6 +465,76 @@ fun MoreScreen(
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp)
                                 )
+                            }
+
+                            Spacer(modifier = Modifier.height(14.dp))
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // 2.3 实时在途通知（灵动胶囊 / 实时活动）
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                        modifier = Modifier.size(40.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            Icon(
+                                                imageVector = Icons.Default.NotificationsActive,
+                                                contentDescription = null,
+                                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.width(14.dp))
+
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "实时通知（状态栏胶囊 / 实时活动）",
+                                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            text = "在状态栏胶囊与锁屏显示公交到达进度。支持 Android 16、小米澎湃OS 焦点通知及 OPPO 流体云",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(8.dp))
+
+                                    Switch(
+                                        checked = isLiveNotificationEnabled,
+                                        onCheckedChange = { viewModel.setLiveNotificationEnabled(it) }
+                                    )
+                                }
+
+                                if (isLiveNotificationEnabled) {
+                                    Spacer(modifier = Modifier.height(10.dp))
+                                    FilledTonalButton(
+                                        onClick = { XiaomiFocusAdapter.openNotificationSettings(context) },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        shape = RoundedCornerShape(12.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.AutoMirrored.Filled.OpenInNew,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = "打开系统流体云 / 焦点通知设置",
+                                            style = MaterialTheme.typography.labelLarge
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

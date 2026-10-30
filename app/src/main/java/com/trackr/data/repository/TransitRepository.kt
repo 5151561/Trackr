@@ -89,6 +89,9 @@ class TransitRepository(
     private val _nearbyStopsCount = MutableStateFlow(loadInitialNearbyStopsCount())
     override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
 
+    private val _isLiveNotificationEnabled = MutableStateFlow(loadInitialLiveNotificationEnabled())
+    override val isLiveNotificationEnabled: StateFlow<Boolean> = _isLiveNotificationEnabled.asStateFlow()
+
     private val _activeTrackingSession = MutableStateFlow(TrackingSessionState())
     override val activeTrackingSession: StateFlow<TrackingSessionState> = _activeTrackingSession.asStateFlow()
 
@@ -150,6 +153,15 @@ class TransitRepository(
         val clamped = count.coerceIn(1, 16)
         _nearbyStopsCount.value = clamped
         prefs.edit().putInt("nearby_stops_count", clamped).apply()
+    }
+
+    private fun loadInitialLiveNotificationEnabled(): Boolean {
+        return prefs.getBoolean("is_live_notification_enabled", true)
+    }
+
+    override fun setLiveNotificationEnabled(enabled: Boolean) {
+        _isLiveNotificationEnabled.value = enabled
+        prefs.edit().putBoolean("is_live_notification_enabled", enabled).apply()
     }
 
     private fun loadInitialEngineMode(): EngineMode {

@@ -27,10 +27,12 @@ interface ITransitRepository {
     val searchHistory: StateFlow<List<String>>
     val preferredTransitCodeProvider: StateFlow<TransitCodeProvider>
     val nearbyStopsCount: StateFlow<Int>
+    val isLiveNotificationEnabled: StateFlow<Boolean>
 
     fun setEngineMode(mode: EngineMode)
     fun setAggregatedPriority(priority: AggregatedSourcePriority)
     fun setNearbyStopsCount(count: Int)
+    fun setLiveNotificationEnabled(enabled: Boolean)
     fun updateUserLocation(lat: Double, lng: Double)
     suspend fun selectCity(city: TransitCity)
     suspend fun getSupportedCities(forceRefresh: Boolean = false): Result<List<TransitCity>>
