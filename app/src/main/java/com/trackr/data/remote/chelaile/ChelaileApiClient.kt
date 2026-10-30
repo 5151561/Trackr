@@ -389,7 +389,7 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
         cityId: String,
         wgsLat: Double,
         wgsLng: Double,
-        limit: Int = 10
+        limit: Int = 4
     ): List<NearbyStop> = withContext(Dispatchers.IO) {
         val params = LinkedHashMap(DEFAULT_PARAMS).apply {
             put("cityId", cityId)
@@ -580,13 +580,17 @@ class ChelaileApiClient(private val httpClient: OkHttpClient) {
                     source = DataSourceType.CHELAILE
                 )
 
+                val shortDesc = lineObj.optString("shortDesc").trim()
+                val nextOp = lineObj.optString("nextOperationTimeDesc").trim()
+                val statusText = shortDesc.ifBlank { nextOp }
+
                 lineStatuses.add(
                     NearbyStopLineStatus(
                         line = dir,
                         targetOrder = targetStn.optInt("order", 0),
                         targetStopId = targetStn.optString("sId"),
                         targetStopName = targetStn.optString("sn").ifBlank { st.optString("sn") },
-                        statusText = lineObj.optString("shortDesc").ifBlank { lineObj.optString("nextOperationTimeDesc") },
+                        statusText = statusText,
                         preArrivalTime = li.optString("preArrivalTime").takeIf { it.isNotBlank() },
                         approachingBuses = liveBuses
                     )

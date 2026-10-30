@@ -320,7 +320,7 @@ class HomeViewModel(
                 _uiState.update { it.copy(isLoadingNearby = true) }
             }
             val targetCity = cityOverride ?: _uiState.value.currentCity
-            val result = repository.getNearbyStops(targetCity, lat, lng, limit = 12)
+            val result = repository.getNearbyStops(targetCity, lat, lng, limit = NEARBY_STOPS_LIMIT)
             val stops = result.getOrNull().orEmpty()
             _uiState.update {
                 it.copy(
@@ -411,7 +411,7 @@ class HomeViewModel(
                     Triple(lat, lng, currentCity)
                 }
 
-                val nearbyResult = repository.getNearbyStops(targetCity, lat, lng, limit = 12)
+                val nearbyResult = repository.getNearbyStops(targetCity, lat, lng, limit = NEARBY_STOPS_LIMIT)
                 _uiState.update {
                     it.copy(
                         nearbyStops = nearbyResult.getOrNull().orEmpty(),
@@ -432,7 +432,7 @@ class HomeViewModel(
                 delay(15_000L)
                 val state = _uiState.value
                 if (!state.isRefreshing && !state.isLoadingNearby && !state.isLocating) {
-                    val nearbyResult = repository.getNearbyStops(state.currentCity, state.currentLat, state.currentLng, limit = 12)
+                    val nearbyResult = repository.getNearbyStops(state.currentCity, state.currentLat, state.currentLng, limit = NEARBY_STOPS_LIMIT)
                     val favResult = repository.refreshFavoritesRealtime()
                     _uiState.update {
                         it.copy(
@@ -572,5 +572,9 @@ class HomeViewModel(
             } catch (_: Exception) {
             }
         }
+    }
+
+    companion object {
+        const val NEARBY_STOPS_LIMIT = 4
     }
 }

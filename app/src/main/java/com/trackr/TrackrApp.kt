@@ -1,6 +1,9 @@
 package com.trackr
 
 import android.app.Application
+import com.trackr.data.provider.TransitProviderCoordinator
+import com.trackr.data.provider.chelaile.ChelaileTransitProvider
+import com.trackr.data.provider.mygolbs.MygolbsTransitProvider
 import com.trackr.data.remote.chelaile.ChelaileApiClient
 import com.trackr.data.remote.mygolbs.MygolbsApiClient
 import com.trackr.data.repository.ITransitRepository
@@ -19,6 +22,15 @@ class TrackrApp : Application() {
     lateinit var mygolbsClient: MygolbsApiClient
         private set
 
+    lateinit var chelaileProvider: ChelaileTransitProvider
+        private set
+
+    lateinit var mygolbsProvider: MygolbsTransitProvider
+        private set
+
+    lateinit var coordinator: TransitProviderCoordinator
+        private set
+
     lateinit var repository: ITransitRepository
         private set
 
@@ -34,10 +46,18 @@ class TrackrApp : Application() {
 
         chelaileClient = ChelaileApiClient(okHttpClient)
         mygolbsClient = MygolbsApiClient(okHttpClient)
+
+        chelaileProvider = ChelaileTransitProvider(chelaileClient)
+        mygolbsProvider = MygolbsTransitProvider(mygolbsClient)
+
+        coordinator = TransitProviderCoordinator(
+            chelaileProvider = chelaileProvider,
+            mygolbsProvider = mygolbsProvider
+        )
+
         repository = TransitRepository(
             context = applicationContext,
-            chelaileClient = chelaileClient,
-            mygolbsClient = mygolbsClient
+            coordinator = coordinator
         )
     }
 

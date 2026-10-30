@@ -35,7 +35,7 @@ interface ITransitRepository {
         city: TransitCity,
         wgsLat: Double,
         wgsLng: Double,
-        limit: Int = 10
+        limit: Int = 4
     ): Result<List<NearbyStop>>
 
     suspend fun getStopDetail(

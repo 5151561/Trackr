@@ -2,12 +2,15 @@ package com.trackr.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.trackr.data.provider.TransitProviderCoordinator
+import com.trackr.data.provider.chelaile.ChelaileTransitProvider
+import com.trackr.data.provider.model.LineDetailRequest
+import com.trackr.data.provider.model.StopDetailRequest
+import com.trackr.data.provider.mygolbs.MygolbsTransitProvider
 import com.trackr.data.remote.chelaile.ChelaileApiClient
 import com.trackr.data.remote.mygolbs.MygolbsApiClient
-import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
-import com.trackr.domain.model.BusLineSummary
 import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.EngineMode
@@ -20,8 +23,6 @@ import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.domain.model.TransitSearchResult
-import com.trackr.domain.model.isPureSubwayStation
-import com.trackr.domain.model.isPureSubwayStation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -41,9 +42,23 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class TransitRepository(
     private val context: Context,
-    private val chelaileClient: ChelaileApiClient,
-    private val mygolbsClient: MygolbsApiClient
+    val coordinator: TransitProviderCoordinator
 ) : ITransitRepository {
+
+    /**
+     * 兼容既有调用方与测试的次构造函数
+     */
+    constructor(
+        context: Context,
+        chelaileClient: ChelaileApiClient,
+        mygolbsClient: MygolbsApiClient
+    ) : this(
+        context = context,
+        coordinator = TransitProviderCoordinator(
+            chelaileProvider = ChelaileTransitProvider(chelaileClient),
+            mygolbsProvider = MygolbsTransitProvider(mygolbsClient)
+        )
+    )
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -157,21 +172,15 @@ class TransitRepository(
         if (!forceRefresh && cachedCities.isNotEmpty()) {
             return@runCatching cachedCities
         }
-        val cities = chelaileClient.getCities(hotOnly = false).map { city ->
-            if (city.province.isBlank()) {
-                city.copy(province = ProvinceCityCatalog.inferProvince(city.cityName))
-            } else {
-                city
-            }
-        }
+        val cities = coordinator.getSupportedCities(forceRefresh)
         cachedCities = cities
         cities
     }
 
     override suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): Result<TransitCity?> = runCatching {
         withContext(Dispatchers.IO) {
-            // 1) 优先尝试车来了 GPS 逆地理服务
-            var resolvedName: String? = chelaileClient.reverseGeocodeCityName(wgsLat, wgsLng)
+            // 1) 优先尝试雷达 Provider GPS 逆地理服务
+            var resolvedName: String? = coordinator.resolveCityByLocation(wgsLat, wgsLng)
 
             // 2) 若为空，尝试 Android 系统原生 Geocoder
             if (resolvedName.isNullOrBlank()) {
@@ -237,12 +246,7 @@ class TransitRepository(
         wgsLng: Double,
         limit: Int
     ): Result<List<NearbyStop>> = runCatching {
-        chelaileClient.getNearbyStops(
-            cityId = city.cityId,
-            wgsLat = wgsLat,
-            wgsLng = wgsLng,
-            limit = limit
-        ).filter { !it.isPureSubwayStation }
+        coordinator.getNearbyStops(city, wgsLat, wgsLng, limit)
     }
 
     override suspend fun getStopDetail(
@@ -256,94 +260,19 @@ class TransitRepository(
         userLat: Double?,
         userLng: Double?
     ): Result<List<NearbyStop>> = runCatching {
-        val isMygolbsStop = stopId?.startsWith("mg:") == true ||
-                physicalStId?.startsWith("mg:") == true ||
-                namesakeStId?.startsWith("mg:") == true ||
-                _engineMode.value == EngineMode.MYGOLBS
-        if (isMygolbsStop) {
-            val cleanName = (stopName ?: stopId?.removePrefix("mg:")?.split(":")?.lastOrNull() ?: "")
-                .removeSuffix(" (掌上公交)")
-                .trim()
-            if (cleanName.isNotBlank()) {
-                val mgStop = mygolbsClient.getStopLines(city.cityName, cleanName)
-                return@runCatching listOf(mgStop)
-            }
-        }
-
         val resolvedUserLat = userLat ?: _userLocation.value?.first
         val resolvedUserLng = userLng ?: _userLocation.value?.second
-
-        val rawStops = chelaileClient.getStopDetail(
-            cityId = city.cityId,
-            physicalStId = physicalStId.orEmpty(),
+        val request = StopDetailRequest(
+            stopId = stopId,
+            stopName = stopName,
+            physicalStId = physicalStId,
             namesakeStId = namesakeStId,
-            stationId = stopId,
+            stationLat = stationLat,
+            stationLng = stationLng,
             userLat = resolvedUserLat,
             userLng = resolvedUserLng
         )
-        // 车来了接口只为当前查询的 physicalStId 返回完整线路与实时数据，其他物理站台为占位空壳
-        // 当存在多个物理站台且其他站台尚未填充完整线路时，并发补全各物理站台的完整线路信息
-        val stops = if (rawStops.size > 1 && rawStops.any { s -> s.lines.isNotEmpty() && s.lines.all { it.line.lineId.isBlank() } }) {
-            coroutineScope {
-                rawStops.map { stop ->
-                    async {
-                        val needsFetch = stop.lines.isNotEmpty() && stop.lines.all { it.line.lineId.isBlank() }
-                        if (needsFetch && !stop.physicalStId.isNullOrBlank()) {
-                            val subResult = runCatching {
-                                chelaileClient.getStopDetail(
-                                    cityId = city.cityId,
-                                    physicalStId = stop.physicalStId,
-                                    namesakeStId = stop.namesakeStId ?: namesakeStId,
-                                    stationId = stop.stopId.takeIf { it.isNotBlank() } ?: stopId,
-                                    userLat = resolvedUserLat,
-                                    userLng = resolvedUserLng
-                                )
-                            }.getOrNull()
-                            val matched = subResult?.firstOrNull { it.physicalStId == stop.physicalStId && it.lines.any { l -> l.line.lineId.isNotBlank() } }
-                                ?: subResult?.firstOrNull { it.lines.any { l -> l.line.lineId.isNotBlank() } }
-                            if (matched != null) {
-                                stop.copy(
-                                    lines = matched.lines,
-                                    subwayLineNames = if (matched.subwayLineNames.isNotEmpty()) matched.subwayLineNames else stop.subwayLineNames
-                                )
-                            } else stop
-                        } else stop
-                    }
-                }.awaitAll()
-            }
-        } else {
-            rawStops
-        }
-        if (stops.isNotEmpty()) {
-            stops
-        } else if (stationLat != null && stationLng != null && stationLat > 0 && stationLng > 0) {
-            val nearby = chelaileClient.getNearbyStops(city.cityId, stationLat, stationLng, limit = 6)
-            val matched = if (!stopName.isNullOrBlank()) {
-                val filtered = nearby.filter { it.name.contains(stopName) || stopName.contains(it.name) }
-                if (filtered.isNotEmpty()) filtered else nearby
-            } else {
-                nearby
-            }
-            if (resolvedUserLat != null && resolvedUserLng != null) {
-                matched.map { s ->
-                    if (s.distanceMeters == null || s.distanceMeters <= 0) {
-                        val d = RouteProjectionMath.calculateDistanceMeters(resolvedUserLat, resolvedUserLng, s.wgsLat, s.wgsLng)
-                        s.copy(distanceMeters = d)
-                    } else s
-                }
-            } else {
-                matched
-            }
-        } else if (!stopName.isNullOrBlank() && _engineMode.value != EngineMode.CHELAILE) {
-            val mgStop = runCatching { mygolbsClient.getStopLines(city.cityName, stopName.trim()) }.getOrNull()
-            if (mgStop != null && mgStop.lines.isNotEmpty()) {
-                listOf(mgStop)
-            } else {
-                emptyList()
-            }
-        } else {
-            emptyList()
-        }
+        coordinator.getStopDetail(city, request, _engineMode.value)
     }
 
     override suspend fun search(
@@ -354,113 +283,13 @@ class TransitRepository(
     ): Result<TransitSearchResult> = runCatching {
         val resolvedUserLat = userLat ?: _userLocation.value?.first
         val resolvedUserLng = userLng ?: _userLocation.value?.second
-        val mode = _engineMode.value
-
-        coroutineScope {
-            val needChelaile = (mode == EngineMode.ALL || mode == EngineMode.CHELAILE)
-            val needMygolbs = (mode == EngineMode.ALL || mode == EngineMode.MYGOLBS)
-
-            val chelaileDeferred = async {
-                if (needChelaile) {
-                    runCatching {
-                        chelaileClient.search(
-                            cityId = city.cityId,
-                            keyword = keyword,
-                            userLat = resolvedUserLat,
-                            userLng = resolvedUserLng
-                        )
-                    }.getOrDefault(TransitSearchResult(keyword))
-                } else {
-                    TransitSearchResult(keyword)
-                }
-            }
-
-            val mygolbsLinesDeferred = async {
-                if (needMygolbs) {
-                    runCatching {
-                        mygolbsClient.searchLines(
-                            cityCode = city.mygolbsCityCode.orEmpty(),
-                            cityName = city.cityName,
-                            keyword = keyword
-                        )
-                    }.getOrDefault(emptyList())
-                } else {
-                    emptyList()
-                }
-            }
-
-            val mygolbsStopsDeferred = async {
-                if (needMygolbs) {
-                    runCatching {
-                        mygolbsClient.searchStops(
-                            cityName = city.cityName,
-                            keyword = keyword
-                        )
-                    }.getOrDefault(emptyList())
-                } else {
-                    emptyList()
-                }
-            }
-
-            val chelaileRes = chelaileDeferred.await()
-            val mygolbsLines = mygolbsLinesDeferred.await()
-            val mygolbsStops = mygolbsStopsDeferred.await()
-
-            // 合并线路
-            val mergedLines = ArrayList<BusLineSummary>()
-            if (mode == EngineMode.MYGOLBS) {
-                mergedLines.addAll(mygolbsLines)
-            } else if (mode == EngineMode.CHELAILE) {
-                mergedLines.addAll(chelaileRes.lines)
-            } else {
-                // 双引擎模式：车来了线路 + 掌上公交线路
-                mergedLines.addAll(chelaileRes.lines)
-                val existingNames = chelaileRes.lines.map { it.name.trim() }.toSet()
-                for (mgLine in mygolbsLines) {
-                    if (!existingNames.contains(mgLine.name.trim())) {
-                        mergedLines.add(mgLine)
-                    } else {
-                        // 同名线路并存添加标有来源标识的掌上公交版本，供用户对比选择
-                        mergedLines.add(mgLine.copy(name = "${mgLine.name} [掌上公交]"))
-                    }
-                }
-            }
-
-            // 过滤纯地铁线路（第三方源无在途实时列车追踪数据）
-            mergedLines.removeAll { it.isSubway || it.name.contains("地铁") }
-
-            mergedLines.sortWith { a, b ->
-                RouteProjectionMath.compareLineNames(a.name, b.name)
-            }
-
-            // 合并车站
-            val mergedStops = ArrayList<NearbyStop>()
-            if (mode == EngineMode.MYGOLBS) {
-                mergedStops.addAll(mygolbsStops)
-            } else if (mode == EngineMode.CHELAILE) {
-                mergedStops.addAll(chelaileRes.stops)
-            } else {
-                // 双引擎模式：车来了站点 + 掌上公交站点
-                mergedStops.addAll(chelaileRes.stops)
-                val existingStopNames = chelaileRes.stops.map { it.name.trim() }.toSet()
-                for (mgStop in mygolbsStops) {
-                    if (!existingStopNames.contains(mgStop.name.trim())) {
-                        mergedStops.add(mgStop)
-                    } else {
-                        mergedStops.add(mgStop.copy(name = "${mgStop.name} (掌上公交)"))
-                    }
-                }
-            }
-
-            // 过滤纯地铁站点（仅保留地面公交站点）
-            mergedStops.removeAll { it.isPureSubwayStation }
-
-            TransitSearchResult(
-                keyword = keyword,
-                lines = mergedLines,
-                stops = mergedStops
-            )
-        }
+        coordinator.search(
+            city = city,
+            keyword = keyword,
+            mode = _engineMode.value,
+            userLat = resolvedUserLat,
+            userLng = resolvedUserLng
+        )
     }
 
     override suspend fun getLineDetail(
@@ -474,19 +303,17 @@ class TransitRepository(
         lineNameHint: String,
         directionHint: Int
     ): Result<BusLineDetail> = runCatching {
-        val isMygolbs = lineId.startsWith("mg:") || source == DataSourceType.MYGOLBS
-        val detail = if (isMygolbs) {
-            mygolbsClient.getLineDetail(lineId, targetOrder)
-        } else {
-            chelaileClient.getLineDetail(
-                cityId = city.cityId,
-                lineId = lineId,
-                targetOrder = targetOrder,
-                stationId = stationId,
-                wgsLat = wgsLat,
-                wgsLng = wgsLng
-            )
-        }
+        val request = LineDetailRequest(
+            lineId = lineId,
+            targetOrder = targetOrder,
+            stationId = stationId,
+            wgsLat = wgsLat,
+            wgsLng = wgsLng,
+            source = source,
+            lineNameHint = lineNameHint,
+            directionHint = directionHint
+        )
+        val detail = coordinator.getLineDetail(city, request)
 
         // 静态站表内存缓存维护
         val effectiveStops = if (detail.stops.isNotEmpty()) {
@@ -508,22 +335,7 @@ class TransitRepository(
         line: BusLineDirection,
         atTimeHHMM: String?
     ): Result<LineTimetable> = runCatching {
-        if (line.source == DataSourceType.MYGOLBS || line.lineId.startsWith("mg:")) {
-            LineTimetable(
-                lineId = line.lineId,
-                lineName = line.name,
-                depDesc = "该线路暂不提供首站预测时刻表，请参考运营首末班：${line.firstTime} - ${line.lastTime}"
-            )
-        } else {
-            val lineNo = line.lineNo.ifBlank { line.name }
-            chelaileClient.getTimetable(
-                cityId = city.cityId,
-                lineId = line.lineId,
-                lineNo = lineNo,
-                direction = line.direction,
-                atTimeHHMM = atTimeHHMM
-            )
-        }
+        coordinator.getTimetable(city, line, atTimeHHMM)
     }
 
     override suspend fun refreshFavoritesRealtime(): Result<Map<String, NearbyStop>> = runCatching {
