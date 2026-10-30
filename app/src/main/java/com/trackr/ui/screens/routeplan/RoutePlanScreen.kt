@@ -35,6 +35,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.Add
@@ -67,8 +69,10 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -101,12 +105,25 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.amap.api.maps.AMap
+import com.amap.api.maps.CameraUpdateFactory
+import com.amap.api.maps.TextureMapView
+import com.amap.api.maps.model.LatLng
+import com.amap.api.maps.model.LatLngBounds
+import com.amap.api.maps.model.MarkerOptions
+import com.amap.api.maps.model.PolylineOptions
 import com.trackr.BuildConfig
+import com.trackr.data.remote.amap.AmapSdkManager
 import com.trackr.data.remote.amap.AmapTipItem
 import com.trackr.data.remote.amap.AmapTransitSchemeResult
 import com.trackr.domain.model.DataSourceType
@@ -155,6 +172,23 @@ fun RoutePlanScreen(
 
     var mapScale by remember { mutableFloatStateOf(1f) }
     var mapOffset by remember { mutableStateOf(Offset.Zero) }
+    var recenterTrigger by rememberSaveable { mutableIntStateOf(0) }
+
+    val isRobolectric = remember {
+        android.os.Build.FINGERPRINT.contains("robolectric", ignoreCase = true)
+    }
+
+    val triggerPlan: () -> Unit = {
+        if (destText.isNotBlank()) {
+            val orig = if (originText.isBlank()) {
+                AmapTipItem(name = "我的位置", location = "")
+            } else {
+                selectedOrigin ?: AmapTipItem(name = originText)
+            }
+            val dst = selectedDest ?: AmapTipItem(name = destText)
+            viewModel.planTransitRoute(orig, dst)
+        }
+    }
 
     // 当方案更新时校准选中索引
     LaunchedEffect(plannedSchemes) {
@@ -193,57 +227,48 @@ fun RoutePlanScreen(
     val currentScheme = plannedSchemes.getOrNull(selectedSchemeIndex)
 
     Box(modifier = modifier.fillMaxSize()) {
-        // 1. 全屏矢量地图视窗 (RoutePlanVectorMapCanvas)
-        RoutePlanVectorMapCanvas(
-            selectedScheme = currentScheme,
-            scale = mapScale,
-            offset = mapOffset,
-            onTransform = { pan, zoom ->
-                mapScale = (mapScale * zoom).coerceIn(0.5f, 3.5f)
-                mapOffset += pan
-            },
-            modifier = Modifier.fillMaxSize()
-        )
+        // 1. 全屏矢量地图视窗 (真实高德 3D 矢量地图 / Robolectric Canvas 测试降级)
+        if (isRobolectric) {
+            RoutePlanVectorMapCanvas(
+                selectedScheme = currentScheme,
+                scale = mapScale,
+                offset = mapOffset,
+                onTransform = { pan, zoom ->
+                    mapScale = (mapScale * zoom).coerceIn(0.5f, 3.5f)
+                    mapOffset += pan
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
+            AmapRealVectorMapView(
+                selectedScheme = currentScheme,
+                customApiKey = customApiKey,
+                recenterTrigger = recenterTrigger,
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
-        // 地图浮动工具按键 (右侧：居中重置与指北针)
-        Column(
+        // 地图浮动工具按键 (右侧：单一居中重置 FAB)
+        FloatingActionButton(
+            onClick = {
+                recenterTrigger++
+                mapScale = 1f
+                mapOffset = Offset.Zero
+            },
             modifier = Modifier
                 .align(Alignment.CenterEnd)
-                .padding(end = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(end = 16.dp)
+                .size(42.dp)
+                .testTag("btn_recenter"),
+            shape = CircleShape,
+            containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
+            contentColor = MaterialTheme.colorScheme.primary
         ) {
-            FloatingActionButton(
-                onClick = {
-                    mapScale = 1f
-                    mapOffset = Offset.Zero
-                },
-                modifier = Modifier.size(42.dp).testTag("btn_recenter"),
-                shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                contentColor = MaterialTheme.colorScheme.primary
-            ) {
-                Icon(
-                    imageVector = Icons.Default.MyLocation,
-                    contentDescription = "居中重置",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-            FloatingActionButton(
-                onClick = {
-                    mapScale = 1f
-                    mapOffset = Offset.Zero
-                },
-                modifier = Modifier.size(42.dp),
-                shape = CircleShape,
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.92f),
-                contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Explore,
-                    contentDescription = "指北罗盘",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+            Icon(
+                imageVector = Icons.Default.MyLocation,
+                contentDescription = "居中重置",
+                modifier = Modifier.size(20.dp)
+            )
         }
 
         // 2. 顶部悬浮搜索岛 (Top Floating Search Console)
@@ -306,7 +331,7 @@ fun RoutePlanScreen(
                                 decorationBox = { innerTextField ->
                                     if (originText.isEmpty()) {
                                         Text(
-                                            text = "我的位置 / 起点公交站",
+                                            text = "我的位置 / 输入起点站",
                                             style = MaterialTheme.typography.bodyMedium.copy(
                                                 color = MaterialTheme.colorScheme.outline
                                             )
@@ -315,32 +340,13 @@ fun RoutePlanScreen(
                                     innerTextField()
                                 }
                             )
-                            if (originText.isEmpty()) {
-                                Text(
-                                    text = "我的位置",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.Bold
-                                    ),
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .clickable {
-                                            originText = "我的位置"
-                                            selectedOrigin = AmapTipItem(name = "我的位置", location = "113.935,22.540")
-                                            viewModel.searchOriginTips("")
-                                            if (destText.isNotBlank()) {
-                                                val dst = selectedDest ?: AmapTipItem(name = destText)
-                                                viewModel.planTransitRoute(selectedOrigin!!, dst)
-                                            }
-                                        }
-                                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            } else {
+                            if (originText.isNotEmpty()) {
                                 IconButton(
                                     onClick = {
                                         originText = ""
                                         selectedOrigin = null
                                         viewModel.searchOriginTips("")
+                                        viewModel.clearPlanError()
                                     },
                                     modifier = Modifier.size(24.dp)
                                 ) {
@@ -385,6 +391,12 @@ fun RoutePlanScreen(
                                 modifier = Modifier
                                     .weight(1f)
                                     .testTag("input_dest"),
+                                keyboardOptions = KeyboardOptions(
+                                    imeAction = ImeAction.Search
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onSearch = { triggerPlan() }
+                                ),
                                 textStyle = TextStyle(
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.SemiBold,
@@ -410,6 +422,7 @@ fun RoutePlanScreen(
                                         destText = ""
                                         selectedDest = null
                                         viewModel.searchDestTips("")
+                                        viewModel.clearPlanError()
                                     },
                                     modifier = Modifier.size(24.dp)
                                 ) {
@@ -424,10 +437,12 @@ fun RoutePlanScreen(
                         }
                     }
 
-                    // 右侧操作栏：互换与高德 Key 配置
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    // 右侧操作栏：互换与规划触发
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         IconButton(
                             onClick = {
@@ -439,8 +454,12 @@ fun RoutePlanScreen(
                                 selectedOrigin = selectedDest
                                 selectedDest = tmpTip
 
-                                if (originText.isNotBlank() && destText.isNotBlank()) {
-                                    val orig = selectedOrigin ?: AmapTipItem(name = originText)
+                                if (destText.isNotBlank()) {
+                                    val orig = if (originText.isBlank()) {
+                                        AmapTipItem(name = "我的位置", location = "")
+                                    } else {
+                                        selectedOrigin ?: AmapTipItem(name = originText)
+                                    }
                                     val dst = selectedDest ?: AmapTipItem(name = destText)
                                     viewModel.planTransitRoute(orig, dst)
                                 }
@@ -460,16 +479,57 @@ fun RoutePlanScreen(
                         }
 
                         IconButton(
-                            onClick = { showKeyDialog = true },
-                            modifier = Modifier.size(28.dp).testTag("btn_key_config")
+                            onClick = { triggerPlan() },
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                                .testTag("btn_trigger_plan")
                         ) {
                             Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "高德Key配置",
-                                tint = if (customApiKey.isNullOrBlank()) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(17.dp)
+                                imageVector = Icons.Default.Search,
+                                contentDescription = "规划",
+                                tint = MaterialTheme.colorScheme.onPrimary,
+                                modifier = Modifier.size(20.dp)
                             )
                         }
+                    }
+                }
+            }
+
+            // 独立的小胶囊配置按钮
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp, end = 4.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Surface(
+                    onClick = { showKeyDialog = true },
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.90f),
+                    shadowElevation = 2.dp,
+                    modifier = Modifier.testTag("btn_key_config")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "高德Key配置",
+                            tint = if (customApiKey.isNullOrBlank()) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = if (customApiKey.isNullOrBlank()) "配置Key" else "Key已生效",
+                            style = MaterialTheme.typography.labelSmall.copy(
+                                fontSize = 11.sp,
+                                color = if (customApiKey.isNullOrBlank()) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Medium
+                            )
+                        )
                     }
                 }
             }
@@ -1515,4 +1575,157 @@ fun AmapApiKeyConfigDialog(
             }
         }
     )
+}
+
+/**
+ * 真实高德 3D 矢量地图视图 (TextureMapView)
+ */
+@Composable
+fun AmapRealVectorMapView(
+    selectedScheme: AmapTransitSchemeResult?,
+    customApiKey: String?,
+    recenterTrigger: Int = 0,
+    modifier: Modifier = Modifier
+) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    var aMapInstance by remember { mutableStateOf<AMap?>(null) }
+    var mapViewInstance by remember { mutableStateOf<TextureMapView?>(null) }
+
+    key(customApiKey) {
+        AndroidView(
+            factory = { ctx ->
+                AmapSdkManager.applyApiKey(ctx, customApiKey)
+                TextureMapView(ctx).apply {
+                    onCreate(null)
+                    mapViewInstance = this
+                    val aMap = this.map
+                    aMapInstance = aMap
+
+                    aMap.uiSettings.apply {
+                        isZoomControlsEnabled = false
+                        isCompassEnabled = false
+                        isScaleControlsEnabled = true
+                        isMyLocationButtonEnabled = false
+                    }
+                }
+            },
+            modifier = modifier
+        )
+    }
+
+    DisposableEffect(lifecycleOwner, mapViewInstance) {
+        val mapView = mapViewInstance ?: return@DisposableEffect onDispose {}
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> mapView.onResume()
+                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
+                Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            mapView.onDestroy()
+        }
+    }
+
+    LaunchedEffect(selectedScheme, recenterTrigger, aMapInstance) {
+        val aMap = aMapInstance ?: return@LaunchedEffect
+        aMap.clear()
+
+        if (selectedScheme != null) {
+            val legs = selectedScheme.group.legs
+            val boundsBuilder = LatLngBounds.builder()
+            var validPointsCount = 0
+
+            var prevLegToLatLng: LatLng? = null
+
+            legs.forEachIndexed { index, leg ->
+                val hasFrom = leg.fromStopLat > 0.0 && leg.fromStopLng > 0.0
+                val hasTo = leg.toStopLat > 0.0 && leg.toStopLng > 0.0
+
+                val fromLatLng = if (hasFrom) LatLng(leg.fromStopLat, leg.fromStopLng) else null
+                val toLatLng = if (hasTo) LatLng(leg.toStopLat, leg.toStopLng) else null
+
+                // 若与上一段换乘站坐标不同，绘制步行换乘虚线
+                if (prevLegToLatLng != null && fromLatLng != null && prevLegToLatLng != fromLatLng) {
+                    aMap.addPolyline(
+                        PolylineOptions()
+                            .add(prevLegToLatLng, fromLatLng)
+                            .color(0xFF78909C.toInt())
+                            .width(12f)
+                            .setDottedLine(true)
+                    )
+                }
+
+                // 绘制当前公交段折线
+                if (fromLatLng != null && toLatLng != null) {
+                    val legColor = if (index == 0) 0xFF0061A4.toInt() else 0xFF7C4DFF.toInt()
+                    aMap.addPolyline(
+                        PolylineOptions()
+                            .add(fromLatLng, toLatLng)
+                            .color(legColor)
+                            .width(18f)
+                    )
+                }
+
+                if (fromLatLng != null) {
+                    boundsBuilder.include(fromLatLng)
+                    validPointsCount++
+                    if (index == 0) {
+                        aMap.addMarker(
+                            MarkerOptions()
+                                .position(fromLatLng)
+                                .title("起点: ${leg.fromStopName}")
+                        )
+                    } else {
+                        aMap.addMarker(
+                            MarkerOptions()
+                                .position(fromLatLng)
+                                .title("换乘: ${leg.fromStopName}")
+                        )
+                    }
+                }
+
+                if (toLatLng != null) {
+                    boundsBuilder.include(toLatLng)
+                    validPointsCount++
+                    prevLegToLatLng = toLatLng
+                    if (index == legs.lastIndex) {
+                        aMap.addMarker(
+                            MarkerOptions()
+                                .position(toLatLng)
+                                .title("终点: ${leg.toStopName}")
+                        )
+                    }
+                }
+            }
+
+            if (validPointsCount > 0) {
+                runCatching {
+                    val bounds = boundsBuilder.build()
+                    aMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 180))
+                }.onFailure {
+                    val firstLeg = legs.firstOrNull()
+                    if (firstLeg != null && firstLeg.fromStopLat > 0.0 && firstLeg.fromStopLng > 0.0) {
+                        aMap.animateCamera(
+                            CameraUpdateFactory.newLatLngZoom(
+                                LatLng(firstLeg.fromStopLat, firstLeg.fromStopLng),
+                                14f
+                            )
+                        )
+                    }
+                }
+            }
+        } else {
+            aMap.animateCamera(
+                CameraUpdateFactory.newLatLngZoom(
+                    LatLng(22.5431, 114.0579),
+                    14f
+                )
+            )
+        }
+    }
 }

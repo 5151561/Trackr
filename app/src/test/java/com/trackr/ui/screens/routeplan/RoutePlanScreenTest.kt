@@ -124,15 +124,19 @@ class RoutePlanScreenTest {
         }
 
         // 验证顶部搜索控制台初始占位文案展示
-        composeTestRule.onNodeWithText("我的位置 / 起点公交站").assertIsDisplayed()
+        composeTestRule.onNodeWithText("我的位置 / 输入起点站").assertIsDisplayed()
         composeTestRule.onNodeWithText("输入目的地、商圈或公交地铁站").assertIsDisplayed()
 
-        // 点击“我的位置”快速填充
-        composeTestRule.onNodeWithText("我的位置").performClick()
+        // 验证规划触发按钮与Key配置按钮
+        composeTestRule.onNodeWithTag("btn_trigger_plan").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("btn_key_config").assertIsDisplayed()
+
+        // 输入起点
+        composeTestRule.onNodeWithTag("input_origin").performTextInput("科技园")
         composeTestRule.waitForIdle()
 
         // 验证起点已填充
-        composeTestRule.onNodeWithText("我的位置").assertIsDisplayed()
+        composeTestRule.onNodeWithText("科技园").assertIsDisplayed()
     }
 
     @Test
