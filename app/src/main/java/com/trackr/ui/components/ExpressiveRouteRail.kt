@@ -70,6 +70,13 @@ import androidx.compose.ui.unit.sp
 import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.sanitizePlateOrFleetNo
+import com.trackr.ui.components.rail.RouteRailArrowArm
+import com.trackr.ui.components.rail.RouteRailArrowGap
+import com.trackr.ui.components.rail.RouteRailArrowSpread
+import com.trackr.ui.components.rail.RouteRailArrowStrokeWidth
+import com.trackr.ui.components.rail.RouteRailStrokeWidth
+import com.trackr.ui.components.rail.drawHorizontalTrackSegment
+import com.trackr.ui.components.rail.drawVerticalTrackSegment
 import com.trackr.ui.theme.BusSemanticColors
 import com.trackr.ui.theme.busChipSpringSpec
 import com.trackr.ui.theme.busColors
@@ -251,14 +258,14 @@ private fun HorizontalRouteRail(
                         .drawWithCache {
                             val arrowPath = Path()
                             val arrowStroke = Stroke(
-                                width = 2.dp.toPx(),
+                                width = RouteRailArrowStrokeWidth.toPx(),
                                 cap = StrokeCap.Round,
                                 join = StrokeJoin.Round
                             )
-                            val arrowGap = 5.dp.toPx()
-                            val arrowArm = 3.dp.toPx()
-                            val arrowSpread = 3.5.dp.toPx()
-                            val strokeWidthPx = 3.dp.toPx()
+                            val arrowGap = RouteRailArrowGap.toPx()
+                            val arrowArm = RouteRailArrowArm.toPx()
+                            val arrowSpread = RouteRailArrowSpread.toPx()
+                            val strokeWidthPx = RouteRailStrokeWidth.toPx()
 
                             onDrawBehind {
                                 val halfHeight = size.height / 2f
@@ -268,7 +275,6 @@ private fun HorizontalRouteRail(
                                     val stopTo = stops[i + 1]
                                     val segStartX = (columnWidthPx / 2f) + i * columnWidthPx
                                     val segEndX = (columnWidthPx / 2f) + (i + 1) * columnWidthPx
-                                    val midX = (segStartX + segEndX) / 2f
                                     val segmentColor = getRouteSegmentColor(
                                         fromOrder = stopFrom.order,
                                         toOrder = stopTo.order,
@@ -276,47 +282,19 @@ private fun HorizontalRouteRail(
                                         busColors = busColors
                                     )
 
-                                    val hasArrow = (i % 3 == 0)
-
-                                    if (hasArrow) {
-                                        // 轨道前半段（站点到箭头间隙）
-                                        drawLine(
-                                            color = segmentColor,
-                                            start = Offset(segStartX, halfHeight),
-                                            end = Offset(midX - arrowGap, halfHeight),
-                                            strokeWidth = strokeWidthPx,
-                                            cap = StrokeCap.Round
-                                        )
-
-                                        // 绘制向右行车折线箭头 '>'（复用底层 Path 缓冲区，避免每帧分配堆对象）
-                                        arrowPath.rewind()
-                                        arrowPath.moveTo(midX - arrowArm, halfHeight - arrowSpread)
-                                        arrowPath.lineTo(midX + arrowArm, halfHeight)
-                                        arrowPath.lineTo(midX - arrowArm, halfHeight + arrowSpread)
-                                        drawPath(
-                                            path = arrowPath,
-                                            color = segmentColor,
-                                            style = arrowStroke
-                                        )
-
-                                        // 轨道后半段（箭头间隙到下一站）
-                                        drawLine(
-                                            color = segmentColor,
-                                            start = Offset(midX + arrowGap, halfHeight),
-                                            end = Offset(segEndX, halfHeight),
-                                            strokeWidth = strokeWidthPx,
-                                            cap = StrokeCap.Round
-                                        )
-                                    } else {
-                                        // 无箭头时，平整绘制贯穿站间的轨道线
-                                        drawLine(
-                                            color = segmentColor,
-                                            start = Offset(segStartX, halfHeight),
-                                            end = Offset(segEndX, halfHeight),
-                                            strokeWidth = strokeWidthPx,
-                                            cap = StrokeCap.Round
-                                        )
-                                    }
+                                    drawHorizontalTrackSegment(
+                                        startX = segStartX,
+                                        endX = segEndX,
+                                        y = halfHeight,
+                                        color = segmentColor,
+                                        strokeWidth = strokeWidthPx,
+                                        hasArrow = (i % 3 == 0),
+                                        arrowPath = arrowPath,
+                                        arrowStroke = arrowStroke,
+                                        arrowGap = arrowGap,
+                                        arrowArm = arrowArm,
+                                        arrowSpread = arrowSpread
+                                    )
                                 }
                             }
                         }
@@ -912,56 +890,31 @@ private fun VerticalTrackSegment(
                 .drawWithCache {
                     val arrowPath = Path()
                     val arrowStroke = Stroke(
-                        width = 2.dp.toPx(),
+                        width = RouteRailArrowStrokeWidth.toPx(),
                         cap = StrokeCap.Round,
                         join = StrokeJoin.Round
                     )
-                    val strokeWidthPx = 3.dp.toPx()
-                    val arrowGap = 4.dp.toPx()
-                    val arrowArm = 3.dp.toPx()
-                    val arrowSpread = 3.5.dp.toPx()
+                    val strokeWidthPx = RouteRailStrokeWidth.toPx()
+                    val arrowGap = RouteRailArrowGap.toPx()
+                    val arrowArm = RouteRailArrowArm.toPx()
+                    val arrowSpread = RouteRailArrowSpread.toPx()
                     val overlap = 1.5f
 
                     onDrawBehind {
                         val centerX = size.width / 2f
-                        val midY = size.height / 2f
-
-                        if (hasArrow) {
-                            // 上半段轨道（顶端到箭头间隙）
-                            drawLine(
-                                color = segmentColor,
-                                start = Offset(centerX, -overlap),
-                                end = Offset(centerX, midY - arrowGap),
-                                strokeWidth = strokeWidthPx
-                            )
-
-                            // 绘制精准居中的向下行车折线箭头 'v'（复用 Path 底层缓冲区）
-                            arrowPath.rewind()
-                            arrowPath.moveTo(centerX - arrowSpread, midY - arrowArm)
-                            arrowPath.lineTo(centerX, midY + arrowArm)
-                            arrowPath.lineTo(centerX + arrowSpread, midY - arrowArm)
-                            drawPath(
-                                path = arrowPath,
-                                color = segmentColor,
-                                style = arrowStroke
-                            )
-
-                            // 下半段轨道（箭头间隙到底部边界）
-                            drawLine(
-                                color = segmentColor,
-                                start = Offset(centerX, midY + arrowGap),
-                                end = Offset(centerX, size.height + overlap),
-                                strokeWidth = strokeWidthPx
-                            )
-                        } else {
-                            // 无箭头时，平整绘制贯穿整段的连接轴线
-                            drawLine(
-                                color = segmentColor,
-                                start = Offset(centerX, -overlap),
-                                end = Offset(centerX, size.height + overlap),
-                                strokeWidth = strokeWidthPx
-                            )
-                        }
+                        drawVerticalTrackSegment(
+                            x = centerX,
+                            startY = -overlap,
+                            endY = size.height + overlap,
+                            color = segmentColor,
+                            strokeWidth = strokeWidthPx,
+                            hasArrow = hasArrow,
+                            arrowPath = arrowPath,
+                            arrowStroke = arrowStroke,
+                            arrowGap = arrowGap,
+                            arrowArm = arrowArm,
+                            arrowSpread = arrowSpread
+                        )
                     }
                 }
         )
