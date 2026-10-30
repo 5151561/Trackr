@@ -23,8 +23,6 @@ class AmapTransitApiClient(
 ) : BaseTransitApiClient(httpClient) {
 
     companion object {
-        // 高德官方开放平台公共 Web 服务 Key（同时支持用户在设置中自定义配置专属 Key）
-        const val DEFAULT_AMAP_WEB_KEY = "6b7617b084e622415174542d131f7cbb"
         private const val BASE_URL_AMAP = "https://restapi.amap.com/v3"
     }
 
@@ -38,7 +36,8 @@ class AmapTransitApiClient(
     ): Result<List<AmapTipItem>> = runCatching {
         if (keyword.isBlank()) return@runCatching emptyList()
 
-        val key = apiKey?.trim()?.ifBlank { null } ?: DEFAULT_AMAP_WEB_KEY
+        val key = apiKey?.trim()?.ifBlank { null }
+            ?: throw IllegalStateException("未配置高德 Web 服务 Key，请在设置中配置自备 Key")
         val url = "$BASE_URL_AMAP/assistant/inputtips?keywords=${URLEncoder.encode(keyword.trim(), "UTF-8")}&city=${URLEncoder.encode(city.trim(), "UTF-8")}&key=$key"
 
         val request = Request.Builder()
@@ -94,7 +93,8 @@ class AmapTransitApiClient(
         city: String,
         apiKey: String? = null
     ): Result<List<AmapTransitSchemeResult>> = runCatching {
-        val key = apiKey?.trim()?.ifBlank { null } ?: DEFAULT_AMAP_WEB_KEY
+        val key = apiKey?.trim()?.ifBlank { null }
+            ?: throw IllegalStateException("未配置高德 Web 服务 Key，请在设置中配置自备 Key")
         val url = "$BASE_URL_AMAP/direction/transit/integrated?origin=$originLngLat&destination=$destinationLngLat&city=${URLEncoder.encode(city.trim(), "UTF-8")}&strategy=0&key=$key"
 
         val request = Request.Builder()

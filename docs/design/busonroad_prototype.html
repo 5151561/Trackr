@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>追客 BusOnRoad - Material Design 3 交互原型 (v2.3)</title>
+  <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
+  <style>
+    /* Material Design 3 核心调色板与规范 */
+    :root {
+      --md-sys-color-primary: #0061A4;
+      --md-sys-color-on-primary: #FFFFFF;
+      --md-sys-color-primary-container: #D1E4FF;
+      --md-sys-color-on-primary-container: #001D36;
+      --md-sys-color-secondary: #535F70;
+      --md-sys-color-secondary-container: #D7E3F7;
+      --md-sys-color-on-secondary-container: #101C2B;
+      --md-sys-color-tertiary: #6B5778;
+      --md-sys-color-surface: #FDFCFF;
+      --md-sys-color-on-surface: #1A1C1E;
+      --md-sys-color-surface-container-low: #F7F9FB;
+      --md-sys-color-surface-container: #F1F4F8;
+      --md-sys-color-surface-container-high: #EBEFF3;
+      --md-sys-color-surface-container-highest: #E5E9ED;
+      --md-sys-color-transit-success: #00875A;
+      --md-sys-color-transit-warning: #D97706;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .phone-mockup {
+      width: 412px;
+      height: 870px;
+      border-radius: 44px;
+      box-shadow: 0 25px 60px -15px rgba(0, 20, 50, 0.25), 0 0 0 12px #202124, 0 0 0 14px #424242;
+      overflow: hidden;
+      position: relative;
+      background: var(--md-sys-color-surface);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .punch-hole {
+      width: 14px;
+      height: 14px;
+      background: #111;
+      border-radius: 50%;
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 999;
+    }
+
+    .nav-indicator {
+      transition: all 0.25s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); opacity: 0.8; }
+      50% { transform: scale(1.3); opacity: 0.2; }
+      100% { transform: scale(0.95); opacity: 0.8; }
+    }
+    .pulse-glow {
+      animation: pulse-ring 2s infinite ease-in-out;
+    }
+
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .no-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+
+    /* 线路号码胶囊激活与非激活样式 */
+    .line-chip {
+      transition: all 0.2s cubic-bezier(0.2, 0, 0, 1);
+    }
+    .line-chip.active {
+      background: #0061A4;
+      color: #FFFFFF;
+      box-shadow: 0 2px 6px -1px rgba(0, 97, 164, 0.4);
+      border-color: #0061A4;
+    }
+    .line-chip.active .sub-eta {
+      color: #D1E4FF;
+    }
+
+    /* 换乘段小号码 */
+    .leg-chip {
+      transition: all 0.15s ease;
+    }
+    .leg-chip.active {
+      background: #1E293B;
+      color: #FFFFFF;
+      font-weight: 800;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 flex flex-col items-center justify-center min-h-screen p-4 text-[var(--md-sys-color-on-surface)]">
+
+  <!-- 原型顶部控制栏与说明 -->
+  <div class="mb-4 text-center max-w-lg">
+    <div class="inline-flex items-center gap-2 px-3 py-1 bg-blue-100 text-blue-900 rounded-full text-xs font-bold mb-1">
+      <span class="w-2 h-2 rounded-full bg-blue-600"></span>
+      v2.3: 极简线路号图标胶囊 (点击切换信息)
+    </div>
+    <h1 class="text-xl font-bold text-slate-800">追客 BusOnRoad - 交互原型</h1>
+    <p class="text-xs text-slate-500 mt-0.5">请在手机框中点击切换 <b>[320] [M194] [311]</b> 纯号码图标体验即时切换</p>
+  </div>
+
+  <!-- 手机外壳 -->
+  <div class="phone-mockup">
+    <div class="punch-hole"></div>
+
+    <!-- 状态栏 -->
+    <div class="h-9 px-6 flex items-center justify-between text-xs font-semibold text-slate-700 select-none z-50 bg-transparent">
+      <span>09:41</span>
+      <div class="flex items-center gap-1.5 text-xs">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-4.97 0-9 4.03-9 9 0 2.12.74 4.07 1.97 5.61L4.35 18.23C2.89 16.48 2 14.34 2 12c0-5.52 4.48-10 10-10s10 4.48 10 10c0 2.34-.89 4.48-2.35 6.23l-.62-.62C20.26 16.07 21 14.12 21 12c0-4.97-4.03-9-9-9z"/><path d="M12 7c-2.76 0-5 2.24-5 5 0 1.25.46 2.39 1.22 3.28l.71-.71C8.36 13.91 8 13 8 12c0-2.21 1.79-4 4-4s4 1.79 4 4c0 1-.36 1.91-.93 2.57l.71.71c.76-.89 1.22-2.03 1.22-3.28 0-2.76-2.24-5-5-5z"/><circle cx="12" cy="12" r="2"/></svg>
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M2 22h20L12 2z"/></svg>
+        <span class="text-[10px]">98%</span>
+      </div>
+    </div>
+
+    <!-- 页面容器 -->
+    <div class="flex-1 relative overflow-hidden bg-[var(--md-sys-color-surface)]">
+
+      <!-- ========================================================================= -->
+      <!-- TAB 1: 首页 -->
+      <!-- ========================================================================= -->
+      <div id="tab-home" class="absolute inset-0 flex flex-col p-4 overflow-y-auto no-scrollbar space-y-3 pb-24">
+        <div class="flex items-center justify-between pt-1">
+          <div>
+            <span class="text-xs font-medium text-slate-500">深圳 · 南山区</span>
+            <h2 class="text-2xl font-bold tracking-tight text-slate-900">追客实时看板</h2>
+          </div>
+          <button class="w-10 h-10 rounded-full bg-[var(--md-sys-color-surface-container-high)] flex items-center justify-center text-slate-700 hover:bg-slate-200">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          </button>
+        </div>
+
+        <div class="bg-[var(--md-sys-color-primary-container)] text-[var(--md-sys-color-on-primary-container)] p-3.5 rounded-2xl flex items-center justify-between">
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold text-xs">🚏</div>
+            <div>
+              <div class="font-semibold text-sm">深大北门 (距您 60米)</div>
+              <div class="text-xs text-blue-900/80">320路、M194路、311路均停靠</div>
+            </div>
+          </div>
+          <span class="text-xs bg-white/70 px-2.5 py-1 rounded-full font-medium">查看</span>
+        </div>
+
+        <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider pt-1">常乘线路实时动态</div>
+
+        <div class="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm">
+          <div class="flex justify-between items-start mb-2">
+            <div>
+              <div class="flex items-center gap-2">
+                <span class="text-lg font-black text-slate-900">320 路</span>
+                <span class="bg-blue-100 text-blue-800 text-[11px] px-2 py-0.5 rounded font-semibold">车来了源</span>
+              </div>
+              <div class="text-xs text-slate-500 mt-0.5">候车站: 深大北门 ➔ 恒丰工业城</div>
+            </div>
+            <div class="text-right">
+              <span class="text-base font-extrabold text-emerald-600">1 站 · 2 分钟</span>
+              <div class="text-[11px] text-slate-400">粤B·58921</div>
+            </div>
+          </div>
+          <div class="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden flex">
+            <div class="bg-emerald-500 h-full w-4/5"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- TAB 2: 路线规划 -->
+      <!-- ========================================================================= -->
+      <div id="tab-route" class="absolute inset-0 hidden">
+        <div class="absolute inset-0 bg-[#E8ECEF] overflow-hidden">
+          <svg class="w-full h-full opacity-60" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+                <path d="M 60 0 L 0 0 0 60" fill="none" stroke="#D3D9DE" stroke-width="1.5"/>
+              </pattern>
+            </defs>
+            <rect width="100%" height="100%" fill="url(#grid)" />
+            <path d="M -20 200 Q 150 250 450 180" stroke="#FFFFFF" stroke-width="18" fill="none"/>
+            <path d="M 80 -20 Q 120 400 350 900" stroke="#FFFFFF" stroke-width="22" fill="none"/>
+            <path d="M 90 280 L 115 380 L 220 450" stroke="#0061A4" stroke-width="7" stroke-linecap="round" fill="none"/>
+            <path d="M 220 450 L 240 480" stroke="#78909C" stroke-width="4" stroke-dasharray="6,6" fill="none"/>
+            <path d="M 240 480 L 310 590 L 280 680" stroke="#7C4DFF" stroke-width="7" stroke-linecap="round" fill="none"/>
+          </svg>
+
+          <div class="absolute top-[260px] left-[70px] flex flex-col items-center">
+            <div class="bg-emerald-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-md flex items-center gap-1">
+              <span class="w-1.5 h-1.5 bg-white rounded-full"></span> 碧海湾 (起点)
+            </div>
+            <div class="w-3 h-3 bg-emerald-600 rotate-45 -mt-1.5"></div>
+          </div>
+          <div class="absolute top-[435px] left-[200px] flex flex-col items-center">
+            <div class="w-7 h-7 rounded-full bg-purple-600 text-white flex items-center justify-center font-bold text-xs shadow-lg border-2 border-white">🔄</div>
+            <div class="bg-white/95 text-purple-900 text-[10px] font-bold px-1.5 py-0.5 rounded shadow mt-1">前海湾</div>
+          </div>
+          <div class="absolute top-[660px] left-[260px] flex flex-col items-center">
+            <div class="bg-rose-600 text-white text-[11px] font-bold px-2.5 py-1 rounded-full shadow-md flex items-center gap-1">🚩 高新园</div>
+            <div class="w-3 h-3 bg-rose-600 rotate-45 -mt-1.5"></div>
+          </div>
+        </div>
+
+        <div class="absolute top-12 left-4 right-4 z-20 bg-white/95 backdrop-blur-md rounded-3xl p-3.5 shadow-lg border border-slate-200/70">
+          <div class="flex items-center gap-3">
+            <div class="flex-1 space-y-2">
+              <div class="flex items-center gap-2.5">
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
+                <input type="text" value="我的位置 (深大北门)" class="w-full text-xs font-semibold bg-transparent text-slate-800 outline-none" readonly>
+              </div>
+              <div class="h-[1px] bg-slate-100 ml-5"></div>
+              <div class="flex items-center gap-2.5">
+                <span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                <input type="text" value="高新园地铁站" class="w-full text-xs font-semibold bg-transparent text-slate-800 outline-none" readonly>
+              </div>
+            </div>
+            <button class="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-slate-600">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div id="route-sheet" class="absolute left-0 right-0 bottom-16 bg-white rounded-t-3xl shadow-2xl border-t border-slate-200/80 p-5 space-y-3 z-30">
+          <div class="flex justify-between items-center">
+            <div>
+              <span class="bg-blue-600 text-white text-[11px] font-bold px-2 py-0.5 rounded-md">直达多线推荐</span>
+              <span class="text-base font-black text-slate-900 ml-2">约 15 分钟</span>
+            </div>
+            <span class="text-xs text-slate-500">3条公交均可直达</span>
+          </div>
+          <div class="flex gap-2 pt-1">
+            <button onclick="switchTab('favorites')" class="flex-1 h-11 rounded-full border border-slate-300 font-semibold text-xs text-slate-700 hover:bg-slate-50">
+              ★ 存入收藏
+            </button>
+            <button onclick="switchTab('favorites')" class="flex-1 h-11 rounded-full bg-blue-600 font-semibold text-xs text-white shadow">
+              ▷ 开启监控
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- TAB 3: 收藏中心 (极简线路号图标胶囊 + 点击无缝切换) -->
+      <!-- ========================================================================= -->
+      <div id="tab-favorites" class="absolute inset-0 hidden flex flex-col p-4 overflow-y-auto no-scrollbar space-y-3.5 pb-24">
+        <div class="flex items-center justify-between pt-1">
+          <div>
+            <h2 class="text-2xl font-bold tracking-tight text-slate-900">我的收藏</h2>
+            <span class="text-xs text-slate-500">已收纳 2 个同达方案与 1 个换乘组合</span>
+          </div>
+          <button class="px-3 py-1.5 rounded-full bg-slate-100 text-xs font-semibold text-slate-700 flex items-center gap-1 hover:bg-slate-200">
+            <span>⚙️</span> 管理
+          </button>
+        </div>
+
+        <!-- 分组 Chips -->
+        <div class="flex gap-2 overflow-x-auto no-scrollbar py-1">
+          <button class="px-3.5 py-1.5 rounded-full text-xs font-bold bg-blue-600 text-white shadow-sm whitespace-nowrap">全部 (3)</button>
+          <button class="px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 whitespace-nowrap">上班通勤 (2)</button>
+          <button class="px-3.5 py-1.5 rounded-full text-xs font-medium bg-slate-100 text-slate-700 whitespace-nowrap">回家线路 (1)</button>
+          <button class="px-3.5 py-1.5 rounded-full text-xs font-medium border border-dashed border-slate-300 text-slate-500 whitespace-nowrap">+ 新建</button>
+        </div>
+
+        <!-- ======================================================================= -->
+        <!-- ★ 重点卡片 1：多线同达卡片 (纯线路号码胶囊群，点击即换) -->
+        <!-- ======================================================================= -->
+        <div class="bg-white border-2 border-slate-200 rounded-3xl p-4 shadow-sm space-y-3">
+          <!-- 头部信息 -->
+          <div class="flex justify-between items-baseline">
+            <div>
+              <h3 class="font-black text-base text-slate-900">家 ➔ 科技园</h3>
+              <div class="text-[11px] text-slate-500 mt-0.5">深大北门 ➔ 高新园总站</div>
+            </div>
+            <span class="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-semibold">直达组合</span>
+          </div>
+
+          <!-- ★ 纯线路号码小图标胶囊群 (无多余文本，支持点击切换) -->
+          <div class="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5">
+            <!-- 号码 1: 320 (默认选中) -->
+            <button onclick="onSelectLineChip(this, '320', '1 站 · 约 2 分钟', '恒丰工业城方向', '粤B·58921', '乘 4 站', true)" 
+                    class="line-chip active px-3 py-1.5 rounded-full border border-slate-200 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap">
+              <span>🚌 320</span>
+              <span class="sub-eta text-[10px] font-semibold">1站</span>
+            </button>
+
+            <!-- 号码 2: M194 -->
+            <button onclick="onSelectLineChip(this, 'M194', '4 站 · 约 7 分钟', '布吉慢城方向', '粤B·33210', '乘 5 站', false)" 
+                    class="line-chip bg-slate-50 hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-full border border-slate-200 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap">
+              <span>🚌 M194</span>
+              <span class="sub-eta text-[10px] text-amber-600 font-semibold">4站</span>
+            </button>
+
+            <!-- 号码 3: 311 -->
+            <button onclick="onSelectLineChip(this, '311', '8 站 · 约 16 分钟', '桃源村总站方向', '粤B·98102', '乘 4 站', false)" 
+                    class="line-chip bg-slate-50 hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-full border border-slate-200 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap">
+              <span>🚌 311</span>
+              <span class="sub-eta text-[10px] text-slate-400 font-normal">8站</span>
+            </button>
+
+            <!-- 加号小按钮 -->
+            <button onclick="alert('可从同站途经线路中勾选添加新的直达线路')" class="w-7 h-7 rounded-full border border-dashed border-slate-300 flex items-center justify-center text-slate-400 hover:text-slate-600 text-xs flex-shrink-0">
+              +
+            </button>
+          </div>
+
+          <!-- 联动切换的实时信息展示区 -->
+          <div class="bg-blue-50/60 border border-blue-200/80 rounded-2xl p-3.5 transition-all duration-200" id="line-detail-panel">
+            <div class="flex justify-between items-start">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span id="current-line-name" class="text-lg font-black text-slate-900">320 路</span>
+                  <span id="fastest-tag" class="text-[10px] bg-emerald-600 text-white font-bold px-1.5 py-0.5 rounded">最快</span>
+                </div>
+                <div id="current-line-dir" class="text-xs text-slate-500 mt-0.5">开往 恒丰工业城方向</div>
+              </div>
+              <div class="text-right">
+                <div id="current-line-eta" class="text-base font-black text-emerald-600">1 站 · 约 2 分钟</div>
+                <div id="current-line-plate" class="text-[10px] text-slate-400">粤B·58921 (舒适)</div>
+              </div>
+            </div>
+            <div class="flex justify-between items-center text-[11px] text-blue-900/80 mt-2.5 pt-2 border-t border-blue-100">
+              <span id="current-line-stops">下车站: 高新园总站 (乘 4 站)</span>
+              <span class="font-bold cursor-pointer text-blue-700 hover:underline">实时轨迹 ></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- ======================================================================= -->
+        <!-- ★ 重点卡片 2：多段换乘时间轴卡片 (每程也是纯号码小标签切换) -->
+        <!-- ======================================================================= -->
+        <div class="bg-white border border-slate-200 rounded-3xl p-4 shadow-sm space-y-3">
+          <div class="flex justify-between items-center">
+            <h3 class="font-black text-base text-slate-900">晨间跨区换乘 (家 ➔ 科技园)</h3>
+            <button class="text-xs font-bold text-blue-600 hover:underline">▷ 开启追踪</button>
+          </div>
+
+          <div class="text-[11px] text-slate-500">总用时 38 分钟 · 换乘 1 次 · 步行 220米</div>
+
+          <!-- 时间轴 -->
+          <div class="relative pl-5 space-y-2.5 pt-1 text-xs">
+            <div class="absolute left-2 top-2 bottom-2 w-[2px] bg-slate-200"></div>
+
+            <!-- 起点 -->
+            <div class="relative">
+              <div class="absolute -left-5 top-1 w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
+              <span class="font-bold text-slate-800">碧海湾站 3号口</span>
+            </div>
+
+            <!-- 第 1 程 (纯号码胶囊切换: 320 vs M375) -->
+            <div class="relative bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
+              <div class="flex items-center justify-between">
+                <!-- 纯号码小切换器 -->
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-bold">1程</span>
+                  <button onclick="switchLeg1(this, '320 路', '2 站 · 4 分钟')" class="leg-chip active px-2 py-0.5 rounded-md text-[11px]">320</button>
+                  <button onclick="switchLeg1(this, 'M375 路', '5 站 · 9 分钟')" class="leg-chip bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md text-[11px]">M375</button>
+                </div>
+                <span id="leg1-eta" class="text-emerald-600 font-bold text-xs">2 站 · 4 分钟</span>
+              </div>
+              <div class="text-[10px] text-slate-500">候车站: 科技园总站 ➔ 在「高新园站」下车</div>
+            </div>
+
+            <!-- 换乘中转 -->
+            <div class="relative">
+              <div class="absolute -left-5 top-1 w-2.5 h-2.5 rounded-full bg-purple-600"></div>
+              <span class="font-bold text-purple-900">高新园地铁站 (步行 120米)</span>
+            </div>
+
+            <!-- 第 2 程 (纯号码胶囊切换: 19 vs 204) -->
+            <div class="relative bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                  <span class="text-[10px] bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded font-bold">2程</span>
+                  <button onclick="switchLeg2(this, '19 路', '5 站 · 11 分钟')" class="leg-chip active px-2 py-0.5 rounded-md text-[11px]">19</button>
+                  <button onclick="switchLeg2(this, '204 路', '7 站 · 14 分钟')" class="leg-chip bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md text-[11px]">204</button>
+                </div>
+                <span id="leg2-eta" class="text-amber-600 font-bold text-xs">5 站 · 11 分钟</span>
+              </div>
+              <div class="text-[10px] text-slate-500">候车站: 高新园地铁站 ➔ 在「腾讯大厦」下车</div>
+            </div>
+
+            <!-- 终点 -->
+            <div class="relative">
+              <div class="absolute -left-5 top-1 w-2.5 h-2.5 rounded-full bg-rose-500"></div>
+              <span class="font-bold text-slate-800">腾讯大厦</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- ========================================================================= -->
+      <!-- TAB 4: 更多 -->
+      <!-- ========================================================================= -->
+      <div id="tab-more" class="absolute inset-0 hidden flex flex-col p-4 overflow-y-auto no-scrollbar space-y-4 pb-24">
+        <h2 class="text-2xl font-bold tracking-tight text-slate-900 pt-1">设置与关于</h2>
+        <div class="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+          <div class="font-bold text-sm text-slate-800">关于追客 (BusOnRoad)</div>
+          <div class="text-xs text-slate-500 leading-relaxed">
+            极简、轻量、秒开的实时公交与通勤换乘工具。<br>
+            架构核心：MAD + Jetpack Compose + Navigation 3。
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 底部导航栏 -->
+    <div class="h-18 bg-[var(--md-sys-color-surface-container)] border-t border-slate-200/60 px-2 flex items-center justify-around z-50">
+      <button onclick="switchTab('home')" id="nav-btn-home" class="nav-btn flex flex-col items-center justify-center flex-1 py-1 group">
+        <div class="nav-indicator w-14 h-8 rounded-full flex items-center justify-center bg-blue-100 text-blue-900">
+          <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M4 16c0 .88.39 1.67 1 2.22V20c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h8v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4s-8 .5-8 4v10zm3.5 1c-.83 0-1.5-.67-1.5-1.5S6.67 14 7.5 14s1.5.67 1.5 1.5S8.33 17 7.5 17zm9 0c-.83 0-1.5-.67-1.5-1.5s.67-1.5 1.5-1.5 1.5.67 1.5 1.5-.67 1.5-1.5 1.5zm1.5-6H6V6h12v5z"/></svg>
+        </div>
+        <span class="text-[11px] font-bold text-blue-900 mt-0.5">首页</span>
+      </button>
+
+      <button onclick="switchTab('route')" id="nav-btn-route" class="nav-btn flex flex-col items-center justify-center flex-1 py-1 group">
+        <div class="nav-indicator w-14 h-8 rounded-full flex items-center justify-center text-slate-600 group-hover:bg-slate-200/60">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+        </div>
+        <span class="text-[11px] font-medium text-slate-600 mt-0.5">路线规划</span>
+      </button>
+
+      <button onclick="switchTab('favorites')" id="nav-btn-favorites" class="nav-btn flex flex-col items-center justify-center flex-1 py-1 group">
+        <div class="nav-indicator w-14 h-8 rounded-full flex items-center justify-center text-slate-600 group-hover:bg-slate-200/60">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z"/></svg>
+        </div>
+        <span class="text-[11px] font-medium text-slate-600 mt-0.5">收藏</span>
+      </button>
+
+      <button onclick="switchTab('more')" id="nav-btn-more" class="nav-btn flex flex-col items-center justify-center flex-1 py-1 group">
+        <div class="nav-indicator w-14 h-8 rounded-full flex items-center justify-center text-slate-600 group-hover:bg-slate-200/60">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h.01M12 12h.01M19 12h.01M6 12a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0zm7 0a1 1 0 11-2 0 1 1 0 012 0z"/></svg>
+        </div>
+        <span class="text-[11px] font-medium text-slate-600 mt-0.5">更多</span>
+      </button>
+    </div>
+
+    <div class="h-4 bg-[var(--md-sys-color-surface-container)] flex items-center justify-center pb-1">
+      <div class="w-32 h-1 bg-slate-400/80 rounded-full"></div>
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tabId) {
+      const tabs = ['home', 'route', 'favorites', 'more'];
+      tabs.forEach(t => {
+        const page = document.getElementById('tab-' + t);
+        const btn = document.getElementById('nav-btn-' + t);
+        const indicator = btn.querySelector('.nav-indicator');
+        const label = btn.querySelector('span');
+
+        if (t === tabId) {
+          page.classList.remove('hidden');
+          indicator.className = 'nav-indicator w-14 h-8 rounded-full flex items-center justify-center bg-blue-100 text-blue-900 font-bold';
+          label.className = 'text-[11px] font-bold text-blue-900 mt-0.5';
+        } else {
+          page.classList.add('hidden');
+          indicator.className = 'nav-indicator w-14 h-8 rounded-full flex items-center justify-center text-slate-600 group-hover:bg-slate-200/60';
+          label.className = 'text-[11px] font-medium text-slate-600 mt-0.5';
+        }
+      });
+    }
+
+    // ★ 点击纯线路号码胶囊切换
+    function onSelectLineChip(btn, lineName, eta, direction, plate, stops, isFastest) {
+      document.querySelectorAll('.line-chip').forEach(c => {
+        c.className = 'line-chip bg-slate-50 hover:bg-slate-100 text-slate-700 px-3 py-1.5 rounded-full border border-slate-200 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap';
+      });
+      btn.className = 'line-chip active px-3 py-1.5 rounded-full border border-slate-200 text-xs font-bold flex items-center gap-1.5 whitespace-nowrap';
+
+      document.getElementById('current-line-name').innerText = lineName + ' 路';
+      document.getElementById('current-line-dir').innerText = '开往 ' + direction;
+      document.getElementById('current-line-eta').innerText = eta;
+      document.getElementById('current-line-plate').innerText = plate;
+      document.getElementById('current-line-stops').innerText = '下车站: 高新园总站 (' + stops + ')';
+
+      const tag = document.getElementById('fastest-tag');
+      if (isFastest) {
+        tag.classList.remove('hidden');
+      } else {
+        tag.classList.add('hidden');
+      }
+    }
+
+    // 换乘第1程号码切换
+    function switchLeg1(btn, lineName, eta) {
+      btn.parentElement.querySelectorAll('.leg-chip').forEach(c => c.className = 'leg-chip bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md text-[11px]');
+      btn.className = 'leg-chip active px-2 py-0.5 rounded-md text-[11px]';
+      document.getElementById('leg1-eta').innerText = eta;
+    }
+
+    // 换乘第2程号码切换
+    function switchLeg2(btn, lineName, eta) {
+      btn.parentElement.querySelectorAll('.leg-chip').forEach(c => c.className = 'leg-chip bg-white border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md text-[11px]');
+      btn.className = 'leg-chip active px-2 py-0.5 rounded-md text-[11px]';
+      document.getElementById('leg2-eta').innerText = eta;
+    }
+  </script>
+</body>
+</html>

@@ -1,5 +1,6 @@
 package com.trackr.ui.screens.favoritesgroup.components
 
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -19,6 +20,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -41,14 +44,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.trackr.BuildConfig
 import com.trackr.data.remote.amap.AmapTipItem
 import com.trackr.data.remote.amap.AmapTransitSchemeResult
+import com.trackr.util.SignatureUtils
 
 /**
- * 高德智能公交路径规划弹窗
+ * 智能公交路径规划弹窗（支持高德云端规划与公交真实站点直达双引擎）
  */
 @Composable
 fun AmapRoutePlanDialog(
@@ -62,6 +72,7 @@ fun AmapRoutePlanDialog(
     onAddScheme: (AmapTransitSchemeResult) -> Unit,
     onStartTrackingScheme: (AmapTransitSchemeResult) -> Unit,
     onDismiss: () -> Unit,
+    planErrorMessage: String? = null,
     customApiKey: String? = null,
     onSaveCustomApiKey: ((String) -> Unit)? = null,
     onClearOriginTips: () -> Unit = { onSearchOrigin("") },
@@ -155,17 +166,44 @@ fun AmapRoutePlanDialog(
             }
         },
         text = {
+            val isKeyConfigured = !customApiKey.isNullOrBlank() || BuildConfig.AMAP_ANDROID_KEY.isNotBlank()
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(440.dp)
+                    .height(480.dp)
             ) {
-                Text(
-                    text = "输入起终点一键规划换乘路线组（支持高德云端规划与实时公交双引擎）：",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(10.dp))
+                // 当前模式指示器
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (isKeyConfigured) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                            else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            RoundedCornerShape(6.dp)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = if (isKeyConfigured) "模式：高德云端规划 (支持复杂换乘与步行)" else "模式：实时公交站点匹配 (免 Key)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isKeyConfigured) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    if (!isKeyConfigured && onSaveCustomApiKey != null) {
+                        Text(
+                            text = "配置 Key >",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.clickable {
+                                inputKey = customApiKey.orEmpty()
+                                showKeyDialog = true
+                            }
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // 起点输入
                 OutlinedTextField(
@@ -306,11 +344,41 @@ fun AmapRoutePlanDialog(
                             color = MaterialTheme.colorScheme.onPrimary
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("高德智能计算换乘方案中…")
+                        Text(if (isKeyConfigured) "高德智能计算换乘方案中…" else "本地实时公交检索直达方案中…")
                     } else {
                         Icon(imageVector = Icons.AutoMirrored.Filled.AltRoute, contentDescription = null)
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("开始换乘规划")
+                    }
+                }
+
+                // 错误提示卡片
+                if (!planErrorMessage.isNullOrBlank() && plannedSchemes.isEmpty() && !isPlanning) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f)
+                        ),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = planErrorMessage,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
                     }
                 }
 
@@ -404,25 +472,159 @@ fun AmapRoutePlanDialog(
     )
 
     if (showKeyDialog && onSaveCustomApiKey != null) {
+        val context = LocalContext.current
+        val clipboardManager = LocalClipboardManager.current
+        val currentPackageName = remember(context) { SignatureUtils.getPackageName(context) }
+        val currentSha1 = remember(context) { SignatureUtils.getSigningCertificateSha1(context) }
+
         AlertDialog(
             onDismissRequest = { showKeyDialog = false },
-            title = { Text("高德 Web 服务 Key 设置") },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("高德 Android Key 设置 (自备 Key)")
+                }
+            },
             text = {
-                Column {
-                    Text(
-                        text = "高德开放平台为个人开发者提供每日免费云端公交/地铁规划额度。填入您的专属 Web 服务 Key 即可启用高德全量换乘规划；若留空则优先使用本地实时公交直达匹配。",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    OutlinedTextField(
-                        value = inputKey,
-                        onValueChange = { inputKey = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("高德 Web 服务 Key") },
-                        placeholder = { Text("粘贴 32 位 Web 服务 Key") },
-                        singleLine = true
-                    )
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    item {
+                        Text(
+                            text = "为保障开源安全并不受公用 Key 严格 QPS 限流影响，本项目采用用户自备 Key 机制。请前往高德开放平台创建应用，添加 Key 并选择【Android 平台】。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // 包名展示与复制
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "应用包名 (PackageName)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                    Text(
+                                        text = currentPackageName,
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(currentPackageName))
+                                        Toast.makeText(context, "包名已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                                    },
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "复制包名",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // 证书 SHA-1 展示与复制
+                    item {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            ),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "安全码 SHA-1 (当前运行签名)",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                    Text(
+                                        text = currentSha1.ifBlank { "未获取到证书指纹" },
+                                        style = MaterialTheme.typography.bodySmall.copy(
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 11.sp
+                                        ),
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                IconButton(
+                                    onClick = {
+                                        if (currentSha1.isNotBlank()) {
+                                            clipboardManager.setText(AnnotatedString(currentSha1))
+                                            Toast.makeText(context, "SHA-1 已复制到剪贴板", Toast.LENGTH_SHORT).show()
+                                        }
+                                    },
+                                    enabled = currentSha1.isNotBlank(),
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.ContentCopy,
+                                        contentDescription = "复制 SHA-1",
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    item {
+                        Text(
+                            text = "提示：开发者亦可在 local.properties 中配置 AMAP_ANDROID_KEY=你的Key 自动编译注入。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+
+                    item {
+                        OutlinedTextField(
+                            value = inputKey,
+                            onValueChange = { inputKey = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            label = { Text("高德 Android Key") },
+                            placeholder = { Text("粘贴 32 位 Android Key") },
+                            singleLine = true
+                        )
+                    }
                 }
             },
             confirmButton = {
@@ -432,12 +634,25 @@ fun AmapRoutePlanDialog(
                         showKeyDialog = false
                     }
                 ) {
-                    Text("保存")
+                    Text("保存生效")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showKeyDialog = false }) {
-                    Text("取消")
+                Row {
+                    if (inputKey.isNotBlank()) {
+                        TextButton(
+                            onClick = {
+                                inputKey = ""
+                                onSaveCustomApiKey("")
+                                showKeyDialog = false
+                            }
+                        ) {
+                            Text("清空")
+                        }
+                    }
+                    TextButton(onClick = { showKeyDialog = false }) {
+                        Text("取消")
+                    }
                 }
             }
         )

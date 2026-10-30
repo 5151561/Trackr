@@ -20,6 +20,9 @@ java {
     }
 }
 
+val amapAndroidKey = System.getenv("AMAP_ANDROID_KEY")
+    ?: localProperties.getProperty("AMAP_ANDROID_KEY", "")
+
 android {
     namespace = "com.trackr"
     compileSdk = 37
@@ -30,6 +33,8 @@ android {
         targetSdk = 36
         versionCode = 3
         versionName = "0.0.3"
+
+        buildConfigField("String", "AMAP_ANDROID_KEY", "\"$amapAndroidKey\"")
 
         vectorDrawables {
             useSupportLibrary = true
@@ -93,6 +98,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     packaging {
@@ -123,6 +129,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.viewmodel.navigation3)
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.okhttp)
+    implementation(libs.amap.search)
 
     testImplementation(libs.junit)
     testImplementation(libs.org.json)

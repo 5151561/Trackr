@@ -423,6 +423,7 @@ fun FavoritesGroupScreen(
             destTips = amapDestTips,
             plannedSchemes = plannedSchemes,
             isPlanning = isPlanningRoute,
+            planErrorMessage = planError,
             customApiKey = customAmapApiKey,
             onSaveCustomApiKey = { viewModel.saveCustomAmapApiKey(it) },
             onSearchOrigin = { viewModel.searchOriginTips(it) },
