@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -43,6 +44,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -79,6 +81,7 @@ import com.trackr.ui.screens.linedetail.LineDetailViewModel
 import com.trackr.ui.screens.more.AboutScreen
 import com.trackr.ui.screens.more.MoreScreen
 import com.trackr.ui.screens.more.MoreViewModel
+import com.trackr.ui.screens.routeplan.AmapMapSession
 import com.trackr.ui.screens.routeplan.RoutePlanScreen
 import com.trackr.ui.screens.search.SearchScreen
 import com.trackr.ui.screens.stopdetail.StopDetailScreen
@@ -168,6 +171,16 @@ fun TrackrNavApp(
     onDeepLinkConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
+
+    // 地图实例托管到 Activity 级会话：切走 tab 只把地图从窗口摘下，回来复用同一实例，
+    // 不会重新初始化 GL / 重新拉瓦片 / 丢失相机位置。
+    val mapSession = remember(context) {
+        (context as? Activity)?.let { AmapMapSession(it) }
+    }
+    DisposableEffect(mapSession) {
+        onDispose { mapSession?.destroy() }
+    }
+
     val homeBackStack = rememberNavBackStack(ScreenKey.Home)
     val routePlanBackStack = rememberNavBackStack(ScreenKey.RoutePlan)
     val groupBackStack = rememberNavBackStack(ScreenKey.FavoritesGroup)
@@ -532,6 +545,7 @@ fun TrackrNavApp(
                 entry<ScreenKey.RoutePlan> {
                     RoutePlanScreen(
                         viewModel = favoritesGroupViewModel,
+                        mapSession = mapSession,
                         onNavigateToFavorites = dropUnlessResumed {
                             selectedTab = "group"
                         },

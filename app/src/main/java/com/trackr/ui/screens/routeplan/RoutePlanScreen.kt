@@ -1,6 +1,7 @@
 package com.trackr.ui.screens.routeplan
 
 import android.os.Build
+import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -118,13 +119,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.amap.api.maps.AMap
 import com.amap.api.maps.CameraUpdateFactory
-import com.amap.api.maps.TextureMapView
 import com.amap.api.maps.model.LatLng
 import com.amap.api.maps.model.LatLngBounds
 import com.amap.api.maps.model.MarkerOptions
-import com.amap.api.maps.model.MyLocationStyle
 import com.amap.api.maps.model.PolylineOptions
 import com.trackr.BuildConfig
 import com.trackr.data.remote.amap.AmapSdkManager
@@ -153,6 +151,7 @@ internal fun isTestEnvironment(): Boolean =
 @Composable
 fun RoutePlanScreen(
     viewModel: FavoritesGroupViewModel,
+    mapSession: AmapMapSession? = null,
     onNavigateToFavorites: () -> Unit = {},
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit = { _, _, _, _, _, _ -> },
     modifier: Modifier = Modifier,
@@ -171,6 +170,9 @@ fun RoutePlanScreen(
     val favoriteGroups by viewModel.favoriteGroups.collectAsStateWithLifecycle()
     val currentCity by viewModel.currentCity.collectAsStateWithLifecycle()
     val userLocationWgs by viewModel.userLocation.collectAsStateWithLifecycle()
+
+    // 地图跟随应用主题：深色时切高德夜间样式，避免夜里一张白底图刺眼
+    val isDarkTheme = isSystemInDarkTheme()
 
     // 系统定位是 WGS-84，高德地图需要 GCJ-02；两者在国内相差 300~600 米
     val myLocationGcj = remember(userLocationWgs) {
@@ -268,7 +270,8 @@ fun RoutePlanScreen(
     var showMapDiagnostics by remember { mutableStateOf(false) }
 
     val fallbackReason = mapUnavailableReason ?: mapRuntimeError
-    val useFallbackMap = useVectorMapFallback || fallbackReason != null
+    // mapSession 为 null（如测试环境）时直接走内置示意图，避免依赖真实地图实例
+    val useFallbackMap = useVectorMapFallback || mapSession == null || fallbackReason != null
 
     Box(modifier = modifier.fillMaxSize()) {
         // 1. 全屏矢量地图视窗 (真实高德 3D 矢量地图 / 降级 Canvas 示意图)
@@ -296,8 +299,10 @@ fun RoutePlanScreen(
             }
         } else {
             AmapRealVectorMapView(
+                session = mapSession,
                 selectedScheme = currentScheme,
                 customApiKey = customApiKey,
+                darkMode = isDarkTheme,
                 myLocation = myLocationGcj,
                 cityCenter = cityCenterLatLng,
                 recenterTrigger = recenterTrigger,
@@ -1952,19 +1957,26 @@ fun MapDiagnosticsDialog(
 }
 
 /**
- * 真实高德 3D 矢量地图视图 (TextureMapView)
+ * 真实高德 3D 矢量地图视图（TextureMapView），实例由 [AmapMapSession] 托管。
  *
- * @param myLocation 当前设备定位，**必须已转换为 GCJ-02**；用于无方案时的取景，null 表示暂无定位
+ * 地图实例不随本 composable 创建 / 销毁：切走 tab 只是把容器从窗口摘下（onPause），
+ * 回来时同一实例重新挂上（onResume），所以不会重新初始化、也不会丢相机位置。
+ *
+ * @param session Activity 级地图会话，负责实例复用与生命周期
+ * @param myLocation 当前设备定位，**必须已转换为 GCJ-02**；无方案时用于取景，null 表示暂无定位
  * @param cityCenter 当前城市中心（GCJ-02）；定位不可用时的取景兜底，null 时保持相机不动
- * @param retryToken 变化时强制重建地图实例（Key 变更、用户点“重试”）
+ * @param darkMode 是否深色主题，决定地图是否使用夜间样式
+ * @param retryToken 变化时丢弃当前实例并重建（用户点“重试”）
  * @param onMapLoaded 底图首次就绪回调
  * @param onLoadTimeout 底图超时未就绪回调（软失败，外层以浮层提示，不销毁地图）
  * @param onRuntimeError 地图实例创建失败（如设备 ABI 缺 arm 库、原生库加载失败）回调，外层切换为矢量示意图
  */
 @Composable
 fun AmapRealVectorMapView(
+    session: AmapMapSession,
     selectedScheme: AmapTransitSchemeResult?,
     customApiKey: String?,
+    darkMode: Boolean = false,
     myLocation: LatLng? = null,
     cityCenter: LatLng? = null,
     recenterTrigger: Int = 0,
@@ -1974,83 +1986,46 @@ fun AmapRealVectorMapView(
     onLoadTimeout: (String) -> Unit = {},
     onRuntimeError: (String) -> Unit = {}
 ) {
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val aMap = session.aMapState.value
+    val isMapLoaded = session.isLoadedState.value
+    val runtimeError = session.runtimeErrorState.value
 
-    var aMapInstance by remember { mutableStateOf<AMap?>(null) }
-    var mapViewInstance by remember { mutableStateOf<TextureMapView?>(null) }
-    var isMapLoaded by remember(customApiKey, retryToken) { mutableStateOf(false) }
-    // onCreate 必须等 view 真正挂到 window 之后才能调：
-    // 在 AndroidView.factory 里调用时 view 还没有 parent、没有 windowToken，
-    // 高德 SDK 的初始化会卡在"等窗口"状态——引擎能读相机，但底图永远不渲染、
-    // onMapLoaded 永不回调、所有 moveCamera 被静默丢弃（表现就是黑屏）。
-    var mapCreated by remember(customApiKey, retryToken) { mutableStateOf(false) }
+    AndroidView(
+        factory = { _ ->
+            // 容器可能是从上一个页面"摘下"的，先确保它没有残留父节点，否则 addView 会抛异常
+            (session.container.parent as? ViewGroup)?.removeView(session.container)
+            // Key 必须在 SDK 创建地图实例前注入
+            session.updateKey(customApiKey)
+            session.container
+        },
+        modifier = modifier
+    )
 
-    key(customApiKey, retryToken) {
-        AndroidView(
-            factory = { ctx ->
-                // 每次（重）建地图前强制重新注入 Key：高德 SDK 只在创建地图实例时读取一次
-                AmapSdkManager.applyApiKey(ctx, customApiKey, force = true)
-                runCatching {
-                    TextureMapView(ctx).apply {
-                        mapViewInstance = this
-                        addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
-                            override fun onViewAttachedToWindow(v: android.view.View) {
-                                // post 一帧，等窗口/尺寸稳定后再走 SDK 生命周期，与官方 Demo 一致
-                                v.post {
-                                    if (mapCreated) return@post
-                                    runCatching {
-                                        onCreate(null)
-                                        val aMap = map
-                                        aMapInstance = aMap
+    LaunchedEffect(customApiKey) { session.updateKey(customApiKey) }
+    LaunchedEffect(darkMode) { session.setDarkMode(darkMode) }
 
-                                        aMap.uiSettings.apply {
-                                            isZoomControlsEnabled = false
-                                            isCompassEnabled = false
-                                            isScaleControlsEnabled = true
-                                            isMyLocationButtonEnabled = false
-                                        }
+    // retryToken 来自 rememberSaveable，首次组合可能带着历史值，只在真正变化时重建
+    var handledRetryToken by remember { mutableIntStateOf(retryToken) }
+    LaunchedEffect(retryToken) {
+        if (retryToken != handledRetryToken) {
+            handledRetryToken = retryToken
+            session.retry()
+        }
+    }
 
-                                        aMap.setOnMapLoadedListener {
-                                            isMapLoaded = true
-                                            runCatching {
-                                                aMap.myLocationStyle = MyLocationStyle()
-                                                    .myLocationType(MyLocationStyle.LOCATION_TYPE_SHOW)
-                                                    .interval(4000L)
-                                                    .showMyLocation(true)
-                                                aMap.isMyLocationEnabled = true
-                                            }
-                                        }
-
-                                        mapCreated = true
-                                    }
-                                }
-                            }
-
-                            override fun onViewDetachedFromWindow(v: android.view.View) = Unit
-                        })
-                    }
-                }.getOrElse { throwable ->
-                    // 原生库加载失败（常见于 x86/x86_64 模拟器）会在这里抛出，交由外层降级。
-                    // 延迟到下一帧再写状态，避免在 AndroidView factory 组合过程中直接修改上层状态。
-                    val message = "高德地图初始化失败：${throwable.javaClass.simpleName}。" +
-                        "3dmap SDK 仅内置 arm64-v8a / armeabi-v7a 原生库，模拟器请使用 arm 架构镜像。"
-                    android.os.Handler(android.os.Looper.getMainLooper()).post { onRuntimeError(message) }
-                    android.view.View(ctx)
-                }
-            },
-            modifier = modifier
-        )
+    LaunchedEffect(runtimeError) {
+        runtimeError?.let { onRuntimeError(it) }
     }
 
     // 底图长时间未就绪：多为 Key 未绑定当前包名 / SHA-1（高德鉴权失败时不会抛异常，只是不出图）
-    LaunchedEffect(mapViewInstance, isMapLoaded, retryToken) {
+    LaunchedEffect(aMap, isMapLoaded) {
+        if (aMap == null) return@LaunchedEffect
         if (isMapLoaded) {
             onMapLoaded()
             return@LaunchedEffect
         }
-        if (mapViewInstance == null) return@LaunchedEffect
         delay(15_000)
-        if (!isMapLoaded) {
+        if (!session.isLoadedState.value) {
             onLoadTimeout(
                 "底图 15 秒内未加载完成。最常见原因是 Key 与当前运行环境不匹配：" +
                     "包名（${BuildConfig.APPLICATION_ID}）或签名 SHA-1 与高德控制台填写的不一致，" +
@@ -2059,69 +2034,10 @@ fun AmapRealVectorMapView(
         }
     }
 
-    // 幂等保护：Activity 销毁时 ON_DESTROY 与 onDispose 都会触发 onDestroy，重复调用会破坏高德内部状态；
-    // 重复 onResume/onPause 同理。以 mapViewInstance 为 key，地图实例重建（如切换 Key）时状态随之重建。
-    val isMapDestroyed = remember(mapViewInstance) { mutableStateOf(false) }
-    val isMapResumed = remember(mapViewInstance) { mutableStateOf(false) }
-
-    DisposableEffect(lifecycleOwner, mapViewInstance, mapCreated) {
-        val mapView = mapViewInstance ?: return@DisposableEffect onDispose {}
-        // onCreate 还没执行（view 尚未 attach），此时不能 onResume
-        if (!mapCreated) return@DisposableEffect onDispose {}
-
-        fun resumeOnce() {
-            if (!isMapDestroyed.value && !isMapResumed.value) {
-                isMapResumed.value = true
-                mapView.onResume()
-            }
-        }
-
-        fun pauseOnce() {
-            if (isMapResumed.value) {
-                isMapResumed.value = false
-                mapView.onPause()
-            }
-        }
-
-        fun destroyOnce() {
-            if (!isMapDestroyed.value) {
-                isMapDestroyed.value = true
-                isMapResumed.value = false
-                mapView.onDestroy()
-            }
-        }
-
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> resumeOnce()
-                Lifecycle.Event.ON_PAUSE -> pauseOnce()
-                Lifecycle.Event.ON_DESTROY -> destroyOnce()
-                else -> Unit
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        // 关键：切到路线规划 Tab 时 Activity 早已处于 RESUMED 状态，
-        // 观察者收不到 ON_RESUME 事件，必须主动补一次 onResume，
-        // 否则 TextureMapView 始终处于 pause 状态，底图不会渲染（表现为白屏/灰屏）。
-        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
-            resumeOnce()
-        }
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            pauseOnce()
-            destroyOnce()
-        }
-    }
-
     // 绘制层：只在「方案变化 / 用户点重置」时重绘，不能把 myLocation 作为 key——
     // 定位每 60 秒刷新一次，否则用户拖动的视角会被反复 fit bounds 拉回去。
-    //
-    // isMapLoaded 必须在 key 里：高德在 GL 引擎尚未创建时收到相机动画消息会在
-    // AMapDelegateImp 里抛 NPE（GLMapEngine.isInMapAnimation on null），
-    // 表现为偶发黑屏。所以底图首帧就绪前不做 clear / animateCamera。
-    LaunchedEffect(selectedScheme, aMapInstance, isMapLoaded, recenterTrigger) {
-        val aMap = aMapInstance ?: return@LaunchedEffect
-        if (!isMapLoaded) return@LaunchedEffect
+    LaunchedEffect(selectedScheme, aMap, isMapLoaded, recenterTrigger) {
+        if (aMap == null || !isMapLoaded) return@LaunchedEffect
         aMap.clear()
 
         if (selectedScheme != null) {
@@ -2211,30 +2127,25 @@ fun AmapRealVectorMapView(
         }
     }
 
-    // 取景层：负责"首次进入/点击重置"时的相机位置。
-    // 优先级：我的定位 > 当前城市中心 > 不动（绝不硬编码某个城市，否则外地用户会"被搬去"别的城市）。
-    var hasCenteredOnce by remember(aMapInstance) { mutableStateOf(false) }
-    var centeredWithMyLocation by remember(aMapInstance) { mutableStateOf(false) }
-    var handledRecenterTrigger by remember(aMapInstance) { mutableIntStateOf(0) }
-    LaunchedEffect(aMapInstance, isMapLoaded, selectedScheme, myLocation, cityCenter, recenterTrigger) {
-        val aMap = aMapInstance ?: return@LaunchedEffect
-        // 底图未就绪时调 animateCamera 会让高德内部 GLMapEngine 空指针，等首帧后再取景
-        if (!isMapLoaded) return@LaunchedEffect
+    // 取景层：负责"首次进入 / 点击重置"时的相机位置。
+    // 优先级：我的定位 > 当前城市中心 > 不动（绝不硬编码某个城市，否则外地用户会"被搬去"别的地方）。
+    LaunchedEffect(aMap, isMapLoaded, selectedScheme, myLocation, cityCenter, recenterTrigger) {
+        if (aMap == null || !isMapLoaded) return@LaunchedEffect
         // 有算路方案时由方案自己 fit bounds，不抢相机
         if (selectedScheme != null) {
-            hasCenteredOnce = true
-            handledRecenterTrigger = recenterTrigger
+            session.hasCenteredOnce = true
+            session.handledRecenterTrigger = recenterTrigger
             return@LaunchedEffect
         }
-        val isUserRecenter = recenterTrigger != handledRecenterTrigger
+        val isUserRecenter = recenterTrigger != session.handledRecenterTrigger
         // 定位迟到（先按城市中心取景，之后才拿到 GPS）时补一次跟随
-        val isFirstUserFix = myLocation != null && !centeredWithMyLocation
-        if (hasCenteredOnce && !isUserRecenter && !isFirstUserFix) return@LaunchedEffect
+        val isFirstUserFix = myLocation != null && !session.centeredWithMyLocation
+        if (session.hasCenteredOnce && !isUserRecenter && !isFirstUserFix) return@LaunchedEffect
 
         val target = myLocation ?: cityCenter ?: return@LaunchedEffect
-        hasCenteredOnce = true
-        handledRecenterTrigger = recenterTrigger
-        if (myLocation != null) centeredWithMyLocation = true
+        session.hasCenteredOnce = true
+        session.handledRecenterTrigger = recenterTrigger
+        if (myLocation != null) session.centeredWithMyLocation = true
         aMap.animateCamera(
             CameraUpdateFactory.newLatLngZoom(target, if (myLocation != null) 15f else 12f)
         )
