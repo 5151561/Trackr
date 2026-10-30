@@ -2,7 +2,7 @@
   "versionCode": 3,
   "versionName": "0.0.3",
   "minSupportedVersionCode": 1,
-  "changelog": "chore: 将发布版本调整为 0.0.3",
+  "changelog": "## 新增\n- 小米与 OPPO 的实时通知支持服务\n- 关于页面增加新版本检测与更新日志提醒功能\n- 规避安全扫描仿冒检测，开启 R8 混淆并增加定位权限前置披露弹窗\n\n## 修复与优化\n- 移除聚合模式，简化数据源管理\n- 修复因 cityID 冲突导致的崩溃\n- 修复城市来源显示与实时通知数据映射问题\n- 修复无车牌车辆不显示 hash 码\n- 优化提前到站提醒选项大小\n- 消除小程序 ID 相关警告",
   "downloadUrl": "https://github.com/5151561/Trackr/releases/tag/v0.0.3",
   "publishTime": "2026-10-30",
   "forceUpdate": false
