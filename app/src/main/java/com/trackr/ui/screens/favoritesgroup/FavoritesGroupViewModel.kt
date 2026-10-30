@@ -6,7 +6,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.trackr.BuildConfig
 import com.trackr.TrackrApp
-import com.trackr.data.parser.MapShareParser
 import com.trackr.data.provider.TransitProviderCoordinator
 import com.trackr.data.provider.model.LineDetailRequest
 import com.trackr.data.provider.model.StopDetailRequest
@@ -18,8 +17,12 @@ import com.trackr.data.remote.amap.AmapTransitSchemeResult
 import com.trackr.data.repository.IRouteGroupRepository
 import com.trackr.data.repository.ITransitRepository
 import com.trackr.domain.math.RouteProjectionMath
+import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.CandidateLine
+import com.trackr.domain.model.CandidateLineRealtimeInfo
+import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.EngineMode
+import com.trackr.domain.model.FavoriteGroup
 import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.GroupTrackingSessionState
 import com.trackr.domain.model.NearbyStop
@@ -27,7 +30,9 @@ import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
 import com.trackr.service.TransferAutoSwitchManager
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -40,6 +45,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.util.UUID
+import kotlin.math.roundToInt
 
 /**
  * 路线组与换乘追踪 ViewModel
@@ -52,6 +58,7 @@ class FavoritesGroupViewModel(
     private val amapApiClient: AmapTransitApiClient = AmapTransitApiClient(okHttpClient ?: OkHttpClient()),
     private val amapSdkService: AmapSdkTransitService? = runCatching { AmapSdkTransitService(TrackrApp.instance) }.getOrNull(),
     private val prefs: SharedPreferences? = runCatching { TrackrApp.instance.getSharedPreferences("trackr_prefs", Context.MODE_PRIVATE) }.getOrNull(),
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     enableAutoRefresh: Boolean = true
 ) : ViewModel() {
 
@@ -62,13 +69,26 @@ class FavoritesGroupViewModel(
     private val _selectedCategory = MutableStateFlow<GroupCategory?>(null)
     val selectedCategory: StateFlow<GroupCategory?> = _selectedCategory.asStateFlow()
 
+    private val _selectedFavoriteGroupId = MutableStateFlow<String?>(null)
+    val selectedFavoriteGroupId: StateFlow<String?> = _selectedFavoriteGroupId.asStateFlow()
+
     val groups: StateFlow<List<TransitGroup>> = groupRepository.groups
+    val favoriteGroups: StateFlow<List<FavoriteGroup>> = groupRepository.favoriteGroups
 
     val filteredGroups: StateFlow<List<TransitGroup>> = combine(
         groups,
-        selectedCategory
-    ) { allGroups, category ->
-        if (category == null) allGroups else allGroups.filter { it.category == category }
+        selectedCategory,
+        selectedFavoriteGroupId
+    ) { allGroups, category, favGroupId ->
+        when {
+            favGroupId != null -> allGroups.filter {
+                it.customGroupId == favGroupId ||
+                    (favGroupId == "commute" && it.category == GroupCategory.COMMUTE) ||
+                    (favGroupId == "home" && (it.category == GroupCategory.COMMUTE || it.name.contains("家")))
+            }
+            category != null -> allGroups.filter { it.category == category }
+            else -> allGroups
+        }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, groups.value)
 
     val activeGroupSession: StateFlow<GroupTrackingSessionState?> =
@@ -77,14 +97,37 @@ class FavoritesGroupViewModel(
     private val _legRealtimeSummary = MutableStateFlow<Map<String, String>>(emptyMap())
     val legRealtimeSummary: StateFlow<Map<String, String>> = _legRealtimeSummary.asStateFlow()
 
-    private val _clipboardSharePrompt = MutableStateFlow<String?>(null)
-    val clipboardSharePrompt: StateFlow<String?> = _clipboardSharePrompt.asStateFlow()
+    private val _candidateRealtimeMap = MutableStateFlow<Map<String, CandidateLineRealtimeInfo>>(emptyMap())
+    val candidateRealtimeMap: StateFlow<Map<String, CandidateLineRealtimeInfo>> = _candidateRealtimeMap.asStateFlow()
 
-    private val _isImporting = MutableStateFlow(false)
-    val isImporting: StateFlow<Boolean> = _isImporting.asStateFlow()
+    private val _userSelectedLines = MutableStateFlow<Map<String, String>>(emptyMap())
 
-    private val _importErrorMessage = MutableStateFlow<String?>(null)
-    val importErrorMessage: StateFlow<String?> = _importErrorMessage.asStateFlow()
+    val selectedLineKeys: StateFlow<Map<String, String>> = combine(
+        groups,
+        _candidateRealtimeMap,
+        _userSelectedLines
+    ) { groupList, realtimeMap, userSelected ->
+        val result = mutableMapOf<String, String>()
+        for (group in groupList) {
+            for (leg in group.legs) {
+                val legKey = "${group.id}_${leg.legIndex}"
+                val userChoice = userSelected[legKey]
+                if (userChoice != null && leg.candidateLines.any { it.lineId == userChoice }) {
+                    result[legKey] = userChoice
+                } else {
+                    val fastestLine = leg.candidateLines
+                        .mapNotNull { line ->
+                            val info = realtimeMap["${group.id}_${leg.legIndex}_${line.lineId}"]
+                                ?: realtimeMap["${line.lineId}_${line.toStopOrder}"]
+                            if (info != null && info.stopsAway < Int.MAX_VALUE) line to info.stopsAway else null
+                        }
+                        .minByOrNull { it.second }?.first
+                    result[legKey] = fastestLine?.lineId ?: leg.primaryLine?.lineId.orEmpty()
+                }
+            }
+        }
+        result
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
     private val _amapOriginTips = MutableStateFlow<List<AmapTipItem>>(emptyList())
     val amapOriginTips: StateFlow<List<AmapTipItem>> = _amapOriginTips.asStateFlow()
@@ -110,7 +153,6 @@ class FavoritesGroupViewModel(
         runCatching {
             AmapSdkManager.applyApiKey(TrackrApp.instance, _customAmapApiKey.value)
         }
-        // 当分组列表加载完毕后，预热刷新一次各分组首程线路的实时到站状态
         if (enableAutoRefresh) {
             viewModelScope.launch {
                 groups.collect { groupList ->
@@ -122,6 +164,49 @@ class FavoritesGroupViewModel(
 
     fun selectCategory(category: GroupCategory?) {
         _selectedCategory.value = category
+        _selectedFavoriteGroupId.value = null
+    }
+
+    fun selectFavoriteGroup(groupId: String?) {
+        _selectedFavoriteGroupId.value = groupId
+        _selectedCategory.value = null
+    }
+
+    fun selectCandidateLine(groupId: String, legIndex: Int, lineId: String) {
+        _userSelectedLines.value = _userSelectedLines.value + ("${groupId}_${legIndex}" to lineId)
+    }
+
+    fun createFavoriteGroup(name: String) {
+        viewModelScope.launch {
+            groupRepository.createFavoriteGroup(name)
+        }
+    }
+
+    fun renameFavoriteGroup(groupId: String, newName: String) {
+        viewModelScope.launch {
+            groupRepository.renameFavoriteGroup(groupId, newName)
+        }
+    }
+
+    fun deleteFavoriteGroup(groupId: String) {
+        viewModelScope.launch {
+            groupRepository.deleteFavoriteGroup(groupId)
+            if (_selectedFavoriteGroupId.value == groupId) {
+                _selectedFavoriteGroupId.value = null
+            }
+        }
+    }
+
+    fun reorderFavoriteGroups(groupIds: List<String>) {
+        viewModelScope.launch {
+            groupRepository.reorderFavoriteGroups(groupIds)
+        }
+    }
+
+    fun addCandidateLineToLeg(groupId: String, legIndex: Int, candidateLine: CandidateLine) {
+        viewModelScope.launch {
+            groupRepository.addCandidateLineToLeg(groupId, legIndex, candidateLine)
+        }
     }
 
     fun saveCustomAmapApiKey(key: String) {
@@ -131,58 +216,6 @@ class FavoritesGroupViewModel(
         runCatching {
             AmapSdkManager.applyApiKey(TrackrApp.instance, trimmed)
         }
-    }
-
-    /**
-     * 探测剪贴板内容是否包含高德/百度地图分享路线
-     */
-    fun checkClipboardForShareContent(clipboardText: String?) {
-        if (clipboardText.isNullOrBlank()) return
-        if (clipboardText == _clipboardSharePrompt.value) return
-        if (MapShareParser.isMapShareContent(clipboardText)) {
-            _clipboardSharePrompt.value = clipboardText
-        }
-    }
-
-    fun dismissClipboardPrompt() {
-        _clipboardSharePrompt.value = null
-    }
-
-    /**
-     * 导入地图分享内容（纯文本或 URL 异步重定向解析并对齐真实线路）
-     */
-    fun importMapShare(rawText: String, onComplete: ((Boolean) -> Unit)? = null) {
-        viewModelScope.launch {
-            _isImporting.value = true
-            _importErrorMessage.value = null
-            try {
-                val city = transitRepository.selectedCity.value
-                val importedGroup = MapShareParser.parseAndAlign(
-                    text = rawText,
-                    defaultCity = city,
-                    coordinator = coordinator,
-                    client = okHttpClient
-                )
-
-                if (importedGroup != null && importedGroup.legs.isNotEmpty()) {
-                    groupRepository.addGroup(importedGroup)
-                    _clipboardSharePrompt.value = null
-                    onComplete?.invoke(true)
-                } else {
-                    _importErrorMessage.value = "未能在分享内容中识别出有效公交/地铁路线"
-                    onComplete?.invoke(false)
-                }
-            } catch (e: Exception) {
-                _importErrorMessage.value = "解析失败: ${e.message}"
-                onComplete?.invoke(false)
-            } finally {
-                _isImporting.value = false
-            }
-        }
-    }
-
-    fun clearImportError() {
-        _importErrorMessage.value = null
     }
 
     /**
@@ -234,7 +267,7 @@ class FavoritesGroupViewModel(
     private suspend fun searchLocalStopTips(keyword: String, city: TransitCity): List<AmapTipItem> {
         val coord = coordinator ?: return emptyList()
         return try {
-            val searchRes = coord.search(city, keyword, com.trackr.domain.model.EngineMode.CHELAILE)
+            val searchRes = coord.search(city, keyword, EngineMode.CHELAILE)
             val stopTips = searchRes.stops.map { stop ->
                 val loc = if (stop.wgsLat != 0.0 && stop.wgsLng != 0.0) "${stop.wgsLng},${stop.wgsLat}" else ""
                 AmapTipItem(
@@ -282,7 +315,6 @@ class FavoritesGroupViewModel(
             var effectiveOrigin = origin
             var effectiveDest = destination
 
-            // 1. 如果启用了高德且用户输入的坐标为空（打字未点下拉框），自动补全经纬度
             if (hasAmap) {
                 if (!effectiveOrigin.location.contains(",")) {
                     val found = amapSdkService?.searchPoiTips(effectiveOrigin.name, city.cityName, customKey)?.getOrNull()?.firstOrNull { it.location.contains(",") }
@@ -296,7 +328,6 @@ class FavoritesGroupViewModel(
 
             var schemes: List<AmapTransitSchemeResult> = emptyList()
 
-            // 2. 优先尝试高德 Android SDK 规划（若失败再尝试 Web API 备用）
             if (effectiveOrigin.location.contains(",") && effectiveDest.location.contains(",")) {
                 val sdkResult = amapSdkService?.planTransit(
                     originLngLat = effectiveOrigin.location,
@@ -320,13 +351,11 @@ class FavoritesGroupViewModel(
                     schemes = webResult.getOrNull().orEmpty()
                 }
 
-                // 对齐高德方案中的线路 ID 为车来了/掌上公交真实调度 ID
                 if (schemes.isNotEmpty()) {
                     schemes = alignAmapSchemesWithRealtimeSource(schemes, city)
                 }
             }
 
-            // 3. 若高德未配置 Key、调用异常或结果为空，平滑降级至本地公交真实站点直达/换乘引擎
             if (schemes.isEmpty()) {
                 schemes = planLocalTransitRoute(effectiveOrigin, effectiveDest, city)
             }
@@ -347,19 +376,16 @@ class FavoritesGroupViewModel(
         }
     }
 
-    /**
-     * 将高德规划出的方案与车来了真实线路数据对齐（解决规划后无法获取实时车辆到站的问题）
-     */
     private suspend fun alignAmapSchemesWithRealtimeSource(
         schemes: List<AmapTransitSchemeResult>,
         city: TransitCity
     ): List<AmapTransitSchemeResult> {
         val coord = coordinator ?: return schemes
-        return withContext(Dispatchers.IO) {
+        return withContext(ioDispatcher) {
             schemes.map { scheme ->
                 val newLegs = scheme.group.legs.map { leg ->
                     val primary = leg.primaryLine
-                    if (primary != null && primary.lineId.length > 20) { // 高德生成的冗长临时 ID
+                    if (primary != null && primary.lineId.length > 20) {
                         val searchRes = runCatching { coord.search(city, primary.lineName, EngineMode.CHELAILE) }.getOrNull()
                         val matchedDir = searchRes?.lines?.flatMap { it.directions }?.find {
                             it.name.contains(primary.lineName) || primary.lineName.contains(it.name)
@@ -385,21 +411,17 @@ class FavoritesGroupViewModel(
         }
     }
 
-    /**
-     * 本地公交换乘计算引擎（纯公交真实调度网络，无需高德 Key，支持直达与一次换乘）
-     */
     private suspend fun planLocalTransitRoute(
         origin: AmapTipItem,
         destination: AmapTipItem,
         city: TransitCity
     ): List<AmapTransitSchemeResult> {
         val coord = coordinator ?: return emptyList()
-        return withContext(Dispatchers.IO) {
+        return withContext(ioDispatcher) {
             try {
                 val originCore = RouteProjectionMath.coreStopName(origin.name)
                 val destCore = RouteProjectionMath.coreStopName(destination.name)
 
-                // 1. 检索起点和终点匹配的公交车站台
                 val originSearch = coord.search(city, origin.name, EngineMode.CHELAILE)
                 val destSearch = coord.search(city, destination.name, EngineMode.CHELAILE)
 
@@ -415,7 +437,6 @@ class FavoritesGroupViewModel(
                     return@withContext emptyList()
                 }
 
-                // 2. 获取起点停靠的所有真实线路
                 val originNearby = mutableListOf<NearbyStop>()
                 for (stop in originStops.take(2)) {
                     val details = runCatching {
@@ -425,7 +446,6 @@ class FavoritesGroupViewModel(
                 }
                 val originLines = originNearby.flatMap { it.lines }.distinctBy { "${it.line.lineId}_${it.line.direction}" }
 
-                // 3. 获取终点停靠的所有真实线路
                 val destNearby = mutableListOf<NearbyStop>()
                 for (stop in destStops.take(2)) {
                     val details = runCatching {
@@ -437,7 +457,6 @@ class FavoritesGroupViewModel(
 
                 val schemes = mutableListOf<AmapTransitSchemeResult>()
 
-                // 4. 直达方案计算（0次换乘）
                 for (origLine in originLines) {
                     val matchingDest = destLines.find {
                         (it.line.name == origLine.line.name || it.line.lineId == origLine.line.lineId) &&
@@ -490,7 +509,6 @@ class FavoritesGroupViewModel(
                     }
                 }
 
-                // 5. 若直达方案不足 3 条，计算 1 次换乘（寻找交汇车站）
                 if (schemes.size < 3) {
                     val origDetails = originLines.take(3).mapNotNull { l ->
                         runCatching {
@@ -599,6 +617,26 @@ class FavoritesGroupViewModel(
         }
     }
 
+    /**
+     * 将规划方案转存为正式收藏分组
+     */
+    fun addPlannedSchemeAsFavorite(
+        scheme: AmapTransitSchemeResult,
+        customGroupId: String? = null,
+        category: GroupCategory = GroupCategory.CUSTOM,
+        customName: String? = null
+    ) {
+        viewModelScope.launch {
+            val nonTempGroup = scheme.group.copy(
+                isTemporary = false,
+                customGroupId = customGroupId,
+                category = if (customGroupId == "commute") GroupCategory.COMMUTE else category,
+                name = customName?.takeIf { it.isNotBlank() } ?: scheme.group.name
+            )
+            groupRepository.addGroup(nonTempGroup)
+        }
+    }
+
     fun clearPlanning() {
         _plannedSchemes.value = emptyList()
         _amapOriginTips.value = emptyList()
@@ -632,9 +670,14 @@ class FavoritesGroupViewModel(
     /**
      * 转存临时分组为正式常用分组
      */
-    fun saveOrConvertTemporaryGroup(groupId: String, newName: String? = null, newCategory: GroupCategory? = null) {
+    fun saveOrConvertTemporaryGroup(
+        groupId: String,
+        newName: String? = null,
+        newCategory: GroupCategory? = null,
+        customGroupId: String? = null
+    ) {
         viewModelScope.launch {
-            groupRepository.saveOrConvertTemporaryGroup(groupId, newName, newCategory)
+            groupRepository.saveOrConvertTemporaryGroup(groupId, newName, newCategory, customGroupId)
         }
     }
 
@@ -648,53 +691,166 @@ class FavoritesGroupViewModel(
     }
 
     /**
-     * 刷新路线组中在途车辆实时状态
+     * 刷新路线组中所有候选线路在途车辆实时状态并聚合计算最先到站线路
      */
-    fun refreshRealtimeEta(groupList: List<TransitGroup> = groups.value) {
-        val coord = coordinator ?: return
-        viewModelScope.launch(Dispatchers.IO) {
-            val candidates = groupList
+    fun refreshRealtimeEta(groupList: List<TransitGroup> = groups.value): Job =
+        viewModelScope.launch(ioDispatcher) {
+            val allCandidates = groupList
                 .flatMap { it.legs }
-                .mapNotNull { it.primaryLine }
-                .distinctBy { "${it.lineId}_${it.toStopOrder}" }
+                .flatMap { it.candidateLines }
 
-            val deferredResults = candidates.map { candidate ->
+            if (allCandidates.isEmpty()) return@launch
+
+            data class QueryKey(
+                val cityId: String,
+                val cityName: String,
+                val lineId: String,
+                val targetOrder: Int,
+                val source: DataSourceType,
+                val lineName: String,
+                val direction: Int
+            )
+
+            val uniqueQueries = allCandidates.map { candidate ->
+                val targetOrder = if (candidate.fromStopOrder > 0) candidate.fromStopOrder else candidate.toStopOrder
+                QueryKey(
+                    cityId = candidate.cityId,
+                    cityName = candidate.cityName,
+                    lineId = candidate.lineId,
+                    targetOrder = targetOrder,
+                    source = candidate.source,
+                    lineName = candidate.lineName,
+                    direction = candidate.direction
+                )
+            }.distinctBy { "${it.lineId}_${it.targetOrder}" }
+
+            val detailResults = uniqueQueries.map { query ->
                 async {
-                    val cacheKey = "${candidate.lineId}_${candidate.toStopOrder}"
-                    val summary = try {
-                        val detail = coord.getLineDetail(
-                            city = TransitCity(cityId = candidate.cityId, cityName = candidate.cityName),
+                    val city = TransitCity(cityId = query.cityId, cityName = query.cityName)
+                    val detail: BusLineDetail? = runCatching {
+                        coordinator?.getLineDetail(
+                            city = city,
                             request = LineDetailRequest(
-                                lineId = candidate.lineId,
-                                targetOrder = candidate.toStopOrder,
-                                source = candidate.source,
-                                lineNameHint = candidate.lineName,
-                                directionHint = candidate.direction
+                                lineId = query.lineId,
+                                targetOrder = query.targetOrder,
+                                source = query.source,
+                                lineNameHint = query.lineName,
+                                directionHint = query.direction
                             )
                         )
-                        val candidateBuses = detail.buses.filter { it.order <= candidate.toStopOrder }
-                        val nearest = candidateBuses.maxByOrNull { it.order.toFloat() + it.segmentProgress }
-                        if (nearest != null) {
-                            val stopsLeft = (candidate.toStopOrder - nearest.order).coerceAtLeast(0)
-                            val isArrived = stopsLeft == 0 && (nearest.isArrived || nearest.segmentProgress >= 0.98f)
-                            val etaText = RouteProjectionMath.formatEtaText(nearest.etaSeconds, isArrived)
-                            if (isArrived) "车辆已到站" else "剩$stopsLeft 站 · $etaText"
+                    }.getOrNull() ?: runCatching {
+                        transitRepository.getLineDetail(
+                            city = city,
+                            lineId = query.lineId,
+                            targetOrder = query.targetOrder,
+                            source = query.source,
+                            lineNameHint = query.lineName,
+                            directionHint = query.direction
+                        ).getOrNull()
+                    }.getOrNull()
+                    "${query.lineId}_${query.targetOrder}" to detail
+                }
+            }.awaitAll().toMap()
+
+            val updatedCandidateMap = _candidateRealtimeMap.value.toMutableMap()
+            val updatedSummaryMap = _legRealtimeSummary.value.toMutableMap()
+
+            for (group in groupList) {
+                for (leg in group.legs) {
+                    val legCandidates = leg.candidateLines
+                    if (legCandidates.isEmpty()) continue
+
+                    val parsedInfos = legCandidates.map { candidate ->
+                        val targetOrder = if (candidate.fromStopOrder > 0) candidate.fromStopOrder else candidate.toStopOrder
+                        val detail = detailResults["${candidate.lineId}_${targetOrder}"]
+
+                        val rideStops = (candidate.toStopOrder - candidate.fromStopOrder).coerceAtLeast(0)
+                        val directionText = detail?.line?.endStop?.takeIf { it.isNotBlank() }?.let { "${it}方向" }
+                            ?: candidate.endStopName.takeIf { it.isNotBlank() }?.let { "${it}方向" }
+                            ?: ""
+
+                        if (detail != null) {
+                            val candidateBuses = detail.buses.filter { it.order <= targetOrder }
+                            val nearest = candidateBuses.maxByOrNull { it.order.toFloat() + it.segmentProgress }
+                            if (nearest != null) {
+                                val stopsLeft = (targetOrder - nearest.order).coerceAtLeast(0)
+                                val isArrived = stopsLeft == 0 && (nearest.isArrived || nearest.segmentProgress >= 0.98f)
+                                val etaMinutes = if (nearest.etaSeconds > 0) {
+                                    (nearest.etaSeconds / 60.0).roundToInt().coerceAtLeast(1)
+                                } else {
+                                    (stopsLeft * 2).coerceAtLeast(1)
+                                }
+                                val etaText = if (isArrived) {
+                                    "车辆已到站"
+                                } else {
+                                    val formattedEta = RouteProjectionMath.formatEtaText(nearest.etaSeconds, isArrived)
+                                    "还有 $stopsLeft 站 · $formattedEta"
+                                }
+                                val shortChipEta = if (isArrived) "已到站" else "${stopsLeft}站"
+
+                                CandidateLineRealtimeInfo(
+                                    lineId = candidate.lineId,
+                                    lineName = candidate.lineName,
+                                    etaText = etaText,
+                                    shortChipEta = shortChipEta,
+                                    stopsAway = stopsLeft,
+                                    estimatedMinutes = etaMinutes,
+                                    directionText = directionText,
+                                    vehiclePlate = nearest.friendlyPlate,
+                                    rideStopsCount = rideStops,
+                                    isFastest = false
+                                )
+                            } else {
+                                CandidateLineRealtimeInfo(
+                                    lineId = candidate.lineId,
+                                    lineName = candidate.lineName,
+                                    etaText = "暂无在途车辆",
+                                    shortChipEta = "等待发车",
+                                    stopsAway = Int.MAX_VALUE,
+                                    estimatedMinutes = Int.MAX_VALUE,
+                                    directionText = directionText,
+                                    vehiclePlate = "",
+                                    rideStopsCount = rideStops,
+                                    isFastest = false
+                                )
+                            }
                         } else {
-                            "暂无在途车辆"
+                            CandidateLineRealtimeInfo(
+                                lineId = candidate.lineId,
+                                lineName = candidate.lineName,
+                                etaText = "等待调度发车",
+                                shortChipEta = "等待发车",
+                                stopsAway = Int.MAX_VALUE,
+                                estimatedMinutes = Int.MAX_VALUE,
+                                directionText = directionText,
+                                vehiclePlate = "",
+                                rideStopsCount = rideStops,
+                                isFastest = false
+                            )
                         }
-                    } catch (_: Exception) {
-                        "等待调度发车"
                     }
-                    cacheKey to summary
+
+                    val minStops = parsedInfos
+                        .filter { it.stopsAway < Int.MAX_VALUE }
+                        .minOfOrNull { it.stopsAway }
+
+                    val fastestLineId = if (minStops != null) {
+                        parsedInfos.find { it.stopsAway == minStops }?.lineId
+                    } else null
+
+                    parsedInfos.forEachIndexed { idx, info ->
+                        val candidate = legCandidates[idx]
+                        val isFastest = (info.lineId == fastestLineId)
+                        val finalInfo = info.copy(isFastest = isFastest)
+
+                        updatedCandidateMap["${group.id}_${leg.legIndex}_${candidate.lineId}"] = finalInfo
+                        updatedCandidateMap["${candidate.lineId}_${candidate.toStopOrder}"] = finalInfo
+                        updatedSummaryMap["${candidate.lineId}_${candidate.toStopOrder}"] = finalInfo.etaText
+                    }
                 }
             }
 
-            val results = deferredResults.awaitAll()
-            val summaryMap = _legRealtimeSummary.value.toMutableMap()
-            results.forEach { (cacheKey, summary) ->
-                summaryMap[cacheKey] = summary
-            }
-            _legRealtimeSummary.value = summaryMap
+            _candidateRealtimeMap.value = updatedCandidateMap
+            _legRealtimeSummary.value = updatedSummaryMap
         }
-    }
 }

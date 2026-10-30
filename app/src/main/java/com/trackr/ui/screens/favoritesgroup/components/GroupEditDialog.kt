@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.trackr.domain.model.CandidateLine
+import com.trackr.domain.model.FavoriteGroup
 import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
@@ -36,24 +37,34 @@ import java.util.UUID
 @Composable
 fun GroupEditDialog(
     initialGroup: TransitGroup?,
+    favoriteGroups: List<FavoriteGroup> = emptyList(),
     onDismiss: () -> Unit,
     onSave: (TransitGroup) -> Unit
 ) {
-    // 初始值快照，用于判断用户是否有未保存的修改 (dirty state)
     val leg1 = initialGroup?.legs?.getOrNull(0)
     val leg2 = initialGroup?.legs?.getOrNull(1)
 
     val initialName = remember(initialGroup) { initialGroup?.name.orEmpty() }
     val initialCategory = remember(initialGroup) { initialGroup?.category ?: GroupCategory.COMMUTE }
+    val initialCustomGroupId = remember(initialGroup) { initialGroup?.customGroupId }
+
     val initialFrom1 = remember(leg1) { leg1?.fromStopName.orEmpty() }
     val initialTo1 = remember(leg1) { leg1?.toStopName.orEmpty() }
-    val initialLine1 = remember(leg1) { leg1?.primaryLine?.lineName.orEmpty() }
+    val initialLine1 = remember(leg1) {
+        val names = leg1?.candidateLines?.map { it.lineName }?.filter { it.isNotBlank() }.orEmpty()
+        if (names.isNotEmpty()) names.joinToString(", ") else leg1?.primaryLine?.lineName.orEmpty()
+    }
+
     val initialFrom2 = remember(leg2, leg1) { leg2?.fromStopName.orEmpty().ifEmpty { initialTo1 } }
     val initialTo2 = remember(leg2) { leg2?.toStopName.orEmpty() }
-    val initialLine2 = remember(leg2) { leg2?.primaryLine?.lineName.orEmpty() }
+    val initialLine2 = remember(leg2) {
+        val names = leg2?.candidateLines?.map { it.lineName }?.filter { it.isNotBlank() }.orEmpty()
+        if (names.isNotEmpty()) names.joinToString(", ") else leg2?.primaryLine?.lineName.orEmpty()
+    }
 
     var groupName by remember { mutableStateOf(initialName) }
     var selectedCategory by remember { mutableStateOf(initialCategory) }
+    var selectedCustomGroupId by remember { mutableStateOf(initialCustomGroupId) }
 
     var from1 by remember { mutableStateOf(initialFrom1) }
     var to1 by remember { mutableStateOf(initialTo1) }
@@ -67,6 +78,7 @@ fun GroupEditDialog(
 
     val isDirty = groupName != initialName ||
         selectedCategory != initialCategory ||
+        selectedCustomGroupId != initialCustomGroupId ||
         from1 != initialFrom1 ||
         to1 != initialTo1 ||
         line1 != initialLine1 ||
@@ -87,6 +99,10 @@ fun GroupEditDialog(
         }
     }
 
+    fun parseLineNames(raw: String): List<String> {
+        return raw.split(Regex("[,，、\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
+    }
+
     AlertDialog(
         onDismissRequest = handleDismissRequest,
         title = { Text(if (initialGroup == null) "新建路线分组" else "编辑路线分组") },
@@ -102,6 +118,36 @@ fun GroupEditDialog(
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
+
+                // 所属收藏分组选择
+                if (favoriteGroups.isNotEmpty()) {
+                    Text("所属收藏分组", style = MaterialTheme.typography.labelMedium)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedCustomGroupId == null,
+                            onClick = { selectedCustomGroupId = null },
+                            label = { Text("全部 (未特别归组)") }
+                        )
+                        favoriteGroups.forEach { fg ->
+                            FilterChip(
+                                selected = selectedCustomGroupId == fg.id,
+                                onClick = {
+                                    selectedCustomGroupId = fg.id
+                                    if (fg.id == "commute") {
+                                        selectedCategory = GroupCategory.COMMUTE
+                                    }
+                                },
+                                label = { Text(fg.name) }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
 
                 Text("所属场景", style = MaterialTheme.typography.labelMedium)
                 Row(
@@ -148,6 +194,7 @@ fun GroupEditDialog(
                     value = line1,
                     onValueChange = { line1 = it },
                     label = { Text("乘坐线路（如 156路）") },
+                    placeholder = { Text("支持多线路用逗号隔开，如 320, M194, 311") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
@@ -175,6 +222,7 @@ fun GroupEditDialog(
                     value = line2,
                     onValueChange = { line2 = it },
                     label = { Text("换乘线路（如 地铁4号线）") },
+                    placeholder = { Text("支持多线路用逗号隔开，如 19, 204") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
@@ -186,40 +234,74 @@ fun GroupEditDialog(
                     val finalName = groupName.trim().ifEmpty { "${from1} ➔ ${to2.ifEmpty { to1 }}" }
                     val legs = mutableListOf<TransitLeg>()
                     if (from1.isNotBlank() && to1.isNotBlank()) {
+                        val parsedLines1 = parseLineNames(line1)
+                        val candidates1 = if (parsedLines1.isNotEmpty()) {
+                            parsedLines1.mapIndexed { idx, name ->
+                                val existing = leg1?.candidateLines?.getOrNull(idx)
+                                CandidateLine(
+                                    cityId = existing?.cityId ?: leg1?.primaryLine?.cityId ?: "033",
+                                    cityName = existing?.cityName ?: leg1?.primaryLine?.cityName ?: "杭州",
+                                    lineId = existing?.lineId ?: "line_1_${idx}_${UUID.randomUUID().toString().take(6)}",
+                                    lineName = name,
+                                    fromStopOrder = existing?.fromStopOrder ?: 1,
+                                    toStopOrder = existing?.toStopOrder ?: 5
+                                )
+                            }
+                        } else {
+                            listOf(
+                                CandidateLine(
+                                    cityId = leg1?.primaryLine?.cityId ?: "033",
+                                    cityName = leg1?.primaryLine?.cityName ?: "杭州",
+                                    lineId = leg1?.primaryLine?.lineId ?: "line_1_${UUID.randomUUID().toString().take(6)}",
+                                    lineName = "156路",
+                                    fromStopOrder = 1,
+                                    toStopOrder = 5
+                                )
+                            )
+                        }
+
                         legs.add(
                             TransitLeg(
                                 legIndex = 0,
                                 fromStopName = from1.trim(),
                                 toStopName = to1.trim(),
-                                candidateLines = listOf(
-                                    CandidateLine(
-                                        cityId = leg1?.primaryLine?.cityId ?: "033",
-                                        cityName = leg1?.primaryLine?.cityName ?: "杭州",
-                                        lineId = leg1?.primaryLine?.lineId ?: "line_1_${UUID.randomUUID().toString().take(6)}",
-                                        lineName = line1.trim().ifEmpty { "156路" },
-                                        fromStopOrder = 1,
-                                        toStopOrder = 5
-                                    )
-                                )
+                                candidateLines = candidates1
                             )
                         )
                     }
                     if (from2.isNotBlank() && to2.isNotBlank()) {
+                        val parsedLines2 = parseLineNames(line2)
+                        val candidates2 = if (parsedLines2.isNotEmpty()) {
+                            parsedLines2.mapIndexed { idx, name ->
+                                val existing = leg2?.candidateLines?.getOrNull(idx)
+                                CandidateLine(
+                                    cityId = existing?.cityId ?: leg2?.primaryLine?.cityId ?: "033",
+                                    cityName = existing?.cityName ?: leg2?.primaryLine?.cityName ?: "杭州",
+                                    lineId = existing?.lineId ?: "line_2_${idx}_${UUID.randomUUID().toString().take(6)}",
+                                    lineName = name,
+                                    fromStopOrder = existing?.fromStopOrder ?: 1,
+                                    toStopOrder = existing?.toStopOrder ?: 6
+                                )
+                            }
+                        } else {
+                            listOf(
+                                CandidateLine(
+                                    cityId = leg2?.primaryLine?.cityId ?: "033",
+                                    cityName = leg2?.primaryLine?.cityName ?: "杭州",
+                                    lineId = leg2?.primaryLine?.lineId ?: "line_2_${UUID.randomUUID().toString().take(6)}",
+                                    lineName = "地铁4号线",
+                                    fromStopOrder = 1,
+                                    toStopOrder = 6
+                                )
+                            )
+                        }
+
                         legs.add(
                             TransitLeg(
                                 legIndex = 1,
                                 fromStopName = from2.trim(),
                                 toStopName = to2.trim(),
-                                candidateLines = listOf(
-                                    CandidateLine(
-                                        cityId = leg2?.primaryLine?.cityId ?: "033",
-                                        cityName = leg2?.primaryLine?.cityName ?: "杭州",
-                                        lineId = leg2?.primaryLine?.lineId ?: "line_2_${UUID.randomUUID().toString().take(6)}",
-                                        lineName = line2.trim().ifEmpty { "地铁4号线" },
-                                        fromStopOrder = 1,
-                                        toStopOrder = 6
-                                    )
-                                ),
+                                candidateLines = candidates2,
                                 walkingDistanceMeters = 60
                             )
                         )
@@ -228,12 +310,14 @@ fun GroupEditDialog(
                     val updated = initialGroup?.copy(
                         name = finalName,
                         category = selectedCategory,
+                        customGroupId = selectedCustomGroupId,
                         legs = if (legs.isNotEmpty()) legs else initialGroup.legs,
                         updatedAt = System.currentTimeMillis()
                     ) ?: TransitGroup(
                         id = UUID.randomUUID().toString(),
                         name = finalName,
                         category = selectedCategory,
+                        customGroupId = selectedCustomGroupId,
                         legs = legs
                     )
                     onSave(updated)

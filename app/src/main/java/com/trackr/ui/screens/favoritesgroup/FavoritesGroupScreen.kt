@@ -1,7 +1,8 @@
 package com.trackr.ui.screens.favoritesgroup
 
-import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,13 +27,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -45,11 +43,11 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,27 +55,28 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.TransitGroup
-import com.trackr.ui.screens.favoritesgroup.components.AmapRoutePlanDialog
 import com.trackr.ui.screens.favoritesgroup.components.GroupEditDialog
+import com.trackr.ui.screens.favoritesgroup.components.ManageFavoriteGroupsBottomSheet
 import com.trackr.ui.screens.favoritesgroup.components.TransitGroupCard
-import kotlinx.coroutines.launch
+import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FavoritesGroupScreen(
     viewModel: FavoritesGroupViewModel,
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit = { _, _, _, _, _, _ -> },
+    onNavigateToRoutePlan: () -> Unit = {},
     onNavigateBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -87,59 +86,22 @@ fun FavoritesGroupScreen(
 
     val groups by viewModel.filteredGroups.collectAsStateWithLifecycle()
     val allGroups by viewModel.groups.collectAsStateWithLifecycle()
+    val favoriteGroups by viewModel.favoriteGroups.collectAsStateWithLifecycle()
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
+    val selectedFavoriteGroupId by viewModel.selectedFavoriteGroupId.collectAsStateWithLifecycle()
+
     val activeSession by viewModel.activeGroupSession.collectAsStateWithLifecycle()
     val realtimeSummaries by viewModel.legRealtimeSummary.collectAsStateWithLifecycle()
-    val clipboardPrompt by viewModel.clipboardSharePrompt.collectAsStateWithLifecycle()
-    val isImporting by viewModel.isImporting.collectAsStateWithLifecycle()
-    val importError by viewModel.importErrorMessage.collectAsStateWithLifecycle()
+    val candidateRealtimeMap by viewModel.candidateRealtimeMap.collectAsStateWithLifecycle()
+    val selectedLineKeys by viewModel.selectedLineKeys.collectAsStateWithLifecycle()
 
-    val amapOriginTips by viewModel.amapOriginTips.collectAsStateWithLifecycle()
-    val amapDestTips by viewModel.amapDestTips.collectAsStateWithLifecycle()
-    val plannedSchemes by viewModel.plannedSchemes.collectAsStateWithLifecycle()
-    val isPlanningRoute by viewModel.isPlanningRoute.collectAsStateWithLifecycle()
-    val planError by viewModel.planErrorMessage.collectAsStateWithLifecycle()
-    val customAmapApiKey by viewModel.customAmapApiKey.collectAsStateWithLifecycle()
+    val directCount = remember(allGroups) { allGroups.count { it.legs.size == 1 } }
+    val transferCount = remember(allGroups) { allGroups.count { it.legs.size > 1 } }
 
-    val categoryCounts = remember(allGroups) {
-        allGroups.groupingBy { it.category }.eachCount()
-    }
-
-    var showPasteImportDialog by remember { mutableStateOf(false) }
-    var showAmapPlanDialog by remember { mutableStateOf(false) }
     var showCreateGroupDialog by remember { mutableStateOf(false) }
+    var showCreateFavGroupQuickDialog by remember { mutableStateOf(false) }
+    var showManageGroupsSheet by remember { mutableStateOf(false) }
     var editingGroup by remember { mutableStateOf<TransitGroup?>(null) }
-
-    // 页面进入或恢复到前台时，自动检测剪贴板是否含有高德/百度分享文本
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        try {
-            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-            if (clipboard != null && clipboard.hasPrimaryClip()) {
-                val clip = clipboard.primaryClip
-                if (clip != null && clip.itemCount > 0) {
-                    val text = clip.getItemAt(0)?.coerceToText(context)?.toString()
-                    if (!text.isNullOrBlank()) {
-                        viewModel.checkClipboardForShareContent(text)
-                    }
-                }
-            }
-        } catch (_: Exception) {
-            // 安全捕获剪贴板跨进程读取或安全沙箱权限异常
-        }
-    }
-
-    LaunchedEffect(importError) {
-        importError?.let {
-            snackbarHostState.showSnackbar(it)
-            viewModel.clearImportError()
-        }
-    }
-
-    LaunchedEffect(planError) {
-        planError?.let {
-            snackbarHostState.showSnackbar(it)
-        }
-    }
 
     // 向上滑动时大标题平滑收起为单行标题栏，向下拉时展开，统一首页与更多页规范
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -149,42 +111,56 @@ fun FavoritesGroupScreen(
             .fillMaxSize()
             .nestedScroll(scrollBehavior.nestedScrollConnection),
         contentWindowInsets = WindowInsets.safeDrawing,
-        snackbarHost = { SnackbarHost(hostState = snackbarHostState) },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             LargeTopAppBar(
                 title = {
-                    Text(
-                        text = "路线组",
-                        fontWeight = FontWeight.Bold
-                    )
+                    Column {
+                        Text(
+                            text = "我的收藏",
+                            style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.Bold),
+                            modifier = Modifier.testTag("top_bar_title")
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "已收纳 ${directCount} 个同达方案与 ${transferCount} 个换乘组合",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("top_bar_subtitle")
+                        )
+                    }
                 },
                 navigationIcon = {
                     if (onNavigateBack != null) {
                         IconButton(onClick = onNavigateBack) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "返回",
-                                tint = MaterialTheme.colorScheme.onSurface
+                                contentDescription = "返回"
                             )
                         }
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showAmapPlanDialog = true }) {
+                    TextButton(
+                        onClick = { showManageGroupsSheet = true },
+                        modifier = Modifier.testTag("btn_manage_groups")
+                    ) {
+                        Text("⚙️ 管理", style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold))
+                    }
+                    IconButton(
+                        onClick = onNavigateToRoutePlan,
+                        modifier = Modifier.testTag("btn_route_plan_action")
+                    ) {
                         Icon(
                             imageVector = Icons.AutoMirrored.Filled.AltRoute,
-                            contentDescription = "智能规划",
+                            contentDescription = "路线规划",
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
-                    IconButton(onClick = { showPasteImportDialog = true }) {
-                        Icon(
-                            imageVector = Icons.Default.ContentPaste,
-                            contentDescription = "导入路线",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                    IconButton(onClick = { showCreateGroupDialog = true }) {
+                    IconButton(
+                        onClick = { showCreateGroupDialog = true },
+                        modifier = Modifier.testTag("btn_add_group_action")
+                    ) {
                         Icon(
                             imageVector = Icons.Default.Add,
                             contentDescription = "新建分组",
@@ -212,131 +188,97 @@ fun FavoritesGroupScreen(
             ),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. 剪贴板地图路线识别条
-            if (clipboardPrompt != null) {
-                item(key = "clipboard_prompt", contentType = "clipboard_prompt") {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
+            // 1. 顶部智能分组滑动栏 (Filter Chips)
+            item(key = "favorite_group_chips", contentType = "chips") {
+                val scrollState = rememberScrollState()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(scrollState),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // 全部
+                    FilterChip(
+                        selected = selectedFavoriteGroupId == null && selectedCategory == null,
+                        onClick = {
+                            viewModel.selectFavoriteGroup(null)
+                            viewModel.selectCategory(null)
+                        },
+                        label = { Text("全部 (${allGroups.size})") },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primary,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimary
                         ),
-                        shape = RoundedCornerShape(14.dp)
+                        modifier = Modifier.testTag("chip_all_groups")
+                    )
+
+                    // 自定义收藏分组
+                    favoriteGroups.forEach { favGroup ->
+                        val count = allGroups.count {
+                            it.customGroupId == favGroup.id ||
+                                (favGroup.id == "commute" && it.category == GroupCategory.COMMUTE) ||
+                                (favGroup.id == "home" && (it.category == GroupCategory.COMMUTE || it.name.contains("家")))
+                        }
+                        FilterChip(
+                            selected = selectedFavoriteGroupId == favGroup.id,
+                            onClick = { viewModel.selectFavoriteGroup(favGroup.id) },
+                            label = { Text("${favGroup.name} ($count)") },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.primary,
+                                selectedLabelColor = MaterialTheme.colorScheme.onPrimary
+                            ),
+                            modifier = Modifier.testTag("chip_fav_group_${favGroup.id}")
+                        )
+                    }
+
+                    // + 新建分组 Chip
+                    Surface(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showCreateFavGroupQuickDialog = true }
+                            .testTag("chip_quick_create_group"),
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surface,
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp),
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.AltRoute,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(24.dp)
+                            Text(
+                                text = "+ 新建",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.outline
                             )
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "检测到地图分享路线",
-                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                                Text(
-                                    text = clipboardPrompt!!.take(60) + if (clipboardPrompt!!.length > 60) "…" else "",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Button(
-                                onClick = {
-                                    viewModel.importMapShare(clipboardPrompt!!) { success ->
-                                        if (success) {
-                                            scope.launch {
-                                                snackbarHostState.showSnackbar("路线方案已成功导入！")
-                                            }
-                                        }
-                                    }
-                                },
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
-                                shape = RoundedCornerShape(20.dp)
-                            ) {
-                                if (isImporting) {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(16.dp),
-                                        strokeWidth = 2.dp,
-                                        color = MaterialTheme.colorScheme.onPrimary
-                                    )
-                                } else {
-                                    Text("一键导入", style = MaterialTheme.typography.labelMedium)
-                                }
-                            }
-                            IconButton(
-                                onClick = { viewModel.dismissClipboardPrompt() },
-                                modifier = Modifier.size(28.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Close,
-                                    contentDescription = "忽略",
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
                         }
                     }
                 }
             }
 
-            // 2. 场景分类过滤器 (Filter Chips)
-            item(key = "category_chips", contentType = "category_chips") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterChip(
-                        selected = selectedCategory == null,
-                        onClick = { viewModel.selectCategory(null) },
-                        label = { Text("全部 (${allGroups.size})") },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    )
-                    GroupCategory.entries.forEach { category ->
-                        val count = categoryCounts[category] ?: 0
-                        FilterChip(
-                            selected = selectedCategory == category,
-                            onClick = { viewModel.selectCategory(category) },
-                            label = { Text("${category.displayName} ($count)") },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        )
-                    }
-                }
-            }
-
-            // 3. 路线组展示列表或空状态
+            // 2. 路线分组列表或空状态
             if (groups.isEmpty()) {
-                item(key = "empty_groups", contentType = "empty_groups") {
-                    Box(
+                item(key = "empty_groups", contentType = "empty_state") {
+                    Card(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 48.dp),
-                        contentAlignment = Alignment.Center
+                            .padding(vertical = 32.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+                        ),
+                        shape = RoundedCornerShape(20.dp)
                     ) {
                         Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(32.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
                             Icon(
                                 imageVector = Icons.AutoMirrored.Filled.AltRoute,
                                 contentDescription = null,
-                                modifier = Modifier.size(64.dp),
+                                modifier = Modifier.size(56.dp),
                                 tint = MaterialTheme.colorScheme.outlineVariant
                             )
                             Spacer(modifier = Modifier.height(16.dp))
@@ -347,21 +289,21 @@ fun FavoritesGroupScreen(
                             )
                             Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                text = "支持直接复制高德/百度地图方案粘贴导入，或点击右上角新建",
+                                text = "点击右上角「新建」或「智能规划」添加常用路线与换乘方案",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.outline
                             )
                             Spacer(modifier = Modifier.height(20.dp))
                             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Button(onClick = { showAmapPlanDialog = true }) {
+                                Button(onClick = onNavigateToRoutePlan) {
                                     Icon(imageVector = Icons.AutoMirrored.Filled.AltRoute, contentDescription = null)
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("智能规划")
+                                    Text("路线规划")
                                 }
-                                OutlinedButton(onClick = { showPasteImportDialog = true }) {
-                                    Icon(imageVector = Icons.Default.ContentPaste, contentDescription = null)
+                                OutlinedButton(onClick = { showCreateGroupDialog = true }) {
+                                    Icon(imageVector = Icons.Default.Add, contentDescription = null)
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("粘贴方案导入")
+                                    Text("新建路线")
                                 }
                             }
                         }
@@ -377,6 +319,27 @@ fun FavoritesGroupScreen(
                         group = group,
                         activeSession = activeSession,
                         realtimeSummaries = realtimeSummaries,
+                        candidateRealtimeMap = candidateRealtimeMap,
+                        selectedLineKeys = selectedLineKeys,
+                        onSelectCandidateLine = { legIndex, lineId ->
+                            viewModel.selectCandidateLine(group.id, legIndex, lineId)
+                        },
+                        onAddCandidateLine = { legIndex, lineName ->
+                            val leg = group.legs.getOrNull(legIndex)
+                            val newCandidate = CandidateLine(
+                                cityId = leg?.primaryLine?.cityId ?: "033",
+                                cityName = leg?.primaryLine?.cityName ?: "",
+                                lineId = "line_${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(4)}",
+                                lineName = lineName.trim(),
+                                source = leg?.primaryLine?.source ?: DataSourceType.CHELAILE,
+                                direction = leg?.primaryLine?.direction ?: 0,
+                                fromStopOrder = leg?.primaryLine?.fromStopOrder ?: 1,
+                                toStopOrder = (leg?.primaryLine?.fromStopOrder ?: 1) + 4,
+                                startStopName = leg?.fromStopName.orEmpty(),
+                                endStopName = leg?.toStopName.orEmpty()
+                            )
+                            viewModel.addCandidateLineToLeg(group.id, legIndex, newCandidate)
+                        },
                         onStartTracking = { viewModel.startGroupTracking(context, group) },
                         onStopTracking = { viewModel.stopGroupTracking(context) },
                         onSaveTemporary = { viewModel.saveOrConvertTemporaryGroup(group.id) },
@@ -398,70 +361,68 @@ fun FavoritesGroupScreen(
         }
     }
 
-    // 4. 手工粘贴导入方案弹窗
-    if (showPasteImportDialog) {
-        PasteImportDialog(
-            isImporting = isImporting,
-            onDismiss = { showPasteImportDialog = false },
-            onConfirm = { textToImport ->
-                showPasteImportDialog = false
-                viewModel.importMapShare(textToImport) { success ->
-                    if (success) {
-                        scope.launch {
-                            snackbarHostState.showSnackbar("路线方案已成功导入！")
+    // 3. 抽屉管理收藏分组
+    if (showManageGroupsSheet) {
+        ManageFavoriteGroupsBottomSheet(
+            favoriteGroups = favoriteGroups,
+            onDismiss = { showManageGroupsSheet = false },
+            onCreateGroup = { name -> viewModel.createFavoriteGroup(name) },
+            onRenameGroup = { groupId, newName -> viewModel.renameFavoriteGroup(groupId, newName) },
+            onDeleteGroup = { groupId -> viewModel.deleteFavoriteGroup(groupId) },
+            onReorderGroups = { groupIds -> viewModel.reorderFavoriteGroups(groupIds) }
+        )
+    }
+
+    // 4. 快速新建分组弹窗 (+ 新建 chip 唤起)
+    if (showCreateFavGroupQuickDialog) {
+        var quickName by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { showCreateFavGroupQuickDialog = false },
+            title = { Text("新建收藏分组") },
+            text = {
+                OutlinedTextField(
+                    value = quickName,
+                    onValueChange = { quickName = it },
+                    label = { Text("分组名称") },
+                    placeholder = { Text("例如：健身房、常用路线") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("input_quick_group_name")
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        if (quickName.isNotBlank()) {
+                            viewModel.createFavoriteGroup(quickName.trim())
+                            showCreateFavGroupQuickDialog = false
+                            quickName = ""
                         }
-                    }
+                    },
+                    enabled = quickName.isNotBlank(),
+                    modifier = Modifier.testTag("btn_confirm_quick_group")
+                ) {
+                    Text("创建")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    showCreateFavGroupQuickDialog = false
+                    quickName = ""
+                }) {
+                    Text("取消")
                 }
             }
         )
     }
 
-    // 5. 智能公交换乘规划弹窗
-    if (showAmapPlanDialog) {
-        AmapRoutePlanDialog(
-            originTips = amapOriginTips,
-            destTips = amapDestTips,
-            plannedSchemes = plannedSchemes,
-            isPlanning = isPlanningRoute,
-            planErrorMessage = planError,
-            customApiKey = customAmapApiKey,
-            onSaveCustomApiKey = { viewModel.saveCustomAmapApiKey(it) },
-            onSearchOrigin = { viewModel.searchOriginTips(it) },
-            onSearchDest = { viewModel.searchDestTips(it) },
-            onClearOriginTips = { viewModel.searchOriginTips("") },
-            onClearDestTips = { viewModel.searchDestTips("") },
-            onPlanRoute = { origin, dest ->
-                viewModel.planTransitRoute(origin, dest)
-            },
-            onAddScheme = { scheme ->
-                viewModel.addPlannedSchemeToGroups(scheme)
-                showAmapPlanDialog = false
-                viewModel.clearPlanning()
-                scope.launch {
-                    snackbarHostState.showSnackbar("路线方案已成功加入常用路线组！")
-                }
-            },
-            onStartTrackingScheme = { scheme ->
-                viewModel.addPlannedSchemeToGroups(scheme)
-                viewModel.startGroupTracking(context, scheme.group)
-                showAmapPlanDialog = false
-                viewModel.clearPlanning()
-                scope.launch {
-                    snackbarHostState.showSnackbar("已加入路线组并开启全程换乘追踪！")
-                }
-            },
-            onDismiss = {
-                showAmapPlanDialog = false
-                viewModel.clearPlanning()
-            }
-        )
-    }
-
-    // 6. 新建 / 编辑分组弹窗
+    // 5. 新建 / 编辑路线分组弹窗
     if (showCreateGroupDialog || editingGroup != null) {
         val target = editingGroup
         GroupEditDialog(
             initialGroup = target,
+            favoriteGroups = favoriteGroups,
             onDismiss = {
                 showCreateGroupDialog = false
                 editingGroup = null
@@ -473,56 +434,4 @@ fun FavoritesGroupScreen(
             }
         )
     }
-}
-
-/**
- * 手工粘贴导入方案弹窗
- */
-@Composable
-private fun PasteImportDialog(
-    isImporting: Boolean,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
-) {
-    var importInputText by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("导入地图路线方案") },
-        text = {
-            Column {
-                Text(
-                    text = "支持直接粘贴高德地图或百度地图 App 复制的分享文本、路线链接（如 surl.amap.com / j.map.baidu.com），系统将自动为您提取站点并对齐实时公交数据：",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = importInputText,
-                    onValueChange = { importInputText = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp),
-                    placeholder = { Text("在此粘贴分享文案或短链接…") }
-                )
-            }
-        },
-        confirmButton = {
-            Button(
-                onClick = {
-                    val textToImport = importInputText.trim()
-                    if (textToImport.isNotEmpty()) {
-                        onConfirm(textToImport)
-                    }
-                },
-                enabled = importInputText.isNotBlank() && !isImporting
-            ) {
-                Text("开始解析导入")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("取消")
-            }
-        }
-    )
 }
