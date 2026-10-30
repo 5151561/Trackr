@@ -160,80 +160,62 @@ fun LineDetailScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         contentWindowInsets = WindowInsets.safeDrawing,
-        containerColor = MaterialTheme.colorScheme.background,
-        bottomBar = {
-            // 底部 M3E 悬浮胶囊工具栏 (Floating Pill Toolbar)
-            BottomFloatingToolbar(
-                isFavorite = uiState.isFavorite,
-                flipRotation = { animatedFlipRotation },
-                hasReverseDirection = lineDetail?.reverseDirection != null,
-                countdownSeconds = uiState.refreshCountdownSeconds,
-                isRefreshing = uiState.isRefreshing,
-                onToggleFavorite = { viewModel.toggleFavoriteStop() },
-                onSwitchDirection = { viewModel.switchOppositeDirection() },
-                onOpenTimetable = { viewModel.loadTimetable() },
-                onOpenTransitCode = {
-                    when (uiState.preferredTransitCodeProvider) {
-                        TransitCodeProvider.ALIPAY -> TransitCodeHelper.openAlipayTransitCode(context)
-                        TransitCodeProvider.UNIONPAY -> TransitCodeHelper.openUnionPayTransitCode(context)
-                        TransitCodeProvider.ASK_ALWAYS -> viewModel.openTransitCodeSheet()
-                    }
-                },
-                onLongClickTransitCode = { viewModel.openTransitCodeSheet() },
-                onRefreshNow = { viewModel.refreshNow() }
-            )
-        }
+        containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
-        if (uiState.isLoading && lineDetail == null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "正在连接实时公交数据…",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 14.sp
-                    )
-                }
-            }
-            return@Scaffold
-        }
-
-        if (lineDetail == null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(innerPadding),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = uiState.errorMessage ?: "未获取到该线路信息",
-                        color = MaterialTheme.colorScheme.error,
-                        fontSize = 15.sp,
-                        textAlign = TextAlign.Center
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Button(onClick = { viewModel.refreshNow() }) {
-                        Text("重试")
-                    }
-                }
-            }
-            return@Scaffold
-        }
-
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
                 .consumeWindowInsets(innerPadding)
-                .verticalScroll(rememberScrollState())
         ) {
+            if (uiState.isLoading && lineDetail == null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = innerPadding.calculateTopPadding()),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "正在连接实时公交数据…",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+                return@Box
+            }
+
+            if (lineDetail == null) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = innerPadding.calculateTopPadding()),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = uiState.errorMessage ?: "未获取到该线路信息",
+                            color = MaterialTheme.colorScheme.error,
+                            fontSize = 15.sp,
+                            textAlign = TextAlign.Center
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Button(onClick = { viewModel.refreshNow() }) {
+                            Text("重试")
+                        }
+                    }
+                }
+                return@Box
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = innerPadding.calculateTopPadding())
+                    .verticalScroll(rememberScrollState())
+            ) {
             // 1. 顶部 Header：返回键、线路名徽标、数据源标签、首末站方向与运营胶囊
             TopLineHeader(
                 lineDetail = lineDetail,
@@ -422,9 +404,37 @@ fun LineDetailScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.height(96.dp)) // 为底部悬浮工具栏留白
+            // 为底部悬浮工具栏留白（工具栏高度约 56dp + 悬浮间距 16dp + 导航栏高度 + 呼吸空间）
+            Spacer(
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .height(96.dp)
+            )
         }
+
+        // 底部 M3E 悬浮胶囊工具栏 (Floating Pill Toolbar) 浮动于内容之上，背景透明无遮挡
+        BottomFloatingToolbar(
+            modifier = Modifier.align(Alignment.BottomCenter),
+            isFavorite = uiState.isFavorite,
+            flipRotation = { animatedFlipRotation },
+            hasReverseDirection = lineDetail.reverseDirection != null,
+            countdownSeconds = uiState.refreshCountdownSeconds,
+            isRefreshing = uiState.isRefreshing,
+            onToggleFavorite = { viewModel.toggleFavoriteStop() },
+            onSwitchDirection = { viewModel.switchOppositeDirection() },
+            onOpenTimetable = { viewModel.loadTimetable() },
+            onOpenTransitCode = {
+                when (uiState.preferredTransitCodeProvider) {
+                    TransitCodeProvider.ALIPAY -> TransitCodeHelper.openAlipayTransitCode(context)
+                    TransitCodeProvider.UNIONPAY -> TransitCodeHelper.openUnionPayTransitCode(context)
+                    TransitCodeProvider.ASK_ALWAYS -> viewModel.openTransitCodeSheet()
+                }
+            },
+            onLongClickTransitCode = { viewModel.openTransitCodeSheet() },
+            onRefreshNow = { viewModel.refreshNow() }
+        )
     }
+}
 
     // 4. 发车时刻表 BottomSheet 弹窗
     if (uiState.isTimetableSheetOpen && uiState.timetable != null) {
@@ -1393,6 +1403,7 @@ private fun BusFollowContent(
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun BottomFloatingToolbar(
+    modifier: Modifier = Modifier,
     isFavorite: Boolean,
     flipRotation: () -> Float,
     hasReverseDirection: Boolean,
@@ -1408,7 +1419,7 @@ private fun BottomFloatingToolbar(
     val haptic = LocalHapticFeedback.current
 
     Box(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
             .padding(bottom = 16.dp),
