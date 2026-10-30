@@ -5,6 +5,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.trackr.BuildConfig
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -46,6 +47,59 @@ class AmapSdkManagerTest {
         if (BuildConfig.AMAP_ANDROID_KEY.isBlank()) {
             val res = AmapSdkManager.applyApiKey(context, "")
             assertFalse(res)
+        }
+    }
+
+    @Test
+    fun getEffectiveWebServiceKey_prefersUserCustomKey() {
+        assertEquals(
+            "web_key_123",
+            AmapSdkManager.getEffectiveWebServiceKey("web_key_123")
+        )
+    }
+
+    @Test
+    fun getEffectiveWebServiceKey_fallsBackToBuildConfig() {
+        assertEquals(
+            BuildConfig.AMAP_WEB_KEY.trim(),
+            AmapSdkManager.getEffectiveWebServiceKey(null)
+        )
+    }
+
+    @Test
+    fun androidAndWebKeys_stayInSeparateSlots() {
+        val storePrefs = AmapKeyStore.prefs(context)
+        AmapKeyStore.writeAndroidKey(context, "android_key_abc")
+        AmapKeyStore.writeWebKey(context, "web_key_xyz")
+
+        assertEquals("android_key_abc", AmapKeyStore.readAndroidKey(context))
+        assertEquals("web_key_xyz", AmapKeyStore.readWebKey(context))
+
+        AmapKeyStore.writeAndroidKey(context, "")
+        AmapKeyStore.writeWebKey(context, "")
+        storePrefs?.edit()?.clear()?.apply()
+    }
+
+    @Test
+    fun mapUnavailableReason_isNullWhenKeyAndAbiAvailable() {
+        if (AmapSdkManager.isRuntimeAbiSupported()) {
+            assertNull(AmapSdkManager.mapUnavailableReason("dummy_key_1234567890abcdef"))
+        }
+    }
+
+    @Test
+    fun mapUnavailableReason_mentionsAbiOnUnsupportedEmulator() {
+        if (!AmapSdkManager.isRuntimeAbiSupported()) {
+            val reason = AmapSdkManager.mapUnavailableReason("dummy_key_1234567890abcdef")
+            assertTrue(reason != null && reason.contains("ABI"))
+        }
+    }
+
+    @Test
+    fun mapUnavailableReason_mentionsKeyWhenKeyMissing() {
+        if (AmapSdkManager.isRuntimeAbiSupported() && BuildConfig.AMAP_ANDROID_KEY.isBlank()) {
+            val reason = AmapSdkManager.mapUnavailableReason("")
+            assertTrue(reason != null && reason.contains("Android Key"))
         }
     }
 }

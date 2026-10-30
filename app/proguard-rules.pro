@@ -43,3 +43,16 @@
 -keep public class * extends android.app.Service
 -keep public class * extends android.content.BroadcastReceiver
 -keep public class * extends android.appwidget.AppWidgetProvider
+
+# --- 高德地图 SDK（3dmap / location / search）---
+# SDK 内部大量使用 JNI 回调与反射查找类名，混淆后会直接导致地图白屏或崩溃
+-keep class com.amap.api.** { *; }
+-keep class com.autonavi.** { *; }
+-keep class com.loc.** { *; }
+-dontwarn com.amap.api.**
+-dontwarn com.autonavi.**
+-dontwarn com.loc.**
+# 11.x 起内置的 location fusion 会反射引用可选的 GNSS 模块（com.amap.ams.*），
+# 该模块未打进一体化包，属于「可选依赖缺失」，忽略即可
+-dontwarn com.amap.ams.**
+

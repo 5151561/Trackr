@@ -4,6 +4,8 @@ import android.app.Application
 import com.trackr.data.provider.TransitProviderCoordinator
 import com.trackr.data.provider.chelaile.ChelaileTransitProvider
 import com.trackr.data.provider.mygolbs.MygolbsTransitProvider
+import com.trackr.data.remote.amap.AmapKeyStore
+import com.trackr.data.remote.amap.AmapSdkManager
 import com.trackr.data.remote.chelaile.ChelaileApiClient
 import com.trackr.data.remote.mygolbs.MygolbsApiClient
 import com.trackr.data.repository.ITransitRepository
@@ -43,6 +45,12 @@ class TrackrApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+
+        // 高德 SDK 必须在任何地图/搜索/定位实例创建之前完成隐私合规与 Key 注入，
+        // 否则首次进入路线规划页会因未鉴权而只显示空白底图。
+        runCatching {
+            AmapSdkManager.initialize(applicationContext, AmapKeyStore.readAndroidKey(applicationContext))
+        }
 
         okHttpClient = OkHttpClient.Builder()
             .connectTimeout(12, TimeUnit.SECONDS)

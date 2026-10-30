@@ -344,7 +344,27 @@ class FavoritesGroupViewModelTest {
         assertNull(viewModel.customAmapApiKey.value)
         viewModel.saveCustomAmapApiKey("test_key_123456")
         assertEquals("test_key_123456", viewModel.customAmapApiKey.value)
-        assertEquals("test_key_123456", sharedPrefs.getString("custom_amap_web_key", null))
+        // Android 平台 Key 与 Web 服务 Key 分槽存储，避免两类 Key 混用
+        assertEquals("test_key_123456", sharedPrefs.getString("custom_amap_android_key", null))
+        assertNull(sharedPrefs.getString("custom_amap_web_key", null))
+    }
+
+    @Test
+    fun testCustomAmapWebApiKeyStoredIndependently() {
+        val sharedPrefs = context.getSharedPreferences("test_prefs_web", Context.MODE_PRIVATE)
+        val viewModel = FavoritesGroupViewModel(
+            groupRepository = groupRepository,
+            transitRepository = fakeTransitRepository,
+            prefs = sharedPrefs,
+            enableAutoRefresh = false
+        )
+
+        assertNull(viewModel.customAmapWebApiKey.value)
+        viewModel.saveCustomAmapWebApiKey("web_key_abcdef")
+        assertEquals("web_key_abcdef", viewModel.customAmapWebApiKey.value)
+        assertEquals("web_key_abcdef", sharedPrefs.getString("custom_amap_web_key", null))
+        // 保存 Web Key 不应污染 Android 平台 Key
+        assertNull(viewModel.customAmapApiKey.value)
     }
 
     @Test

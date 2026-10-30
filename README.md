@@ -103,11 +103,27 @@ Trackr (BusOnRoad) 是一款专为通勤族打造的 Android 实时公交追踪�
 为保障开源项目安全合规，并规避商业地图平台对公共个人 Key 的严格 QPS 并发限流（高德个人开发者仅 3 QPS 并发），本项目全面采用**自备 Key 与配置解耦**规范：
 
 - **开源安全**：严禁提交任何正式 Keystore 及其密码（已加入 `.gitignore`），源码中无任何硬编码 Key。
-- **动态适配证书指纹**：用户无论使用发布包、克隆后 Debug 编译或使用个人签名，在 App 内打开路线规划并点击右上角设置，即可**一键复制当前环境运行的真实包名与 SHA-1 安全码**，前往[高德开放平台](https://console.amap.com/)添加 **Android 平台** Key。
+- **两类 Key 不能混用**（地图出不来最常见的原因）：
+  | Key 类型 | 用途 | 是否绑定包名 |
+  | --- | --- | --- |
+  | Android 平台 Key | 3D 底图渲染、搜索 SDK、定位 SDK | ✅ 必须绑定包名 + SHA-1 |
+  | Web 服务 Key | `restapi.amap.com` 公交算路 / 输入提示 | ❌ 不绑定 |
+- **动态适配证书指纹**：在 App 内打开路线规划 → 点击「配置 Key」胶囊 → 「复制包名 + SHA-1」，前往[高德开放平台](https://console.amap.com/dev/key/app)创建 **Android 平台** Key 后回填即可，**无需重新编译**。
+- **一把 Key 同时覆盖 debug 与 release**：`debug` 与 `release` 共用同一个 `PackageName`（`com.github.u5151561.trackr`），而高德控制台的 Key 表单允许同时填写「发布版安全码 SHA1」与「调试版安全码 SHA1」。把两个指纹都填上，同一个 Key 在两种构建产物里都能出图，不必分别申请。
+- **开源分发场景说明**：所有人安装的是同一个已签名 APK，包名与 SHA-1 完全一致，因此每位用户用自己的高德账号按同一组「包名 + SHA-1」申请各自的 Key 即可，互不干扰，也不会互相争抢 QPS 配额。只有**自行从源码编译**的人签名不同（debug keystore），需要按 App 内显示的实际 SHA-1 另外注册一个 Key。
 - **配置注入方式（二选一）**：
-  1. **界面配置**：在 App 内设置弹窗直接粘贴保存；
-  2. **工程解耦**：在本地 `local.properties`（已被 Git 忽略）中添加 `AMAP_ANDROID_KEY=你的Key`，编译时自动注入。
-- **免 Key 兜底**：未配置 Key 时，应用将自动启用内置的实时公交直达与站点匹配引擎。
+  1. **界面配置（推荐，终端用户）**：App 内弹窗分别填写「Android Key」与「Web 服务 Key」并保存，立即生效；
+  2. **工程解耦（自用打包）**：在本地 `local.properties`（已被 Git 忽略）中写入，编译时自动注入：
+     ```properties
+     # Android 平台 Key（地图）；通常一把 Key 即可覆盖 debug + release，
+     # 仅有自定义签名等特殊需求时才用 _DEBUG / _RELEASE 单独指定
+     AMAP_ANDROID_KEY=你的 Android 平台 Key
+     # Web 服务 Key（云端公交算路，可选）
+     AMAP_WEB_KEY=你的 Web 服务 Key
+     ```
+     也可用同名环境变量注入。执行 `./gradlew amapKeyStatus` 可查看当前注入状态。
+- **出图必需 ABI**：高德 3dmap 仅内置 `arm64-v8a` / `armeabi-v7a` 原生库，x86/x86_64 模拟器无法渲染底图，请使用真机或 arm 架构模拟器。
+- **免 Key 兜底**：未配置 Key、ABI 不支持或底图鉴权失败时，界面会自动降级为内置矢量示意图并给出具体原因提示，本地实时公交直达与站点匹配引擎仍然可用。
 
 ---
 

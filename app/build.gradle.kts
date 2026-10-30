@@ -1,3 +1,4 @@
+import java.io.RandomAccessFile
 import java.util.Properties
 
 plugins {
@@ -20,8 +21,18 @@ java {
     }
 }
 
-val amapAndroidKey = System.getenv("AMAP_ANDROID_KEY")
-    ?: localProperties.getProperty("AMAP_ANDROID_KEY", "")
+fun localOrEnv(name: String): String =
+    System.getenv(name)?.trim().orEmpty().ifBlank { localProperties.getProperty(name, "").trim() }
+
+// 高德 Android 平台 Key：与「PackageName + 签名 SHA-1」绑定。
+// debug 与 release 使用同一个 PackageName（见下方 buildTypes），而高德控制台允许在**同一个 Key**
+// 里同时填写「发布版 SHA-1」和「调试版 SHA-1」，因此一把 Key 即可同时覆盖两种构建产物。
+val amapAndroidKeyFallback = localOrEnv("AMAP_ANDROID_KEY")
+// 仅在使用自定义签名 / 需要为某个变体单独配 Key 时才需要这两项，通常留空
+val amapAndroidKeyDebug = localOrEnv("AMAP_ANDROID_KEY_DEBUG").ifBlank { amapAndroidKeyFallback }
+val amapAndroidKeyRelease = localOrEnv("AMAP_ANDROID_KEY_RELEASE").ifBlank { amapAndroidKeyFallback }
+// 高德 Web 服务 Key（restapi.amap.com），与 Android 平台 Key 互不通用。
+val amapWebServiceKey = localOrEnv("AMAP_WEB_KEY")
 
 android {
     namespace = "com.trackr"
@@ -34,8 +45,9 @@ android {
         versionCode = 3
         versionName = "0.0.3"
 
-        buildConfigField("String", "AMAP_ANDROID_KEY", "\"$amapAndroidKey\"")
-        manifestPlaceholders["AMAP_ANDROID_KEY"] = amapAndroidKey
+        buildConfigField("String", "AMAP_WEB_KEY", "\"$amapWebServiceKey\"")
+        buildConfigField("String", "AMAP_ANDROID_KEY", "\"$amapAndroidKeyRelease\"")
+        manifestPlaceholders["AMAP_ANDROID_KEY"] = amapAndroidKeyRelease
 
         vectorDrawables {
             useSupportLibrary = true
@@ -66,12 +78,17 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".d"
+            // 刻意不再加 .d 后缀：与 release 共用 PackageName，
+            // 这样同一个高德 Key（同时填了发布版 + 调试版 SHA-1）对两种构建都有效。
             enableUnitTestCoverage = true
+            buildConfigField("String", "AMAP_ANDROID_KEY", "\"$amapAndroidKeyDebug\"")
+            manifestPlaceholders["AMAP_ANDROID_KEY"] = amapAndroidKeyDebug
         }
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            buildConfigField("String", "AMAP_ANDROID_KEY", "\"$amapAndroidKeyRelease\"")
+            manifestPlaceholders["AMAP_ANDROID_KEY"] = amapAndroidKeyRelease
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -103,6 +120,11 @@ android {
     }
 
     packaging {
+        jniLibs {
+            // 16 KB 页设备要求 .so 以未压缩方式、按 16 KB 边界在 zip 内对齐；
+            // false = 不压缩（AGP 8.5.1+ 会对未压缩 .so 做 16 KB zipalign）。
+            useLegacyPackaging = false
+        }
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
@@ -142,6 +164,131 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+}
+
+/*
+ * 高德 Key 注入状态自检：./gradlew amapKeyStatus
+ * 用于核对「开放平台注册的包名 + SHA-1」与当前构建产物是否一致。
+ */
+tasks.register("amapKeyStatus") {
+    group = "help"
+    description = "打印高德 Android/Web Key 注入情况与各变体包名"
+    doLast {
+        fun state(key: String) = if (key.isEmpty()) "❌ 未配置" else "✅ 已配置（${key.length} 位）"
+        println(
+            """
+            |高德 Key 状态
+            |  AMAP_ANDROID_KEY          : ${state(amapAndroidKeyFallback)}
+            |  AMAP_ANDROID_KEY_DEBUG    : ${state(amapAndroidKeyDebug)}
+            |  AMAP_ANDROID_KEY_RELEASE  : ${state(amapAndroidKeyRelease)}
+            |  AMAP_WEB_KEY              : ${state(amapWebServiceKey)}
+            |
+            |包名（提交到高德开放平台时填写，debug / release 一致）
+            |  PackageName : com.github.u5151561.trackr
+            |
+            |一个 Key 可同时填写「发布版 SHA-1」与「调试版 SHA-1」，两种构建都能出图。
+            |签名 SHA-1 可在 App 内「配置 Key」弹窗一键复制。
+            """.trimMargin()
+        )
+    }
+}
+
+/*
+ * 16 KB 页大小自检（Android 15+ / 16 KB 页设备）。
+ *
+ * 要求：ELF 的 PT_LOAD 段 p_align >= 0x4000，且 p_offset 与 p_vaddr 对 0x4000 同余。
+ * 不满足时系统会弹出「Android 应用兼容性」警告，后续在这类设备上会直接加载失败。
+ * 校验任务在 assemble* 之后自动执行，也可单独运行：
+ *   ./gradlew checkDebug16kbPageAlignment
+ *   ./gradlew checkRelease16kbPageAlignment
+ */
+
+/** 读取 ELF 的 PT_LOAD 段：(p_offset, p_vaddr, p_align) */
+fun readElfLoadSegments(file: File): List<Triple<Long, Long, Long>> =
+    RandomAccessFile(file, "r").use { raf ->
+        val ident = ByteArray(16).also { raf.readFully(it) }
+        require(ident[0] == 0x7F.toByte() && ident[1] == 'E'.code.toByte()) { "非 ELF 文件: $file" }
+        val is64 = ident[4] == 2.toByte()
+        fun u16(off: Long): Int {
+            val b = ByteArray(2).also { raf.seek(off); raf.readFully(it) }
+            return (b[0].toInt() and 0xFF) or ((b[1].toInt() and 0xFF) shl 8)
+        }
+        fun u32(off: Long): Long {
+            val b = ByteArray(4).also { raf.seek(off); raf.readFully(it) }
+            return (0 until 4).fold(0L) { acc, i -> acc or ((b[i].toLong() and 0xFF) shl (8 * i)) }
+        }
+        fun u64(off: Long): Long {
+            val b = ByteArray(8).also { raf.seek(off); raf.readFully(it) }
+            return (0 until 8).fold(0L) { acc, i -> acc or ((b[i].toLong() and 0xFF) shl (8 * i)) }
+        }
+        val phoff = if (is64) u64(0x20) else u32(0x1C)
+        val phentsize = u16(if (is64) 0x36 else 0x2A)
+        val phnum = u16(if (is64) 0x38 else 0x2C)
+        (0 until phnum).mapNotNull { i ->
+            val base = phoff + i.toLong() * phentsize
+            if (u32(base) != 1L) null
+            else if (is64) Triple(u64(base + 8), u64(base + 16), u64(base + 48))
+            else Triple(u32(base + 4), u32(base + 8), u32(base + 28))
+        }
+    }
+
+/** 16 KB 页兼容性：所有 PT_LOAD 段都按 16 KB 对齐，且 offset/vaddr 同余 */
+fun File.is16kbPageAligned(): Boolean {
+    val pageSize = 0x4000L
+    val segments = readElfLoadSegments(this)
+    return segments.isNotEmpty() && segments.all { (offset, vaddr, align) ->
+        align >= pageSize && offset % pageSize == vaddr % pageSize
+    }
+}
+
+/** 32 位 ABI 不会运行在 16 KB 页设备上，只校验 64 位库 */
+val CHECKED_ABIS = setOf("arm64-v8a", "x86_64")
+
+listOf("Debug", "Release").forEach { variant ->
+    val mergedDir = layout.buildDirectory.dir(
+        "intermediates/merged_native_libs/${variant.lowercase()}/merge${variant}NativeLibs/out/lib"
+    )
+    val checkTask = tasks.register("check${variant}16kbPageAlignment") {
+        group = "verification"
+        description = "校验 ${variant} 变体合并后的 .so 是否满足 16 KB 页对齐"
+        dependsOn(tasks.matching { it.name == "merge${variant}NativeLibs" })
+        inputs.dir(mergedDir).withPropertyName("mergedNativeLibs")
+        outputs.upToDateWhen { false }
+
+        doLast {
+            val root = mergedDir.get().asFile
+            val libs = if (root.exists()) {
+                root.walkTopDown()
+                    .filter { it.isFile && it.extension == "so" && it.parentFile?.name in CHECKED_ABIS }
+                    .sortedBy { it.path }
+                    .toList()
+            } else {
+                emptyList()
+            }
+            if (libs.isEmpty()) {
+                logger.lifecycle("check${variant}16kbPageAlignment: 未找到 64 位共享库，跳过")
+                return@doLast
+            }
+            libs.forEach { logger.lifecycle("  ✔ ${it.parentFile.name}/${it.name}") }
+
+            val bad = libs.filterNot { it.is16kbPageAligned() }
+            if (bad.isNotEmpty()) {
+                throw GradleException(
+                    buildString {
+                        appendLine("以下共享库未按 16 KB 页对齐，会在 16 KB 页大小的设备上加载失败：")
+                        bad.forEach {
+                            val aligns = readElfLoadSegments(it)
+                                .joinToString { seg -> "0x" + seg.third.toString(16) }
+                            appendLine("  ✘ ${it.parentFile.name}/${it.name}  (p_align: $aligns)")
+                        }
+                        append("请将对应依赖升级到 16 KB 兼容版本（自编译 .so 需 NDK r28+）。")
+                    }
+                )
+            }
+            logger.lifecycle("check${variant}16kbPageAlignment: ${libs.size} 个 64 位共享库全部通过")
+        }
+    }
+    tasks.matching { it.name == "assemble${variant}" }.configureEach { finalizedBy(checkTask) }
 }
 
 tasks.register<JacocoReport>("jacocoTestReport") {

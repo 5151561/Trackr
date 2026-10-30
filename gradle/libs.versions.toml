@@ -21,7 +21,9 @@ coroutinesTest = "1.10.2"
 robolectric = "4.14.1"
 turbine = "1.2.0"
 jacoco = "0.8.12"
-amap3dBundle = "10.0.1000_loc6.4.8_sea9.7.4"
+# 高德 3dmap 一体化包：11.2.100 起其 .so 的 PT_LOAD 段才按 16 KB 对齐（0x4000），
+# 10.0.x / 11.1.x 均为 4 KB（0x1000），在 16 KB 页大小的 Android 设备上会加载失败。
+amap3dBundle = "11.3.100_loc11.3.101_sea9.8.1"
 
 [libraries]
 amap-search = { group = "com.amap.api", name = "3dmap-location-search", version.ref = "amap3dBundle" }

@@ -4,11 +4,11 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.trackr.BuildConfig
 import com.trackr.TrackrApp
 import com.trackr.data.provider.TransitProviderCoordinator
 import com.trackr.data.provider.model.LineDetailRequest
 import com.trackr.data.provider.model.StopDetailRequest
+import com.trackr.data.remote.amap.AmapKeyStore
 import com.trackr.data.remote.amap.AmapSdkManager
 import com.trackr.data.remote.amap.AmapSdkTransitService
 import com.trackr.data.remote.amap.AmapTipItem
@@ -64,7 +64,11 @@ class FavoritesGroupViewModel(
 ) : ViewModel() {
 
     companion object {
-        const val PREF_KEY_AMAP_KEY = "custom_amap_web_key"
+        @Deprecated("历史槽位，等同于 web 服务 Key")
+        const val PREF_KEY_AMAP_KEY = AmapKeyStore.KEY_WEB
+
+        /** 高德 Android 平台 Key（地图 / 搜索 / 定位 SDK） */
+        const val PREF_KEY_AMAP_ANDROID_KEY = AmapKeyStore.KEY_ANDROID
 
         /** 一次性数据迁移版本号，避免每次 ViewModel 重建都全量重跑迁移逻辑 */
         const val PREF_KEY_MIGRATION_VERSION = "favorites_group_migration_version"
@@ -155,12 +159,24 @@ class FavoritesGroupViewModel(
     private val _planErrorMessage = MutableStateFlow<String?>(null)
     val planErrorMessage: StateFlow<String?> = _planErrorMessage.asStateFlow()
 
+    /** 高德 Android 平台 Key（地图渲染 / 搜索 / 定位 SDK），与包名 + SHA-1 绑定 */
     private val _customAmapApiKey = MutableStateFlow<String?>(
-        prefs?.getString(PREF_KEY_AMAP_KEY, null)?.trim()?.ifBlank { null }
+        prefs?.let { p ->
+            // 显式 Android Key 优先；旧版本只有单一输入框，Key 存在 web 槽位，这里做兼容回落
+            p.getString(PREF_KEY_AMAP_ANDROID_KEY, null)?.trim()?.ifBlank { null }
+                ?: p.getString(PREF_KEY_AMAP_KEY, null)?.trim()?.ifBlank { null }
+        }
     )
     val customAmapApiKey: StateFlow<String?> = _customAmapApiKey.asStateFlow()
 
+    /** 高德 Web 服务 Key（restapi.amap.com 公交算路 / 输入提示），不绑定包名 */
+    private val _customAmapWebApiKey = MutableStateFlow<String?>(
+        prefs?.getString(PREF_KEY_AMAP_KEY, null)?.trim()?.ifBlank { null }
+    )
+    val customAmapWebApiKey: StateFlow<String?> = _customAmapWebApiKey.asStateFlow()
+
     init {
+        // SDK Key 已在 TrackrApp 启动阶段完成注入，这里只在运行期配置变更后重新对齐一次
         runCatching {
             AmapSdkManager.applyApiKey(TrackrApp.instance, _customAmapApiKey.value)
         }
@@ -276,13 +292,25 @@ class FavoritesGroupViewModel(
         }
     }
 
+    /**
+     * 保存高德 Android 平台 Key（地图 / 搜索 / 定位 SDK 使用）
+     */
     fun saveCustomAmapApiKey(key: String) {
         val trimmed = key.trim().ifBlank { null }
-        prefs?.edit()?.putString(PREF_KEY_AMAP_KEY, trimmed)?.apply()
+        prefs?.edit()?.putString(PREF_KEY_AMAP_ANDROID_KEY, trimmed)?.apply()
         _customAmapApiKey.value = trimmed
         runCatching {
             AmapSdkManager.applyApiKey(TrackrApp.instance, trimmed)
         }
+    }
+
+    /**
+     * 保存高德 Web 服务 Key（restapi.amap.com 公交算路 / 输入提示）
+     */
+    fun saveCustomAmapWebApiKey(key: String) {
+        val trimmed = key.trim().ifBlank { null }
+        prefs?.edit()?.putString(PREF_KEY_AMAP_KEY, trimmed)?.apply()
+        _customAmapWebApiKey.value = trimmed
     }
 
     /**
@@ -295,10 +323,11 @@ class FavoritesGroupViewModel(
         }
         viewModelScope.launch {
             val city = transitRepository.selectedCity.value
-            val customKey = _customAmapApiKey.value
-            val sdkResult = amapSdkService?.searchPoiTips(keyword, city.cityName, customKey)
+            val sdkKey = _customAmapApiKey.value
+            val webKey = _customAmapWebApiKey.value
+            val sdkResult = amapSdkService?.searchPoiTips(keyword, city.cityName, sdkKey)
             val tips = sdkResult?.getOrNull()
-                ?: runCatching { amapApiClient.searchPoiTips(keyword, city.cityName, customKey) }.getOrNull()?.getOrNull().orEmpty()
+                ?: runCatching { amapApiClient.searchPoiTips(keyword, city.cityName, webKey) }.getOrNull()?.getOrNull().orEmpty()
 
             if (tips.isNotEmpty()) {
                 _amapOriginTips.value = tips
@@ -318,10 +347,11 @@ class FavoritesGroupViewModel(
         }
         viewModelScope.launch {
             val city = transitRepository.selectedCity.value
-            val customKey = _customAmapApiKey.value
-            val sdkResult = amapSdkService?.searchPoiTips(keyword, city.cityName, customKey)
+            val sdkKey = _customAmapApiKey.value
+            val webKey = _customAmapWebApiKey.value
+            val sdkResult = amapSdkService?.searchPoiTips(keyword, city.cityName, sdkKey)
             val tips = sdkResult?.getOrNull()
-                ?: runCatching { amapApiClient.searchPoiTips(keyword, city.cityName, customKey) }.getOrNull()?.getOrNull().orEmpty()
+                ?: runCatching { amapApiClient.searchPoiTips(keyword, city.cityName, webKey) }.getOrNull()?.getOrNull().orEmpty()
 
             if (tips.isNotEmpty()) {
                 _amapDestTips.value = tips
@@ -380,8 +410,11 @@ class FavoritesGroupViewModel(
             _plannedSchemes.value = emptyList()
 
             val city = transitRepository.selectedCity.value
-            val customKey = _customAmapApiKey.value
-            val hasAmap = !customKey.isNullOrBlank() || BuildConfig.AMAP_ANDROID_KEY.isNotBlank()
+            val sdkKey = _customAmapApiKey.value
+            val webKey = _customAmapWebApiKey.value
+            val hasAmapSdk = AmapSdkManager.isAndroidKeyConfigured(sdkKey)
+            val hasAmapWeb = AmapSdkManager.isWebServiceKeyConfigured(webKey)
+            val hasAmap = hasAmapSdk || hasAmapWeb
 
             var effectiveOrigin = origin
             var effectiveDest = destination
@@ -434,14 +467,18 @@ class FavoritesGroupViewModel(
             suspend fun resolveLocation(tip: AmapTipItem): AmapTipItem {
                 if (tip.location.contains(",")) return tip
                 if (hasAmap) {
-                    val sdkFound = amapSdkService?.searchPoiTips(tip.name, city.cityName, customKey)
-                        ?.getOrNull()?.firstOrNull { it.location.contains(",") }
-                    if (sdkFound != null) return sdkFound
+                    if (hasAmapSdk) {
+                        val sdkFound = amapSdkService?.searchPoiTips(tip.name, city.cityName, sdkKey)
+                            ?.getOrNull()?.firstOrNull { it.location.contains(",") }
+                        if (sdkFound != null) return sdkFound
+                    }
 
-                    val webFound = runCatching {
-                        amapApiClient.searchPoiTips(tip.name, city.cityName, customKey)
-                    }.getOrNull()?.getOrNull()?.firstOrNull { it.location.contains(",") }
-                    if (webFound != null) return webFound
+                    if (hasAmapWeb) {
+                        val webFound = runCatching {
+                            amapApiClient.searchPoiTips(tip.name, city.cityName, webKey)
+                        }.getOrNull()?.getOrNull()?.firstOrNull { it.location.contains(",") }
+                        if (webFound != null) return webFound
+                    }
                 }
                 val localFound = searchLocalStopTips(tip.name, city).firstOrNull { it.location.contains(",") }
                 if (localFound != null) return localFound
@@ -454,24 +491,26 @@ class FavoritesGroupViewModel(
             var schemes: List<AmapTransitSchemeResult> = emptyList()
 
             if (effectiveOrigin.location.contains(",") && effectiveDest.location.contains(",")) {
-                val sdkResult = amapSdkService?.planTransit(
-                    originLngLat = effectiveOrigin.location,
-                    destinationLngLat = effectiveDest.location,
-                    originName = effectiveOrigin.name,
-                    destName = effectiveDest.name,
-                    city = city.cityName,
-                    customApiKey = customKey
-                )
-                schemes = sdkResult?.getOrNull().orEmpty()
+                if (hasAmapSdk) {
+                    val sdkResult = amapSdkService?.planTransit(
+                        originLngLat = effectiveOrigin.location,
+                        destinationLngLat = effectiveDest.location,
+                        originName = effectiveOrigin.name,
+                        destName = effectiveDest.name,
+                        city = city.cityName,
+                        customApiKey = sdkKey
+                    )
+                    schemes = sdkResult?.getOrNull().orEmpty()
+                }
 
-                if (schemes.isEmpty()) {
+                if (schemes.isEmpty() && hasAmapWeb) {
                     val webResult = amapApiClient.planTransit(
                         originLngLat = effectiveOrigin.location,
                         destinationLngLat = effectiveDest.location,
                         originName = effectiveOrigin.name,
                         destName = effectiveDest.name,
                         city = city.cityName,
-                        apiKey = customKey
+                        apiKey = webKey
                     )
                     schemes = webResult.getOrNull().orEmpty()
                 }

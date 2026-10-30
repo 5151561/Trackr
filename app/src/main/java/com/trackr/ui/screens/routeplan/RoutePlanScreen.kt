@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapVert
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -100,6 +101,7 @@ import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
@@ -132,6 +134,7 @@ import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.TransitGroup
 import com.trackr.ui.screens.favoritesgroup.FavoritesGroupViewModel
 import com.trackr.util.SignatureUtils
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
@@ -161,6 +164,7 @@ fun RoutePlanScreen(
     val isPlanning by viewModel.isPlanningRoute.collectAsStateWithLifecycle()
     val planError by viewModel.planErrorMessage.collectAsStateWithLifecycle()
     val customApiKey by viewModel.customAmapApiKey.collectAsStateWithLifecycle()
+    val customWebApiKey by viewModel.customAmapWebApiKey.collectAsStateWithLifecycle()
     val favoriteGroups by viewModel.favoriteGroups.collectAsStateWithLifecycle()
 
     var originText by rememberSaveable { mutableStateOf("") }
@@ -230,9 +234,26 @@ fun RoutePlanScreen(
 
     val currentScheme = plannedSchemes.getOrNull(selectedSchemeIndex)
 
+    // 地图可用性判定：
+    // - 硬失败（缺 Key / ABI 不支持 / 原生库异常）→ 直接降级为内置矢量示意图；
+    // - 软失败（底图 15s 未就绪）→ 保留真实地图，浮层提示，避免把“加载慢”误判成“用不了”。
+    val isSdkKeyConfigured = remember(customApiKey) {
+        AmapSdkManager.isAndroidKeyConfigured(customApiKey)
+    }
+    val mapUnavailableReason = remember(customApiKey) {
+        AmapSdkManager.mapUnavailableReason(customApiKey)
+    }
+    var mapRuntimeError by remember(customApiKey) { mutableStateOf<String?>(null) }
+    var mapLoadTimeout by remember(customApiKey) { mutableStateOf<String?>(null) }
+    var mapRetryToken by remember(customApiKey) { mutableIntStateOf(0) }
+    var showMapDiagnostics by remember { mutableStateOf(false) }
+
+    val fallbackReason = mapUnavailableReason ?: mapRuntimeError
+    val useFallbackMap = useVectorMapFallback || fallbackReason != null
+
     Box(modifier = modifier.fillMaxSize()) {
-        // 1. 全屏矢量地图视窗 (真实高德 3D 矢量地图 / Robolectric Canvas 测试降级)
-        if (useVectorMapFallback) {
+        // 1. 全屏矢量地图视窗 (真实高德 3D 矢量地图 / 降级 Canvas 示意图)
+        if (useFallbackMap) {
             RoutePlanVectorMapCanvas(
                 selectedScheme = currentScheme,
                 scale = mapScale,
@@ -243,12 +264,43 @@ fun RoutePlanScreen(
                 },
                 modifier = Modifier.fillMaxSize()
             )
+            if (!useVectorMapFallback && fallbackReason != null) {
+                MapUnavailableNotice(
+                    reason = fallbackReason,
+                    showKeyAction = !isSdkKeyConfigured,
+                    onConfigureKey = { showKeyDialog = true },
+                    onRetry = { mapRuntimeError = null; mapRetryToken++ },
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(horizontal = 24.dp)
+                )
+            }
         } else {
             AmapRealVectorMapView(
                 selectedScheme = currentScheme,
                 customApiKey = customApiKey,
                 recenterTrigger = recenterTrigger,
+                retryToken = mapRetryToken,
+                onMapLoaded = { mapLoadTimeout = null },
+                onLoadTimeout = { mapLoadTimeout = it },
+                onRuntimeError = { mapRuntimeError = it },
                 modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // 底图迟迟未就绪：浮层提示但不销毁地图，用户可以直接重试或查看诊断信息
+        if (!useFallbackMap && mapLoadTimeout != null) {
+            MapLoadTimeoutNotice(
+                reason = mapLoadTimeout.orEmpty(),
+                onRetry = {
+                    mapLoadTimeout = null
+                    mapRetryToken++
+                },
+                onShowDiagnostics = { showMapDiagnostics = true },
+                onDismiss = { mapLoadTimeout = null },
+                modifier = Modifier
+                    .align(Alignment.Center)
+                    .padding(horizontal = 24.dp)
             )
         }
 
@@ -523,14 +575,14 @@ fun RoutePlanScreen(
                         Icon(
                             imageVector = Icons.Default.Settings,
                             contentDescription = "高德Key配置",
-                            tint = if (customApiKey.isNullOrBlank()) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                            tint = if (!isSdkKeyConfigured) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(13.dp)
                         )
                         Text(
-                            text = if (customApiKey.isNullOrBlank()) "配置Key" else "Key已生效",
+                            text = if (!isSdkKeyConfigured) "配置Key" else "Key已生效",
                             style = MaterialTheme.typography.labelSmall.copy(
                                 fontSize = 11.sp,
-                                color = if (customApiKey.isNullOrBlank()) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
+                                color = if (!isSdkKeyConfigured) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Medium
                             )
                         )
@@ -1033,8 +1085,18 @@ fun RoutePlanScreen(
     if (showKeyDialog) {
         AmapApiKeyConfigDialog(
             customApiKey = customApiKey,
+            customWebApiKey = customWebApiKey,
             onSaveCustomApiKey = { viewModel.saveCustomAmapApiKey(it) },
+            onSaveCustomWebApiKey = { viewModel.saveCustomAmapWebApiKey(it) },
             onDismiss = { showKeyDialog = false }
+        )
+    }
+
+    // 6. 地图诊断信息（核对包名 / SHA-1 / 生效 Key 是否与控制台一致）
+    if (showMapDiagnostics) {
+        MapDiagnosticsDialog(
+            androidKey = customApiKey,
+            onDismiss = { showMapDiagnostics = false }
         )
     }
 }
@@ -1426,18 +1488,32 @@ fun SaveFavoriteGroupDialog(
 }
 
 /**
- * 高德 Android Key 与 SHA-1 签名配置对话框
+ * 高德 Key 与 SHA-1 签名配置对话框。
+ *
+ * 高德开放平台的「Android 平台 Key」与「Web 服务 Key」互不通用，这里分两个输入框分别保存：
+ * 前者决定地图能否出图，后者决定云端公交算路能否走 HTTP 接口。
  */
 @Composable
 fun AmapApiKeyConfigDialog(
     customApiKey: String?,
+    customWebApiKey: String?,
     onSaveCustomApiKey: (String) -> Unit,
+    onSaveCustomWebApiKey: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
+    val uriHandler = LocalUriHandler.current
     var inputKey by remember(customApiKey) { mutableStateOf(customApiKey.orEmpty()) }
+    var inputWebKey by remember(customWebApiKey) { mutableStateOf(customWebApiKey.orEmpty()) }
     val currentSha1 = remember { SignatureUtils.getSigningCertificateSha1(context) }
+
+    // 高德 Key 为 32 位字母数字组合，长度不符时直接拦下，省得用户以为“填了就该出图”
+    fun isKeyFormatAcceptable(key: String): Boolean =
+        key.isBlank() || key.length == 32 && key.all { it.isLetterOrDigit() }
+
+    val isAndroidKeyFormatValid = isKeyFormatAcceptable(inputKey.trim())
+    val isWebKeyFormatValid = isKeyFormatAcceptable(inputWebKey.trim())
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1450,7 +1526,7 @@ fun AmapApiKeyConfigDialog(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "高德地图 Key 与签名配置",
+                    text = "高德地图 Key 配置",
                     style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                 )
             }
@@ -1462,10 +1538,51 @@ fun AmapApiKeyConfigDialog(
             ) {
                 item {
                     Text(
-                        text = "本应用默认启用本地站点直达规划引擎。若需使用高德云端规划与地铁换乘算路，可在高德开放平台创建 Android Key：",
+                        text = "本应用开源分发、不内置任何 Key，每位用户用自己的高德账号申请即可（个人开发者免费额度足够日常使用）。" +
+                            "地图底图由「Android 平台 Key」鉴权，必须与下方包名 + SHA-1 完全一致；" +
+                            "「Web 服务 Key」只用于云端公交算路，两者不能混填。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+
+                item {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(
+                            text = "申请步骤：① 复制包名 + SHA-1 → ② 控制台创建「Android 平台」Key，发布版 / 调试版 SHA-1 都填上 → ③ 把 Key 填到下面 → ④ 保存",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    val text = "包名：${context.packageName}\nSHA-1：$currentSha1"
+                                    clipboardManager.setText(AnnotatedString(text))
+                                    Toast.makeText(context, "包名与 SHA-1 已复制", Toast.LENGTH_SHORT).show()
+                                },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier.testTag("btn_copy_pkg_sha1")
+                            ) {
+                                Text("复制包名 + SHA-1", style = MaterialTheme.typography.labelSmall)
+                            }
+                            TextButton(
+                                onClick = {
+                                    runCatching {
+                                        uriHandler.openUri("https://console.amap.com/dev/key/app")
+                                    }.onFailure {
+                                        Toast.makeText(context, "未找到可用浏览器，请手动访问 console.amap.com", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
+                                modifier = Modifier.testTag("btn_open_amap_console")
+                            ) {
+                                Text("打开高德控制台", style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
                 }
 
                 item {
@@ -1541,10 +1658,61 @@ fun AmapApiKeyConfigDialog(
                 item {
                     OutlinedTextField(
                         value = inputKey,
-                        onValueChange = { inputKey = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("高德 Android Key") },
-                        placeholder = { Text("粘贴 32 位 Android Key") },
+                        onValueChange = { inputKey = it.trim() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_amap_android_key"),
+                        label = { Text("高德 Android Key（地图）") },
+                        placeholder = { Text("粘贴 32 位 Android 平台 Key") },
+                        isError = !isAndroidKeyFormatValid,
+                        supportingText = {
+                            Text(
+                                text = when {
+                                    !isAndroidKeyFormatValid -> "Key 应为 32 位字母数字，请检查是否粘贴完整"
+                                    AmapSdkManager.isAndroidKeyConfigured(inputKey) -> "已配置，地图将使用该 Key 出图"
+                                    else -> "未配置时地图降级为内置示意图"
+                                },
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        },
+                        trailingIcon = {
+                            if (inputKey.isNotBlank()) {
+                                IconButton(onClick = { inputKey = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "清空 Android Key", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
+                        singleLine = true
+                    )
+                }
+
+                item {
+                    OutlinedTextField(
+                        value = inputWebKey,
+                        onValueChange = { inputWebKey = it.trim() },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("input_amap_web_key"),
+                        label = { Text("高德 Web 服务 Key（可选）") },
+                        placeholder = { Text("用于云端公交算路，不绑定包名") },
+                        isError = !isWebKeyFormatValid,
+                        supportingText = {
+                            Text(
+                                text = when {
+                                    !isWebKeyFormatValid -> "Key 应为 32 位字母数字，请检查是否粘贴完整"
+                                    AmapSdkManager.isWebServiceKeyConfigured(inputWebKey) -> "已配置"
+                                    else -> "未配置时仅使用本地 + SDK 引擎算路"
+                                },
+                                style = MaterialTheme.typography.labelSmall
+                            )
+                        },
+                        trailingIcon = {
+                            if (inputWebKey.isNotBlank()) {
+                                IconButton(onClick = { inputWebKey = "" }) {
+                                    Icon(Icons.Default.Clear, contentDescription = "清空 Web Key", modifier = Modifier.size(16.dp))
+                                }
+                            }
+                        },
                         singleLine = true
                     )
                 }
@@ -1552,8 +1720,11 @@ fun AmapApiKeyConfigDialog(
         },
         confirmButton = {
             Button(
+                enabled = isAndroidKeyFormatValid && isWebKeyFormatValid,
                 onClick = {
                     onSaveCustomApiKey(inputKey.trim())
+                    onSaveCustomWebApiKey(inputWebKey.trim())
+                    Toast.makeText(context, "Key 已保存，正在重新加载地图", Toast.LENGTH_SHORT).show()
                     onDismiss()
                 }
             ) {
@@ -1561,21 +1732,199 @@ fun AmapApiKeyConfigDialog(
             }
         },
         dismissButton = {
-            Row {
-                if (inputKey.isNotBlank()) {
-                    TextButton(
-                        onClick = {
-                            inputKey = ""
-                            onSaveCustomApiKey("")
-                            onDismiss()
-                        }
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        }
+    )
+}
+
+/**
+ * 地图不可用提示：说明原因并给出配置入口，避免空白底图让人摸不着头脑。
+ */
+@Composable
+fun MapUnavailableNotice(
+    reason: String,
+    showKeyAction: Boolean,
+    onConfigureKey: () -> Unit,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.testTag("card_map_unavailable"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "底图未加载",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = reason,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "当前展示的是内置矢量示意图，路线与站点信息仍然可用。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "提示：刚填完 Key 仍不出图时，请彻底退出应用再打开一次（高德 SDK 会缓存首次初始化结果）。",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (showKeyAction) {
+                    Button(
+                        onClick = onConfigureKey,
+                        modifier = Modifier.testTag("btn_map_configure_key")
                     ) {
-                        Text("清空")
+                        Text("配置 Key")
                     }
                 }
-                TextButton(onClick = onDismiss) {
-                    Text("取消")
+                TextButton(
+                    onClick = onRetry,
+                    modifier = Modifier.testTag("btn_map_retry")
+                ) {
+                    Text("重试")
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 底图加载超时提示（软失败）：不销毁地图，只做浮层说明 + 重试 / 诊断入口。
+ */
+@Composable
+fun MapLoadTimeoutNotice(
+    reason: String,
+    onRetry: () -> Unit,
+    onShowDiagnostics: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.testTag("card_map_timeout"),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.96f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 6.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.tertiary,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "底图还没加载出来",
+                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = reason,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = onRetry,
+                    modifier = Modifier.testTag("btn_map_timeout_retry")
+                ) {
+                    Text("重试")
+                }
+                OutlinedButton(
+                    onClick = onShowDiagnostics,
+                    modifier = Modifier.testTag("btn_map_diagnostics")
+                ) {
+                    Text("诊断信息")
+                }
+                TextButton(onClick = onDismiss) {
+                    Text("先不用")
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 地图诊断信息：把包名 / SHA-1 / 实际生效的 Key 摆出来，方便对照高德控制台排查。
+ */
+@Composable
+fun MapDiagnosticsDialog(
+    androidKey: String?,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+
+    val packageName = context.packageName
+    val sha1 = remember { SignatureUtils.getSigningCertificateSha1(context) }
+    val effectiveKey = remember(androidKey) { AmapSdkManager.getEffectiveApiKey(androidKey) }
+    val keySource = when {
+        !androidKey.isNullOrBlank() -> "应用内配置"
+        effectiveKey.isNotEmpty() -> "编译期注入（local.properties / 环境变量）"
+        else -> "未配置"
+    }
+    val maskedKey = if (effectiveKey.isEmpty()) {
+        "未配置"
+    } else {
+        "${effectiveKey.take(4)}…${effectiveKey.takeLast(4)}（${effectiveKey.length} 位）"
+    }
+    val sdkVersion = remember { runCatching { com.amap.api.maps.MapsInitializer.getVersion() }.getOrDefault("未知") }
+
+    val report = buildString {
+        appendLine("包名：$packageName")
+        appendLine("SHA-1：${sha1.ifBlank { "读取失败" }}")
+        appendLine("生效 Key：$maskedKey")
+        appendLine("Key 来源：$keySource")
+        appendLine("设备 ABI：${Build.SUPPORTED_ABIS.joinToString("/")}")
+        appendLine("地图 SDK：$sdkVersion")
+        appendLine("鉴权失败常见原因：Key 未绑定当前包名或 SHA-1；把 Web 服务 Key 当地图 Key 用；Key 未通过审核/未勾选协议。")
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("地图诊断信息", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)) },
+        text = {
+            Text(
+                text = report,
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    clipboardManager.setText(AnnotatedString(report))
+                    Toast.makeText(context, "诊断信息已复制", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.testTag("btn_copy_diagnostics")
+            ) {
+                Text("复制")
             }
         }
     )
@@ -1583,39 +1932,78 @@ fun AmapApiKeyConfigDialog(
 
 /**
  * 真实高德 3D 矢量地图视图 (TextureMapView)
+ *
+ * @param retryToken 变化时强制重建地图实例（Key 变更、用户点“重试”）
+ * @param onMapLoaded 底图首次就绪回调
+ * @param onLoadTimeout 底图超时未就绪回调（软失败，外层以浮层提示，不销毁地图）
+ * @param onRuntimeError 地图实例创建失败（如设备 ABI 缺 arm 库、原生库加载失败）回调，外层切换为矢量示意图
  */
 @Composable
 fun AmapRealVectorMapView(
     selectedScheme: AmapTransitSchemeResult?,
     customApiKey: String?,
     recenterTrigger: Int = 0,
-    modifier: Modifier = Modifier
+    retryToken: Int = 0,
+    modifier: Modifier = Modifier,
+    onMapLoaded: () -> Unit = {},
+    onLoadTimeout: (String) -> Unit = {},
+    onRuntimeError: (String) -> Unit = {}
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
 
     var aMapInstance by remember { mutableStateOf<AMap?>(null) }
     var mapViewInstance by remember { mutableStateOf<TextureMapView?>(null) }
+    var isMapLoaded by remember(customApiKey, retryToken) { mutableStateOf(false) }
 
-    key(customApiKey) {
+    key(customApiKey, retryToken) {
         AndroidView(
             factory = { ctx ->
-                AmapSdkManager.applyApiKey(ctx, customApiKey)
-                TextureMapView(ctx).apply {
-                    onCreate(null)
-                    mapViewInstance = this
-                    val aMap = this.map
-                    aMapInstance = aMap
+                // 每次（重）建地图前强制重新注入 Key：高德 SDK 只在创建地图实例时读取一次
+                AmapSdkManager.applyApiKey(ctx, customApiKey, force = true)
+                runCatching {
+                    TextureMapView(ctx).apply {
+                        onCreate(null)
+                        mapViewInstance = this
+                        val aMap = this.map
+                        aMapInstance = aMap
 
-                    aMap.uiSettings.apply {
-                        isZoomControlsEnabled = false
-                        isCompassEnabled = false
-                        isScaleControlsEnabled = true
-                        isMyLocationButtonEnabled = false
+                        aMap.setOnMapLoadedListener { isMapLoaded = true }
+
+                        aMap.uiSettings.apply {
+                            isZoomControlsEnabled = false
+                            isCompassEnabled = false
+                            isScaleControlsEnabled = true
+                            isMyLocationButtonEnabled = false
+                        }
                     }
+                }.getOrElse { throwable ->
+                    // 原生库加载失败（常见于 x86/x86_64 模拟器）会在这里抛出，交由外层降级。
+                    // 延迟到下一帧再写状态，避免在 AndroidView factory 组合过程中直接修改上层状态。
+                    val message = "高德地图初始化失败：${throwable.javaClass.simpleName}。" +
+                        "3dmap SDK 仅内置 arm64-v8a / armeabi-v7a 原生库，模拟器请使用 arm 架构镜像。"
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { onRuntimeError(message) }
+                    android.view.View(ctx)
                 }
             },
             modifier = modifier
         )
+    }
+
+    // 底图长时间未就绪：多为 Key 未绑定当前包名 / SHA-1（高德鉴权失败时不会抛异常，只是不出图）
+    LaunchedEffect(mapViewInstance, isMapLoaded, retryToken) {
+        if (isMapLoaded) {
+            onMapLoaded()
+            return@LaunchedEffect
+        }
+        if (mapViewInstance == null) return@LaunchedEffect
+        delay(15_000)
+        if (!isMapLoaded) {
+            onLoadTimeout(
+                "底图 15 秒内未加载完成。最常见原因是 Key 与当前运行环境不匹配：" +
+                    "包名（${BuildConfig.APPLICATION_ID}）或签名 SHA-1 与高德控制台填写的不一致，" +
+                    "或误把「Web 服务 Key」当成了地图 Key。可点「诊断信息」核对具体数值。"
+            )
+        }
     }
 
     // 幂等保护：Activity 销毁时 ON_DESTROY 与 onDispose 都会触发 onDestroy，重复调用会破坏高德内部状态；
@@ -1657,6 +2045,12 @@ fun AmapRealVectorMapView(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
+        // 关键：切到路线规划 Tab 时 Activity 早已处于 RESUMED 状态，
+        // 观察者收不到 ON_RESUME 事件，必须主动补一次 onResume，
+        // 否则 TextureMapView 始终处于 pause 状态，底图不会渲染（表现为白屏/灰屏）。
+        if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            resumeOnce()
+        }
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
             pauseOnce()
