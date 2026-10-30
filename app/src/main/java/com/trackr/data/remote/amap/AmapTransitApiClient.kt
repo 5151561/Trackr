@@ -170,6 +170,9 @@ class AmapTransitApiClient(
                             fromLat = loc[1].toDoubleOrNull() ?: 0.0
                         }
                     }
+                    if (departureStopName.isEmpty()) {
+                        departureStopName = originName
+                    }
 
                     if (arrStop != null) {
                         arrivalStopName = arrStop.optString("name")
@@ -178,6 +181,9 @@ class AmapTransitApiClient(
                             toLng = loc[0].toDoubleOrNull() ?: 0.0
                             toLat = loc[1].toDoubleOrNull() ?: 0.0
                         }
+                    }
+                    if (arrivalStopName.isEmpty()) {
+                        arrivalStopName = destName
                     }
 
                     val viaNum = lineObj.optInt("via_num", 1)

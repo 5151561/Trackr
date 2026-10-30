@@ -175,17 +175,31 @@ class AmapSdkTransitService(
                     val depStop = lineItem.departureBusStation
                     val arrStop = lineItem.arrivalBusStation
 
-                    if (depStop != null) {
+                    if (depStop != null && !depStop.busStationName.isNullOrEmpty()) {
                         departureStopName = depStop.busStationName.orEmpty()
                         depStop.latLonPoint?.let { pt ->
                             fromLng = pt.longitude
                             fromLat = pt.latitude
                         }
+                    } else {
+                        val firstStation = lineItem.busStations?.firstOrNull()
+                        departureStopName = firstStation?.busStationName?.ifBlank { null } ?: originName
+                        firstStation?.latLonPoint?.let { pt ->
+                            fromLng = pt.longitude
+                            fromLat = pt.latitude
+                        }
                     }
 
-                    if (arrStop != null) {
+                    if (arrStop != null && !arrStop.busStationName.isNullOrEmpty()) {
                         arrivalStopName = arrStop.busStationName.orEmpty()
                         arrStop.latLonPoint?.let { pt ->
+                            toLng = pt.longitude
+                            toLat = pt.latitude
+                        }
+                    } else {
+                        val lastStation = lineItem.busStations?.lastOrNull()
+                        arrivalStopName = lastStation?.busStationName?.ifBlank { null } ?: destName
+                        lastStation?.latLonPoint?.let { pt ->
                             toLng = pt.longitude
                             toLat = pt.latitude
                         }

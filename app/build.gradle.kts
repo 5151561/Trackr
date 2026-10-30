@@ -35,6 +35,7 @@ android {
         versionName = "0.0.3"
 
         buildConfigField("String", "AMAP_ANDROID_KEY", "\"$amapAndroidKey\"")
+        manifestPlaceholders["AMAP_ANDROID_KEY"] = amapAndroidKey
 
         vectorDrawables {
             useSupportLibrary = true
