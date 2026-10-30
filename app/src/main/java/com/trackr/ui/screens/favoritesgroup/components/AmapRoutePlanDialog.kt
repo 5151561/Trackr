@@ -161,14 +161,13 @@ fun AmapRoutePlanDialog(
 
                 // 起点搜索候选
                 if (isOriginTipsVisible) {
-                    LazyColumn(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(110.dp)
                             .padding(vertical = 4.dp)
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
                     ) {
-                        items(originTips.take(4)) { tip ->
+                        originTips.take(4).forEach { tip ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -223,14 +222,13 @@ fun AmapRoutePlanDialog(
 
                 // 终点搜索候选
                 if (isDestTipsVisible) {
-                    LazyColumn(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(110.dp)
                             .padding(vertical = 4.dp)
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f), RoundedCornerShape(8.dp))
                     ) {
-                        items(destTips.take(4)) { tip ->
+                        destTips.take(4).forEach { tip ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -305,7 +303,11 @@ fun AmapRoutePlanDialog(
                             .weight(1f),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(plannedSchemes) { scheme ->
+                        items(
+                            items = plannedSchemes,
+                            key = { it.group.id },
+                            contentType = { "amap_transit_scheme" }
+                        ) { scheme ->
                             Card(
                                 modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(12.dp),

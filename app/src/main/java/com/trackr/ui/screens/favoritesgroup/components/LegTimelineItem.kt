@@ -39,13 +39,11 @@ fun LegTimelineItem(
     totalLegs: Int,
     leg: TransitLeg,
     isLegActive: Boolean,
-    realtimeSummaries: Map<String, String>,
+    etaSummary: String,
     onLineClick: (CandidateLine) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val primaryCandidate = leg.primaryLine
-    val realtimeKey = if (primaryCandidate != null) "${primaryCandidate.lineId}_${primaryCandidate.toStopOrder}" else ""
-    val etaSummary = realtimeSummaries[realtimeKey] ?: "查询车辆中…"
 
     Column(modifier = modifier.fillMaxWidth()) {
         // 起始站点

@@ -87,7 +87,7 @@ fun FavoritesGroupScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     val groups by viewModel.filteredGroups.collectAsStateWithLifecycle()
-    val allGroupsCount by viewModel.groups.collectAsStateWithLifecycle()
+    val allGroups by viewModel.groups.collectAsStateWithLifecycle()
     val selectedCategory by viewModel.selectedCategory.collectAsStateWithLifecycle()
     val activeSession by viewModel.activeGroupSession.collectAsStateWithLifecycle()
     val realtimeSummaries by viewModel.legRealtimeSummary.collectAsStateWithLifecycle()
@@ -100,6 +100,10 @@ fun FavoritesGroupScreen(
     val plannedSchemes by viewModel.plannedSchemes.collectAsStateWithLifecycle()
     val isPlanningRoute by viewModel.isPlanningRoute.collectAsStateWithLifecycle()
     val planError by viewModel.planErrorMessage.collectAsStateWithLifecycle()
+
+    val categoryCounts = remember(allGroups) {
+        allGroups.groupingBy { it.category }.eachCount()
+    }
 
     var showPasteImportDialog by remember { mutableStateOf(false) }
     var showAmapPlanDialog by remember { mutableStateOf(false) }
@@ -293,14 +297,14 @@ fun FavoritesGroupScreen(
                 FilterChip(
                     selected = selectedCategory == null,
                     onClick = { viewModel.selectCategory(null) },
-                    label = { Text("全部 (${allGroupsCount.size})") },
+                    label = { Text("全部 (${allGroups.size})") },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                         selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
                     )
                 )
                 GroupCategory.entries.forEach { category ->
-                    val count = allGroupsCount.count { it.category == category }
+                    val count = categoryCounts[category] ?: 0
                     FilterChip(
                         selected = selectedCategory == category,
                         onClick = { viewModel.selectCategory(category) },
@@ -364,7 +368,11 @@ fun FavoritesGroupScreen(
                     contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
-                    items(items = groups, key = { it.id }) { group ->
+                    items(
+                        items = groups,
+                        key = { it.id },
+                        contentType = { it.category }
+                    ) { group ->
                         TransitGroupCard(
                             group = group,
                             activeSession = activeSession,

@@ -20,6 +20,8 @@ import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
 import com.trackr.service.TransferAutoSwitchManager
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -283,15 +285,15 @@ class FavoritesGroupViewModel(
     fun refreshRealtimeEta(groupList: List<TransitGroup> = groups.value) {
         val coord = coordinator ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            val city = transitRepository.selectedCity.value
-            val summaryMap = _legRealtimeSummary.value.toMutableMap()
+            val candidates = groupList
+                .flatMap { it.legs }
+                .mapNotNull { it.primaryLine }
+                .distinctBy { "${it.lineId}_${it.toStopOrder}" }
 
-            for (group in groupList) {
-                for (leg in group.legs) {
-                    val candidate = leg.primaryLine ?: continue
+            val deferredResults = candidates.map { candidate ->
+                async {
                     val cacheKey = "${candidate.lineId}_${candidate.toStopOrder}"
-
-                    try {
+                    val summary = try {
                         val detail = coord.getLineDetail(
                             city = TransitCity(cityId = candidate.cityId, cityName = candidate.cityName),
                             request = LineDetailRequest(
@@ -308,14 +310,21 @@ class FavoritesGroupViewModel(
                             val stopsLeft = (candidate.toStopOrder - nearest.order).coerceAtLeast(0)
                             val isArrived = stopsLeft == 0 && (nearest.isArrived || nearest.segmentProgress >= 0.98f)
                             val etaText = RouteProjectionMath.formatEtaText(nearest.etaSeconds, isArrived)
-                            summaryMap[cacheKey] = if (isArrived) "车辆已到站" else "剩$stopsLeft 站 · $etaText"
+                            if (isArrived) "车辆已到站" else "剩$stopsLeft 站 · $etaText"
                         } else {
-                            summaryMap[cacheKey] = "暂无在途车辆"
+                            "暂无在途车辆"
                         }
                     } catch (_: Exception) {
-                        summaryMap[cacheKey] = "等待调度发车"
+                        "等待调度发车"
                     }
+                    cacheKey to summary
                 }
+            }
+
+            val results = deferredResults.awaitAll()
+            val summaryMap = _legRealtimeSummary.value.toMutableMap()
+            results.forEach { (cacheKey, summary) ->
+                summaryMap[cacheKey] = summary
             }
             _legRealtimeSummary.value = summaryMap
         }

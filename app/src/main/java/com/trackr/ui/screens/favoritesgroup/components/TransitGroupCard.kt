@@ -30,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -60,6 +61,11 @@ fun TransitGroupCard(
     val isTrackingThisGroup = activeSession != null && activeSession.groupId == group.id && !activeSession.isCompleted
     val currentLegIndex = activeSession?.activeLegIndex ?: 0
 
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val trackingBorder = remember(primaryColor) {
+        BorderStroke(2.dp, primaryColor)
+    }
+
     Card(
         modifier = modifier.fillMaxWidth(),
         shape = RoundedCornerShape(18.dp),
@@ -70,9 +76,7 @@ fun TransitGroupCard(
                 MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
             }
         ),
-        border = if (isTrackingThisGroup) {
-            BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
-        } else null
+        border = if (isTrackingThisGroup) trackingBorder else null
     ) {
         Column(
             modifier = Modifier
@@ -138,13 +142,16 @@ fun TransitGroupCard(
             // 时间线走向展示 (Timeline Flow)
             group.legs.forEachIndexed { index, leg ->
                 val isLegActive = isTrackingThisGroup && currentLegIndex == index
+                val primaryCandidate = leg.primaryLine
+                val realtimeKey = if (primaryCandidate != null) "${primaryCandidate.lineId}_${primaryCandidate.toStopOrder}" else ""
+                val etaSummary = realtimeSummaries[realtimeKey] ?: "查询车辆中…"
 
                 LegTimelineItem(
                     legIndex = index,
                     totalLegs = group.legs.size,
                     leg = leg,
                     isLegActive = isLegActive,
-                    realtimeSummaries = realtimeSummaries,
+                    etaSummary = etaSummary,
                     onLineClick = onLineClick
                 )
 
