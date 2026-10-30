@@ -85,6 +85,8 @@ import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.NearbyStop
 import com.trackr.ui.screens.home.HomeViewModel
 
+private val SEARCH_SUGGESTIONS = listOf("1路", "2路", "10路", "快速公交", "火车站", "人民广场", "地铁接驳线", "机场大巴")
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SearchScreen(
@@ -230,18 +232,21 @@ fun SearchScreen(
             ) {
                 // 1. 公交线路结果分组
                 if (result != null && result.lines.isNotEmpty()) {
-                    item {
+                    item(key = "section_lines_header", contentType = "search_section_header") {
                         SearchSectionHeader(
                             title = "公交线路",
                             count = result.lines.size,
                             icon = Icons.Default.DirectionsBus
                         )
                     }
-                    itemsIndexed(
+                    items(
                         items = result.lines,
-                        key = { index, it -> "${it.source.name}_${it.name}_${it.lineNo}_$index" },
-                        contentType = { _, _ -> "search_line_item" }
-                    ) { _, lineSummary ->
+                        key = {
+                            val primaryLineId = it.primaryDirection?.lineId.orEmpty()
+                            "${it.source.name}_${it.lineNo}_${it.name}_$primaryLineId"
+                        },
+                        contentType = { "search_line_item" }
+                    ) { lineSummary ->
                         SearchLineItemCard(
                             cityId = state.currentCity.cityId,
                             summary = lineSummary,
@@ -264,18 +269,18 @@ fun SearchScreen(
 
                 // 2. 公交车站结果分组
                 if (result != null && result.stops.isNotEmpty()) {
-                    item {
+                    item(key = "section_stops_header", contentType = "search_section_header") {
                         SearchSectionHeader(
                             title = "公交车站",
                             count = result.stops.size,
                             icon = Icons.Default.Place
                         )
                     }
-                    itemsIndexed(
+                    items(
                         items = result.stops,
-                        key = { index, it -> "${it.stopId.ifBlank { it.name }}_$index" },
-                        contentType = { _, _ -> "search_stop_item" }
-                    ) { _, stop ->
+                        key = { "${it.source.name}_${it.stopId.ifBlank { "${it.name}_${it.wgsLat}_${it.wgsLng}" }}" },
+                        contentType = { "search_stop_item" }
+                    ) { stop ->
                         SearchStopItemCard(
                             stop = stop,
                             onCardClick = {
@@ -767,12 +772,11 @@ private fun SearchSuggestionsView(
         )
         Spacer(modifier = Modifier.height(12.dp))
 
-        val suggestions = listOf("1路", "2路", "10路", "快速公交", "火车站", "人民广场", "地铁接驳线", "机场大巴")
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            suggestions.forEach { suggestion ->
+            SEARCH_SUGGESTIONS.forEach { suggestion ->
                 FilterChip(
                     selected = false,
                     onClick = { onSelectQuery(suggestion) },

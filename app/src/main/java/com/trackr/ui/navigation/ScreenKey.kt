@@ -14,8 +14,8 @@ sealed interface ScreenKey : NavKey {
 
     @Serializable
     data class LineDetail(
-        val cityId: String = "034",
-        val lineId: String = "",
+        val cityId: String,
+        val lineId: String,
         val targetOrder: Int = 0,
         val stopId: String = "",
         val source: DataSourceType = DataSourceType.CHELAILE,
@@ -24,8 +24,8 @@ sealed interface ScreenKey : NavKey {
 
     @Serializable
     data class StopDetail(
-        val cityId: String = "034",
-        val stopId: String = "",
+        val cityId: String,
+        val stopId: String,
         val stopName: String = "",
         val physicalStId: String = "",
         val namesakeStId: String = "",
@@ -39,3 +39,13 @@ sealed interface ScreenKey : NavKey {
     @Serializable
     data object About : ScreenKey
 }
+
+@Serializable
+data class PendingDeepLink(
+    val cityId: String,
+    val lineId: String,
+    val targetOrder: Int = 0,
+    val stopId: String = "",
+    val sourceName: String = "",
+    val lineName: String = ""
+)

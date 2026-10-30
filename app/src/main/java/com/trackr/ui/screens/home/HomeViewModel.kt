@@ -93,6 +93,13 @@ class HomeViewModel(
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    private var autoPollingEnabled: Boolean = enableAutoPolling
+    private var pollingJob: Job? = null
+    private val pollingLock = Any()
+
+    val isPollingActive: Boolean
+        get() = pollingJob?.isActive == true
+
     private var searchJob: Job? = null
     private val locationManager = application.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
 
@@ -184,7 +191,7 @@ class HomeViewModel(
 
         // 开启 15 秒定时轮询
         if (enableAutoPolling) {
-            startRealtimePolling()
+            resumePolling()
         }
     }
 
@@ -446,19 +453,56 @@ class HomeViewModel(
         }
     }
 
-    private fun startRealtimePolling() {
-        viewModelScope.launch {
-            while (isActive) {
-                delay(15_000L)
-                val state = _uiState.value
-                if (!state.isRefreshing && !state.isLoadingNearby && !state.isLocating) {
-                    val nearbyResult = repository.getNearbyStops(state.currentCity, state.currentLat, state.currentLng, limit = repository.nearbyStopsCount.value)
-                    val favResult = repository.refreshFavoritesRealtime()
-                    _uiState.update {
-                        it.copy(
-                            nearbyStops = nearbyResult.getOrNull() ?: it.nearbyStops,
-                            favoritesRealtime = favResult.getOrNull() ?: it.favoritesRealtime
+    /**
+     * 设置轮询是否激活（生命周期感知或显式开关）
+     */
+    fun setPollingActive(active: Boolean) {
+        synchronized(pollingLock) {
+            autoPollingEnabled = active
+            if (active) {
+                resumePolling()
+            } else {
+                pausePolling()
+            }
+        }
+    }
+
+    /**
+     * 暂停后台轮询，安全取消当前轮询 Job
+     */
+    fun pausePolling() {
+        synchronized(pollingLock) {
+            pollingJob?.cancel()
+            pollingJob = null
+        }
+    }
+
+    /**
+     * 恢复/启动后台轮询（幂等，避免重复启动）
+     */
+    fun resumePolling() {
+        synchronized(pollingLock) {
+            if (!autoPollingEnabled) return
+            if (pollingJob?.isActive == true) return
+
+            pollingJob = viewModelScope.launch {
+                while (isActive) {
+                    delay(POLLING_INTERVAL_MS)
+                    val state = _uiState.value
+                    if (!state.isRefreshing && !state.isLoadingNearby && !state.isLocating) {
+                        val nearbyResult = repository.getNearbyStops(
+                            state.currentCity,
+                            state.currentLat,
+                            state.currentLng,
+                            limit = repository.nearbyStopsCount.value
                         )
+                        val favResult = repository.refreshFavoritesRealtime()
+                        _uiState.update {
+                            it.copy(
+                                nearbyStops = nearbyResult.getOrNull() ?: it.nearbyStops,
+                                favoritesRealtime = favResult.getOrNull() ?: it.favoritesRealtime
+                            )
+                        }
                     }
                 }
             }
@@ -594,9 +638,16 @@ class HomeViewModel(
         }
     }
 
+    override fun onCleared() {
+        super.onCleared()
+        pausePolling()
+        searchJob?.cancel()
+    }
+
     companion object {
         const val DEFAULT_NEARBY_STOPS_LIMIT = 4
         const val MAX_NEARBY_STOPS_LIMIT = 16
         const val NEARBY_STOPS_LIMIT = 4
+        const val POLLING_INTERVAL_MS = 15_000L
     }
 }

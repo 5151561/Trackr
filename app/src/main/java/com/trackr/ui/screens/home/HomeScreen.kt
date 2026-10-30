@@ -132,7 +132,7 @@ fun HomeScreen(
         ) {
             // 1. 若当前有正在运行的通知栏实时追踪，置顶显示呼吸动效卡片
             if (state.activeTracking.isActive) {
-                item {
+                item(key = "active_tracking_banner", contentType = "active_tracking_banner") {
                     ActiveTrackingBanner(
                         tracking = state.activeTracking,
                         onCardClick = {
@@ -151,7 +151,7 @@ fun HomeScreen(
             }
 
             // 2. 搜索入口胶囊栏
-            item {
+            item(key = "search_entry_bar", contentType = "search_entry_bar") {
                 SearchEntryBar(
                     cityName = state.currentCity.cityName,
                     onClick = onNavigateToSearch
@@ -159,16 +159,16 @@ fun HomeScreen(
             }
 
             // 3. 一键唤醒乘车码双胶囊卡片
-            item {
+            item(key = "transit_code_card", contentType = "transit_code_card") {
                 TransitCodeQuickCard(
                     onOpenAlipay = { TransitCodeHelper.openAlipayTransitCode(context) },
                     onOpenUnionPay = { TransitCodeHelper.openUnionPayTransitCode(context) }
                 )
             }
 
-            // 3. 权限或定位提示
+            // 4. 权限或定位提示
             if (state.locationError != null) {
-                item {
+                item(key = "location_hint_bar", contentType = "location_hint_bar") {
                     LocationHintBar(
                         message = state.locationError ?: "",
                         onRefreshLocation = { viewModel.refreshLocationAndNearby() }
@@ -176,8 +176,8 @@ fun HomeScreen(
                 }
             }
 
-            // 4. 「常用候车站 / 我的收藏」横向滑动卡片区
-            item {
+            // 5. 「常用候车站 / 我的收藏」横向滑动卡片区
+            item(key = "favorites_section", contentType = "favorites_section") {
                 FavoritesSection(
                     favorites = state.favorites,
                     favoritesRealtime = state.favoritesRealtime,
@@ -194,8 +194,8 @@ fun HomeScreen(
                 )
             }
 
-            // 5. 「附近公交站点」手风琴卡片流
-            item {
+            // 6. 「附近公交站点」手风琴卡片流
+            item(key = "nearby_stops_header", contentType = "nearby_stops_header") {
                 NearbyStopsHeader(
                     cityName = state.currentCity.cityName,
                     isLoading = state.isLoadingNearby || state.isRefreshing || state.isLocating,
@@ -204,7 +204,7 @@ fun HomeScreen(
             }
 
             if (state.isLoadingNearby && state.nearbyStops.isEmpty()) {
-                item {
+                item(key = "nearby_loading", contentType = "nearby_loading") {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -215,15 +215,15 @@ fun HomeScreen(
                     }
                 }
             } else if (state.nearbyStops.isEmpty()) {
-                item {
+                item(key = "nearby_empty", contentType = "nearby_empty") {
                     EmptyNearbyView(onRetry = { viewModel.refreshLocationAndNearby() })
                 }
             } else {
-                itemsIndexed(
+                items(
                     items = state.nearbyStops,
-                    key = { index, it -> "${it.stopId.ifBlank { it.name }}_$index" },
-                    contentType = { _, _ -> "nearby_stop" }
-                ) { _, stop ->
+                    key = { "${it.source.name}_${it.stopId.ifBlank { "${it.name}_${it.wgsLat}_${it.wgsLng}" }}" },
+                    contentType = { "nearby_stop" }
+                ) { stop ->
                     NearbyStopCard(
                         stop = stop,
                         cityId = state.currentCity.cityId,

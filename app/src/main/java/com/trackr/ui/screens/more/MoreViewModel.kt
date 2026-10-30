@@ -9,8 +9,21 @@ import com.trackr.data.repository.ITransitRepository
 import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.ScheduledReminder
 import com.trackr.domain.model.TransitCodeProvider
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+/**
+ * 更多页 UI 状态
+ */
+data class MoreUiState(
+    val engineMode: EngineMode = EngineMode.ALL,
+    val nearbyStopsCount: Int = 4,
+    val preferredTransitCode: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
+    val reminders: List<ScheduledReminder> = emptyList()
+)
 
 class MoreViewModel(
     application: Application,
@@ -34,6 +47,29 @@ class MoreViewModel(
     val nearbyStopsCount: StateFlow<Int> = repository.nearbyStopsCount
     val preferredTransitCode: StateFlow<TransitCodeProvider> = repository.preferredTransitCodeProvider
     val reminders: StateFlow<List<ScheduledReminder>> = reminderRepository.reminders
+
+    val uiState: StateFlow<MoreUiState> = combine(
+        engineMode,
+        nearbyStopsCount,
+        preferredTransitCode,
+        reminders
+    ) { mode, count, code, rems ->
+        MoreUiState(
+            engineMode = mode,
+            nearbyStopsCount = count,
+            preferredTransitCode = code,
+            reminders = rems
+        )
+    }.stateIn(
+        scope = viewModelScope,
+        started = SharingStarted.Eagerly,
+        initialValue = MoreUiState(
+            engineMode = repository.engineMode.value,
+            nearbyStopsCount = repository.nearbyStopsCount.value,
+            preferredTransitCode = repository.preferredTransitCodeProvider.value,
+            reminders = reminderRepository.reminders.value
+        )
+    )
 
     fun setEngineMode(mode: EngineMode) {
         repository.setEngineMode(mode)

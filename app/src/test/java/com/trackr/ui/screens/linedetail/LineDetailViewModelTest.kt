@@ -187,4 +187,41 @@ class LineDetailViewModelTest {
         assertEquals(TransitCodeProvider.UNIONPAY, viewModel.uiState.value.preferredTransitCodeProvider)
         assertEquals(TransitCodeProvider.UNIONPAY, fakeRepository.preferredTransitCodeProvider.value)
     }
+
+    @Test
+    fun testPollingLifecycle_pauseResumeAndExplicitControl() = runTest {
+        val vmWithAutoPolling = LineDetailViewModel(
+            cityId = "034",
+            initialLineId = "line_001",
+            repository = fakeRepository,
+            enableAutoPolling = true
+        )
+        assertTrue(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.pausePolling()
+        assertFalse(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.resumePolling()
+        assertTrue(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.setPollingActive(false)
+        assertFalse(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.setPollingActive(true)
+        assertTrue(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.pausePolling()
+    }
+
+    @Test
+    fun testPollingLifecycle_disabledByDefaultInTest() = runTest {
+        val viewModel = createViewModel()
+        assertFalse(viewModel.isPollingActive)
+
+        viewModel.setPollingActive(true)
+        assertTrue(viewModel.isPollingActive)
+
+        viewModel.pausePolling()
+        assertFalse(viewModel.isPollingActive)
+    }
 }

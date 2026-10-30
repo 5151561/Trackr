@@ -125,4 +125,42 @@ class StopDetailViewModelTest {
 
         assertFalse(viewModel.uiState.value.favoriteIds.contains(expectedFavId))
     }
+
+    @Test
+    fun testPollingLifecycle_pauseResumeAndExplicitControl() = runTest {
+        val vmWithAutoPolling = StopDetailViewModel(
+            cityId = "034",
+            stopId = "stop_001",
+            initialStopName = "人民广场",
+            repository = fakeRepository,
+            enableAutoPolling = true
+        )
+        assertTrue(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.pausePolling()
+        assertFalse(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.resumePolling()
+        assertTrue(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.setPollingActive(false)
+        assertFalse(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.setPollingActive(true)
+        assertTrue(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.pausePolling()
+    }
+
+    @Test
+    fun testPollingLifecycle_disabledByDefaultInTest() = runTest {
+        val viewModel = createViewModel()
+        assertFalse(viewModel.isPollingActive)
+
+        viewModel.setPollingActive(true)
+        assertTrue(viewModel.isPollingActive)
+
+        viewModel.pausePolling()
+        assertFalse(viewModel.isPollingActive)
+    }
 }

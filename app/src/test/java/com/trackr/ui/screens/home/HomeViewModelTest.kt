@@ -14,6 +14,7 @@ import com.trackr.util.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -411,5 +412,41 @@ class HomeViewModelTest {
         assertEquals(false, viewModel.uiState.value.isLocating)
         assertEquals(31.2304, fakeRepository.userLocation.value?.first ?: 0.0, 0.0001)
         assertEquals(121.4737, fakeRepository.userLocation.value?.second ?: 0.0, 0.0001)
+    }
+
+    @Test
+    fun testPollingLifecycle_pauseResumeAndExplicitControl() = runTest {
+        val vmWithAutoPolling = HomeViewModel(
+            application = app,
+            repository = fakeRepository,
+            enableAutoPolling = true
+        )
+        assertTrue(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.pausePolling()
+        assertFalse(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.resumePolling()
+        assertTrue(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.setPollingActive(false)
+        assertFalse(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.setPollingActive(true)
+        assertTrue(vmWithAutoPolling.isPollingActive)
+
+        vmWithAutoPolling.pausePolling()
+    }
+
+    @Test
+    fun testPollingLifecycle_disabledByDefaultInTest() = runTest {
+        val viewModel = createViewModel()
+        assertFalse(viewModel.isPollingActive)
+
+        viewModel.setPollingActive(true)
+        assertTrue(viewModel.isPollingActive)
+
+        viewModel.pausePolling()
+        assertFalse(viewModel.isPollingActive)
     }
 }

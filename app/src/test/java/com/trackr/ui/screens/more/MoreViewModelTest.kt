@@ -49,6 +49,12 @@ class MoreViewModelTest {
         assertEquals(4, viewModel.nearbyStopsCount.value)
         assertEquals(TransitCodeProvider.ASK_ALWAYS, viewModel.preferredTransitCode.value)
         assertTrue(viewModel.reminders.value.isEmpty())
+
+        // 验证统一 MoreUiState
+        assertEquals(EngineMode.ALL, viewModel.uiState.value.engineMode)
+        assertEquals(4, viewModel.uiState.value.nearbyStopsCount)
+        assertEquals(TransitCodeProvider.ASK_ALWAYS, viewModel.uiState.value.preferredTransitCode)
+        assertTrue(viewModel.uiState.value.reminders.isEmpty())
     }
 
     @Test

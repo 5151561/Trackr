@@ -35,6 +35,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -52,24 +54,28 @@ import androidx.navigation3.runtime.rememberSaveableStateHolderNavEntryDecorator
 import androidx.navigation3.ui.NavDisplay
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.TransitCodeProvider
+import com.trackr.ui.navigation.PendingDeepLink
 import com.trackr.ui.navigation.ScreenKey
+import com.trackr.ui.navigation.dropUnlessResumed
 import com.trackr.ui.screens.home.HomeScreen
 import com.trackr.ui.screens.home.HomeViewModel
+import com.trackr.ui.screens.linedetail.LineDetailScreen
+import com.trackr.ui.screens.linedetail.LineDetailViewModel
 import com.trackr.ui.screens.more.AboutScreen
 import com.trackr.ui.screens.more.MoreScreen
 import com.trackr.ui.screens.more.MoreViewModel
-import com.trackr.ui.screens.linedetail.LineDetailScreen
-import com.trackr.ui.screens.linedetail.LineDetailViewModel
 import com.trackr.ui.screens.search.SearchScreen
 import com.trackr.ui.screens.stopdetail.StopDetailScreen
 import com.trackr.ui.screens.stopdetail.StopDetailViewModel
 import com.trackr.ui.theme.TrackrTheme
 import com.trackr.util.TransitCodeHelper
 import com.trackr.widget.BusStopWidgetProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
 
-    private var currentIntent by mutableStateOf<Intent?>(null)
+    private var pendingDeepLink by mutableStateOf<PendingDeepLink?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -78,27 +84,19 @@ class MainActivity : ComponentActivity() {
             window.isNavigationBarContrastEnforced = false
         }
 
-        currentIntent = intent
         handleTransitCodeIntent(intent)
+
+        // 仅在首次启动时消费 Deep Link（避免旋转屏幕等配置变更时重复追加到栈顶）
+        if (savedInstanceState == null) {
+            extractAndConsumeDeepLink(intent)
+        }
 
         setContent {
             TrackrTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    val activeIntent = currentIntent
-                    val cityId = activeIntent?.getStringExtra("extra_city_id")
-                    val lineId = activeIntent?.getStringExtra("extra_line_id")
-                    val targetOrder = activeIntent?.getIntExtra("extra_target_order", 0) ?: 0
-                    val stopId = activeIntent?.getStringExtra("extra_stop_id").orEmpty()
-                    val sourceName = activeIntent?.getStringExtra("extra_source").orEmpty()
-                    val lineName = activeIntent?.getStringExtra("extra_line_name").orEmpty()
-
                     TrackrNavApp(
-                        deepLinkCityId = cityId,
-                        deepLinkLineId = lineId,
-                        deepLinkTargetOrder = targetOrder,
-                        deepLinkStopId = stopId,
-                        deepLinkSourceName = sourceName,
-                        deepLinkLineName = lineName
+                        pendingDeepLink = pendingDeepLink,
+                        onDeepLinkConsumed = { pendingDeepLink = null }
                     )
                 }
             }
@@ -108,8 +106,31 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        currentIntent = intent
         handleTransitCodeIntent(intent)
+        extractAndConsumeDeepLink(intent)
+    }
+
+    private fun extractAndConsumeDeepLink(intent: Intent?) {
+        if (intent == null) return
+        val cityId = intent.getStringExtra("extra_city_id")
+        val lineId = intent.getStringExtra("extra_line_id")
+        if (!cityId.isNullOrBlank() && !lineId.isNullOrBlank()) {
+            pendingDeepLink = PendingDeepLink(
+                cityId = cityId,
+                lineId = lineId,
+                targetOrder = intent.getIntExtra("extra_target_order", 0),
+                stopId = intent.getStringExtra("extra_stop_id").orEmpty(),
+                sourceName = intent.getStringExtra("extra_source").orEmpty(),
+                lineName = intent.getStringExtra("extra_line_name").orEmpty()
+            )
+            // 一次性消费：移除 Intent 中的 Deep Link 参数，杜绝后续重放
+            intent.removeExtra("extra_city_id")
+            intent.removeExtra("extra_line_id")
+            intent.removeExtra("extra_target_order")
+            intent.removeExtra("extra_stop_id")
+            intent.removeExtra("extra_source")
+            intent.removeExtra("extra_line_name")
+        }
     }
 
     private fun handleTransitCodeIntent(intent: Intent?) {
@@ -117,28 +138,32 @@ class MainActivity : ComponentActivity() {
             val providerStr = intent.getStringExtra("extra_provider")
             val provider = if (providerStr == "alipay") TransitCodeProvider.ALIPAY else TransitCodeProvider.UNIONPAY
             TransitCodeHelper.openTransitCode(this, provider)
+            intent.removeExtra("extra_provider")
+            intent.action = null
         }
     }
 }
 
 @Composable
 fun TrackrNavApp(
-    deepLinkCityId: String? = null,
-    deepLinkLineId: String? = null,
-    deepLinkTargetOrder: Int = 0,
-    deepLinkStopId: String = "",
-    deepLinkSourceName: String = "",
-    deepLinkLineName: String = ""
+    pendingDeepLink: PendingDeepLink? = null,
+    onDeepLinkConsumed: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val backStack = rememberNavBackStack(ScreenKey.Home)
+    val homeBackStack = rememberNavBackStack(ScreenKey.Home)
+    val moreBackStack = rememberNavBackStack(ScreenKey.More)
+    var selectedTab by rememberSaveable { mutableStateOf("home") }
+
+    val activeBackStack = if (selectedTab == "home") homeBackStack else moreBackStack
     val homeViewModel: HomeViewModel = viewModel()
 
-    // 自动同步收藏到桌面快捷方式 (App Shortcuts) 与桌面小组件 (AppWidget)
+    // 自动同步收藏到桌面快捷方式 (App Shortcuts) 与桌面小组件 (AppWidget)，切离主线程调度
     val favorites by TrackrApp.instance.repository.favorites.collectAsStateWithLifecycle()
     LaunchedEffect(favorites) {
-        BusStopWidgetProvider.updateDynamicShortcuts(context, favorites)
-        BusStopWidgetProvider.triggerRefresh(context)
+        withContext(Dispatchers.IO) {
+            BusStopWidgetProvider.updateDynamicShortcuts(context, favorites)
+            BusStopWidgetProvider.triggerRefresh(context)
+        }
     }
 
     // 申请定位与通知权限
@@ -170,27 +195,35 @@ fun TrackrNavApp(
         }
     }
 
-    // 处理来自桌面小组件、快捷方式或通知栏的直接跳转
-    LaunchedEffect(deepLinkCityId, deepLinkLineId, deepLinkTargetOrder, deepLinkStopId, deepLinkSourceName, deepLinkLineName) {
-        if (!deepLinkCityId.isNullOrBlank() && !deepLinkLineId.isNullOrBlank()) {
-            val source = runCatching { DataSourceType.valueOf(deepLinkSourceName) }
-                .getOrDefault(DataSourceType.CHELAILE)
-            val lineDetailKey = ScreenKey.LineDetail(
-                cityId = deepLinkCityId,
-                lineId = deepLinkLineId,
-                targetOrder = deepLinkTargetOrder,
-                stopId = deepLinkStopId,
-                source = source,
-                lineName = deepLinkLineName
-            )
-            if (backStack.lastOrNull() != lineDetailKey) {
-                backStack.add(lineDetailKey)
-            }
+    // 处理来自桌面小组件、快捷方式或通知栏的直接跳转（一次性消费，防止重复入栈）
+    LaunchedEffect(pendingDeepLink) {
+        val deepLink = pendingDeepLink ?: return@LaunchedEffect
+        val source = runCatching { DataSourceType.valueOf(deepLink.sourceName) }
+            .getOrDefault(DataSourceType.CHELAILE)
+        val lineDetailKey = ScreenKey.LineDetail(
+            cityId = deepLink.cityId,
+            lineId = deepLink.lineId,
+            targetOrder = deepLink.targetOrder,
+            stopId = deepLink.stopId,
+            source = source,
+            lineName = deepLink.lineName
+        )
+        selectedTab = "home"
+        if (homeBackStack.lastOrNull() != lineDetailKey) {
+            homeBackStack.add(lineDetailKey)
         }
+        onDeepLinkConsumed()
     }
 
-    val currentKey = backStack.lastOrNull()
-    val isTopLevel = currentKey is ScreenKey.Home || currentKey is ScreenKey.More
+    val currentKey = activeBackStack.lastOrNull()
+    val isTopLevel = (selectedTab == "home" && currentKey is ScreenKey.Home) ||
+        (selectedTab == "more" && currentKey is ScreenKey.More)
+
+    val saveableDecorator = rememberSaveableStateHolderNavEntryDecorator<androidx.navigation3.runtime.NavKey>()
+    val viewModelStoreDecorator = rememberViewModelStoreNavEntryDecorator<androidx.navigation3.runtime.NavKey>()
+    val entryDecorators = remember(saveableDecorator, viewModelStoreDecorator) {
+        listOf(saveableDecorator, viewModelStoreDecorator)
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets(0.dp),
@@ -208,15 +241,15 @@ fun TrackrNavApp(
             ) {
                 NavigationBar {
                     NavigationBarItem(
-                        selected = currentKey is ScreenKey.Home,
+                        selected = selectedTab == "home",
                         onClick = dropUnlessResumed {
-                            if (currentKey !is ScreenKey.Home) {
-                                while (backStack.size > 1) {
-                                    backStack.removeLastOrNull()
+                            if (selectedTab == "home") {
+                                // 点击当前已处于活跃状态的 Tab 时，平滑返回该 Tab 的根目录
+                                while (homeBackStack.size > 1) {
+                                    homeBackStack.removeLastOrNull()
                                 }
-                                if (backStack.lastOrNull() != ScreenKey.Home) {
-                                    backStack.add(ScreenKey.Home)
-                                }
+                            } else {
+                                selectedTab = "home"
                             }
                         },
                         icon = {
@@ -228,19 +261,15 @@ fun TrackrNavApp(
                         label = { Text("首页") }
                     )
                     NavigationBarItem(
-                        selected = currentKey is ScreenKey.More,
+                        selected = selectedTab == "more",
                         onClick = dropUnlessResumed {
-                            if (currentKey !is ScreenKey.More) {
-                                if (backStack.lastOrNull() is ScreenKey.Home) {
-                                    backStack.add(ScreenKey.More)
-                                } else {
-                                    while (backStack.size > 1 && backStack.lastOrNull() !is ScreenKey.More) {
-                                        backStack.removeLastOrNull()
-                                    }
-                                    if (backStack.lastOrNull() !is ScreenKey.More) {
-                                        backStack.add(ScreenKey.More)
-                                    }
+                            if (selectedTab == "more") {
+                                // 点击当前已处于活跃状态的 Tab 时，平滑返回该 Tab 的根目录
+                                while (moreBackStack.size > 1) {
+                                    moreBackStack.removeLastOrNull()
                                 }
+                            } else {
+                                selectedTab = "more"
                             }
                         },
                         icon = {
@@ -256,12 +285,15 @@ fun TrackrNavApp(
         }
     ) { innerPadding ->
         NavDisplay(
-            backStack = backStack,
-            onBack = { backStack.removeLastOrNull() },
-            entryDecorators = listOf(
-                rememberSaveableStateHolderNavEntryDecorator(),
-                rememberViewModelStoreNavEntryDecorator()
-            ),
+            backStack = activeBackStack,
+            onBack = {
+                if (activeBackStack.size > 1) {
+                    activeBackStack.removeLastOrNull()
+                } else if (selectedTab != "home") {
+                    selectedTab = "home"
+                }
+            },
+            entryDecorators = entryDecorators,
             modifier = Modifier
                 .fillMaxSize()
                 .padding(bottom = innerPadding.calculateBottomPadding()),
@@ -290,159 +322,187 @@ fun TrackrNavApp(
                     (slideOutHorizontally(targetOffsetX = { it }, animationSpec = tween(300)) + fadeOut(animationSpec = tween(300)))
             },
             entryProvider = entryProvider {
-                    entry<ScreenKey.Home> {
-                        HomeScreen(
-                            viewModel = homeViewModel,
-                            onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
-                                backStack.add(
-                                    ScreenKey.LineDetail(
-                                        cityId = cityId,
-                                        lineId = lineId,
-                                        targetOrder = targetOrder,
-                                        stopId = stopId,
-                                        source = source,
-                                        lineName = lineName
-                                    )
-                                )
-                            },
-                            onNavigateToStopDetail = { cityId, stopId, stopName, physicalStId, namesakeStId, lat, lng ->
-                                backStack.add(
-                                    ScreenKey.StopDetail(
-                                        cityId = cityId,
-                                        stopId = stopId,
-                                        stopName = stopName,
-                                        physicalStId = physicalStId,
-                                        namesakeStId = namesakeStId,
-                                        lat = lat,
-                                        lng = lng
-                                    )
-                                )
-                            },
-                            onNavigateToSearch = dropUnlessResumed {
-                                backStack.add(ScreenKey.Search)
+                entry<ScreenKey.Home> {
+                    HomeScreen(
+                        viewModel = homeViewModel,
+                        onNavigateToLineDetail = dropUnlessResumed { cityId, lineId, targetOrder, stopId, source, lineName ->
+                            val key = ScreenKey.LineDetail(
+                                cityId = cityId,
+                                lineId = lineId,
+                                targetOrder = targetOrder,
+                                stopId = stopId,
+                                source = source,
+                                lineName = lineName
+                            )
+                            if (activeBackStack.lastOrNull() != key) {
+                                activeBackStack.add(key)
                             }
-                        )
-                    }
-
-                    entry<ScreenKey.Search> {
-                        SearchScreen(
-                            viewModel = homeViewModel,
-                            onNavigateBack = dropUnlessResumed { backStack.removeLastOrNull() },
-                            onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
-                                backStack.add(
-                                    ScreenKey.LineDetail(
-                                        cityId = cityId,
-                                        lineId = lineId,
-                                        targetOrder = targetOrder,
-                                        stopId = stopId,
-                                        source = source,
-                                        lineName = lineName
-                                    )
-                                )
-                            },
-                            onNavigateToStopDetail = { cityId, stopId, stopName, physicalStId, namesakeStId, lat, lng ->
-                                backStack.add(
-                                    ScreenKey.StopDetail(
-                                        cityId = cityId,
-                                        stopId = stopId,
-                                        stopName = stopName,
-                                        physicalStId = physicalStId,
-                                        namesakeStId = namesakeStId,
-                                        lat = lat,
-                                        lng = lng
-                                    )
-                                )
+                        },
+                        onNavigateToStopDetail = dropUnlessResumed { cityId, stopId, stopName, physicalStId, namesakeStId, lat, lng ->
+                            val key = ScreenKey.StopDetail(
+                                cityId = cityId,
+                                stopId = stopId,
+                                stopName = stopName,
+                                physicalStId = physicalStId,
+                                namesakeStId = namesakeStId,
+                                lat = lat,
+                                lng = lng
+                            )
+                            if (activeBackStack.lastOrNull() != key) {
+                                activeBackStack.add(key)
                             }
-                        )
-                    }
-
-                    entry<ScreenKey.LineDetail> { key ->
-                        val detailViewModel: LineDetailViewModel = viewModel(
-                            key = "detail_${key.cityId}_${key.lineId}_${key.targetOrder}",
-                            factory = object : ViewModelProvider.Factory {
-                                @Suppress("UNCHECKED_CAST")
-                                override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                                    return LineDetailViewModel(
-                                        cityId = key.cityId,
-                                        initialLineId = key.lineId,
-                                        initialTargetOrder = key.targetOrder.takeIf { it > 0 },
-                                        initialStationId = key.stopId.takeIf { it.isNotBlank() },
-                                        initialSource = key.source,
-                                        lineNameHint = key.lineName
-                                    ) as T
-                                }
+                        },
+                        onNavigateToSearch = dropUnlessResumed {
+                            if (activeBackStack.lastOrNull() != ScreenKey.Search) {
+                                activeBackStack.add(ScreenKey.Search)
                             }
-                        )
-
-                        LineDetailScreen(
-                            viewModel = detailViewModel,
-                            onNavigateBack = dropUnlessResumed { backStack.removeLastOrNull() }
-                        )
-                    }
-
-                    entry<ScreenKey.StopDetail> { key ->
-                        val stopDetailViewModel: StopDetailViewModel = viewModel(
-                            key = "stop_${key.cityId}_${key.stopId}_${key.physicalStId}_${key.stopName}",
-                            factory = object : ViewModelProvider.Factory {
-                                @Suppress("UNCHECKED_CAST")
-                                override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                                    return StopDetailViewModel(
-                                        cityId = key.cityId,
-                                        stopId = key.stopId,
-                                        initialStopName = key.stopName,
-                                        physicalStId = key.physicalStId,
-                                        namesakeStId = key.namesakeStId,
-                                        stationLat = key.lat,
-                                        stationLng = key.lng
-                                    ) as T
-                                }
-                            }
-                        )
-
-                        StopDetailScreen(
-                            viewModel = stopDetailViewModel,
-                            onNavigateBack = dropUnlessResumed { backStack.removeLastOrNull() },
-                            onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
-                                backStack.add(
-                                    ScreenKey.LineDetail(
-                                        cityId = cityId,
-                                        lineId = lineId,
-                                        targetOrder = targetOrder,
-                                        stopId = stopId,
-                                        source = source,
-                                        lineName = lineName
-                                    )
-                                )
-                            }
-                        )
-                    }
-
-                    entry<ScreenKey.More> {
-                        val moreViewModel: MoreViewModel = viewModel()
-                        MoreScreen(
-                            viewModel = moreViewModel,
-                            onNavigateToAbout = dropUnlessResumed { backStack.add(ScreenKey.About) },
-                            onNavigateToLineDetail = { cityId, lineId, targetOrder, stopId, source, lineName ->
-                                backStack.add(
-                                    ScreenKey.LineDetail(
-                                        cityId = cityId,
-                                        lineId = lineId,
-                                        targetOrder = targetOrder,
-                                        stopId = stopId,
-                                        source = source,
-                                        lineName = lineName
-                                    )
-                                )
-                            }
-                        )
-                    }
-
-                    entry<ScreenKey.About> {
-                        AboutScreen(
-                            onNavigateBack = dropUnlessResumed { backStack.removeLastOrNull() }
-                        )
-                    }
+                        }
+                    )
                 }
-            )
+
+                entry<ScreenKey.Search> {
+                    SearchScreen(
+                        viewModel = homeViewModel,
+                        onNavigateBack = dropUnlessResumed {
+                            if (activeBackStack.size > 1) {
+                                activeBackStack.removeLastOrNull()
+                            }
+                        },
+                        onNavigateToLineDetail = dropUnlessResumed { cityId, lineId, targetOrder, stopId, source, lineName ->
+                            val key = ScreenKey.LineDetail(
+                                cityId = cityId,
+                                lineId = lineId,
+                                targetOrder = targetOrder,
+                                stopId = stopId,
+                                source = source,
+                                lineName = lineName
+                            )
+                            if (activeBackStack.lastOrNull() != key) {
+                                activeBackStack.add(key)
+                            }
+                        },
+                        onNavigateToStopDetail = dropUnlessResumed { cityId, stopId, stopName, physicalStId, namesakeStId, lat, lng ->
+                            val key = ScreenKey.StopDetail(
+                                cityId = cityId,
+                                stopId = stopId,
+                                stopName = stopName,
+                                physicalStId = physicalStId,
+                                namesakeStId = namesakeStId,
+                                lat = lat,
+                                lng = lng
+                            )
+                            if (activeBackStack.lastOrNull() != key) {
+                                activeBackStack.add(key)
+                            }
+                        }
+                    )
+                }
+
+                entry<ScreenKey.LineDetail> { key ->
+                    val detailViewModel: LineDetailViewModel = viewModel(
+                        key = "detail_${key.cityId}_${key.lineId}_${key.targetOrder}",
+                        factory = object : ViewModelProvider.Factory {
+                            @Suppress("UNCHECKED_CAST")
+                            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                return LineDetailViewModel(
+                                    cityId = key.cityId,
+                                    initialLineId = key.lineId,
+                                    initialTargetOrder = key.targetOrder.takeIf { it > 0 },
+                                    initialStationId = key.stopId.takeIf { it.isNotBlank() },
+                                    initialSource = key.source,
+                                    lineNameHint = key.lineName
+                                ) as T
+                            }
+                        }
+                    )
+
+                    LineDetailScreen(
+                        viewModel = detailViewModel,
+                        onNavigateBack = dropUnlessResumed {
+                            if (activeBackStack.size > 1) {
+                                activeBackStack.removeLastOrNull()
+                            }
+                        }
+                    )
+                }
+
+                entry<ScreenKey.StopDetail> { key ->
+                    val stopDetailViewModel: StopDetailViewModel = viewModel(
+                        key = "stop_${key.cityId}_${key.stopId}_${key.physicalStId}_${key.stopName}",
+                        factory = object : ViewModelProvider.Factory {
+                            @Suppress("UNCHECKED_CAST")
+                            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                                return StopDetailViewModel(
+                                    cityId = key.cityId,
+                                    stopId = key.stopId,
+                                    initialStopName = key.stopName,
+                                    physicalStId = key.physicalStId,
+                                    namesakeStId = key.namesakeStId,
+                                    stationLat = key.lat,
+                                    stationLng = key.lng
+                                ) as T
+                            }
+                        }
+                    )
+
+                    StopDetailScreen(
+                        viewModel = stopDetailViewModel,
+                        onNavigateBack = dropUnlessResumed {
+                            if (activeBackStack.size > 1) {
+                                activeBackStack.removeLastOrNull()
+                            }
+                        },
+                        onNavigateToLineDetail = dropUnlessResumed { cityId, lineId, targetOrder, stopId, source, lineName ->
+                            val lineDetailKey = ScreenKey.LineDetail(
+                                cityId = cityId,
+                                lineId = lineId,
+                                targetOrder = targetOrder,
+                                stopId = stopId,
+                                source = source,
+                                lineName = lineName
+                            )
+                            if (activeBackStack.lastOrNull() != lineDetailKey) {
+                                activeBackStack.add(lineDetailKey)
+                            }
+                        }
+                    )
+                }
+
+                entry<ScreenKey.More> {
+                    val moreViewModel: MoreViewModel = viewModel()
+                    MoreScreen(
+                        viewModel = moreViewModel,
+                        onNavigateToAbout = dropUnlessResumed {
+                            if (activeBackStack.lastOrNull() != ScreenKey.About) {
+                                activeBackStack.add(ScreenKey.About)
+                            }
+                        },
+                        onNavigateToLineDetail = dropUnlessResumed { cityId, lineId, targetOrder, stopId, source, lineName ->
+                            val lineDetailKey = ScreenKey.LineDetail(
+                                cityId = cityId,
+                                lineId = lineId,
+                                targetOrder = targetOrder,
+                                stopId = stopId,
+                                source = source,
+                                lineName = lineName
+                            )
+                            if (activeBackStack.lastOrNull() != lineDetailKey) {
+                                activeBackStack.add(lineDetailKey)
+                            }
+                        }
+                    )
+                }
+
+                entry<ScreenKey.About> {
+                    AboutScreen(
+                        onNavigateBack = dropUnlessResumed {
+                            if (activeBackStack.size > 1) {
+                                activeBackStack.removeLastOrNull()
+                            }
+                        }
+                    )
+                }
+            }
+        )
     }
 }

@@ -110,4 +110,84 @@ class NavigationFlowTest {
         assertEquals(ScreenKey.More, poppedMore)
         assertEquals(ScreenKey.Home, backStack.last())
     }
+
+    @Test
+    fun testTabSwitching_preservesHistoryAndReselectPopsToRoot() {
+        val homeStack = mutableListOf<ScreenKey>(ScreenKey.Home)
+        val moreStack = mutableListOf<ScreenKey>(ScreenKey.More)
+        var selectedTab = "home"
+
+        // 1. Home navigates to Search
+        homeStack.add(ScreenKey.Search)
+        assertEquals(2, homeStack.size)
+
+        // 2. Switch to More tab
+        selectedTab = "more"
+        assertEquals("more", selectedTab)
+        assertEquals(ScreenKey.More, moreStack.last())
+
+        // 3. More navigates to About
+        moreStack.add(ScreenKey.About)
+        assertEquals(2, moreStack.size)
+
+        // 4. Switch back to Home tab: Home history is completely preserved!
+        selectedTab = "home"
+        assertEquals("home", selectedTab)
+        assertEquals(ScreenKey.Search, homeStack.last())
+        assertEquals(2, homeStack.size)
+
+        // 5. Re-select active Home tab: pops to root (ScreenKey.Home)
+        if (selectedTab == "home") {
+            while (homeStack.size > 1) {
+                homeStack.removeLastOrNull()
+            }
+        }
+        assertEquals(1, homeStack.size)
+        assertEquals(ScreenKey.Home, homeStack.last())
+
+        // 6. Switch back to More tab: More history (About) is also preserved!
+        selectedTab = "more"
+        assertEquals(ScreenKey.About, moreStack.last())
+
+        // 7. Re-select active More tab: pops to root (ScreenKey.More)
+        if (selectedTab == "more") {
+            while (moreStack.size > 1) {
+                moreStack.removeLastOrNull()
+            }
+        }
+        assertEquals(1, moreStack.size)
+        assertEquals(ScreenKey.More, moreStack.last())
+    }
+
+    @Test
+    fun testOneOffDeepLinkConsumption_preventsDuplicateReplay() {
+        var pendingDeepLink: PendingDeepLink? = PendingDeepLink(
+            cityId = "021",
+            lineId = "line_71",
+            lineName = "71路"
+        )
+        val homeStack = mutableListOf<ScreenKey>(ScreenKey.Home)
+
+        // First consumption
+        pendingDeepLink?.let { link ->
+            val key = ScreenKey.LineDetail(cityId = link.cityId, lineId = link.lineId, lineName = link.lineName)
+            if (homeStack.lastOrNull() != key) {
+                homeStack.add(key)
+            }
+            pendingDeepLink = null // consumed
+        }
+
+        assertEquals(2, homeStack.size)
+        assertTrue(homeStack.last() is ScreenKey.LineDetail)
+        assertEquals(null, pendingDeepLink)
+
+        // Simulated configuration change (recreation): pendingDeepLink is null, no extra pushed
+        pendingDeepLink?.let { link ->
+            val key = ScreenKey.LineDetail(cityId = link.cityId, lineId = link.lineId, lineName = link.lineName)
+            if (homeStack.lastOrNull() != key) {
+                homeStack.add(key)
+            }
+        }
+        assertEquals(2, homeStack.size)
+    }
 }

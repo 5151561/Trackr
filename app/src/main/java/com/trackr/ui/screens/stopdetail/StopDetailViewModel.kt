@@ -55,8 +55,13 @@ class StopDetailViewModel(
     )
     val uiState: StateFlow<StopDetailUiState> = _uiState.asStateFlow()
 
+    private var autoPollingEnabled: Boolean = enableAutoPolling
     private var pollingJob: Job? = null
     private var countdownJob: Job? = null
+    private val pollingLock = Any()
+
+    val isPollingActive: Boolean
+        get() = pollingJob?.isActive == true || countdownJob?.isActive == true
 
     init {
         // 监听收藏夹变动
@@ -69,7 +74,7 @@ class StopDetailViewModel(
 
         loadStopDetail(isInitial = true)
         if (enableAutoPolling) {
-            startAutoPolling()
+            resumePolling()
         }
     }
 
@@ -187,30 +192,57 @@ class StopDetailViewModel(
         }
     }
 
-    private fun startAutoPolling() {
-        pollingJob?.cancel()
-        pollingJob = viewModelScope.launch {
-            while (isActive) {
-                delay(10_000L)
-                loadStopDetail(isInitial = false)
+    /**
+     * 设置轮询是否激活（生命周期感知或显式开关）
+     */
+    fun setPollingActive(active: Boolean) {
+        synchronized(pollingLock) {
+            autoPollingEnabled = active
+            if (active) {
+                resumePolling()
+            } else {
+                pausePolling()
             }
         }
+    }
 
-        countdownJob?.cancel()
-        countdownJob = viewModelScope.launch {
-            while (isActive) {
-                for (sec in 10 downTo 1) {
-                    _uiState.update { it.copy(refreshCountdownSeconds = sec) }
+    /**
+     * 暂停后台轮询，安全取消当前轮询 Job
+     */
+    fun pausePolling() {
+        synchronized(pollingLock) {
+            countdownJob?.cancel()
+            countdownJob = null
+            pollingJob?.cancel()
+            pollingJob = null
+        }
+    }
+
+    /**
+     * 恢复/启动 10 秒自动轮询与倒计时指示（幂等控制）
+     */
+    fun resumePolling() {
+        synchronized(pollingLock) {
+            if (!autoPollingEnabled) return
+            if (isPollingActive) return
+
+            pollingJob = viewModelScope.launch {
+                while (isActive) {
                     delay(1000L)
+                    val current = _uiState.value.refreshCountdownSeconds
+                    if (current <= 1) {
+                        _uiState.update { it.copy(refreshCountdownSeconds = 10) }
+                        loadStopDetail(isInitial = false)
+                    } else {
+                        _uiState.update { it.copy(refreshCountdownSeconds = current - 1) }
+                    }
                 }
-                _uiState.update { it.copy(refreshCountdownSeconds = 10) }
             }
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        pollingJob?.cancel()
-        countdownJob?.cancel()
+        pausePolling()
     }
 }

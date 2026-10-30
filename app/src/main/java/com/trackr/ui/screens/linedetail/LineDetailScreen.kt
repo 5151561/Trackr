@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -93,6 +92,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
@@ -127,10 +127,12 @@ import com.trackr.ui.components.ScheduledReminderDialog
 import kotlinx.coroutines.launch
 import java.util.UUID
 
+private val ALERT_THRESHOLD_OPTIONS = listOf(1, 2, 3)
+
 /**
  * 线路详情页面（Material Design 3 Expressive 规范）
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun LineDetailScreen(
     viewModel: LineDetailViewModel,
@@ -163,7 +165,7 @@ fun LineDetailScreen(
             // 底部 M3E 悬浮胶囊工具栏 (Floating Pill Toolbar)
             BottomFloatingToolbar(
                 isFavorite = uiState.isFavorite,
-                flipRotation = animatedFlipRotation,
+                flipRotation = { animatedFlipRotation },
                 hasReverseDirection = lineDetail?.reverseDirection != null,
                 countdownSeconds = uiState.refreshCountdownSeconds,
                 isRefreshing = uiState.isRefreshing,
@@ -844,7 +846,7 @@ private fun StationArrivalContent(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(1, 2, 3).forEach { stops ->
+                    ALERT_THRESHOLD_OPTIONS.forEach { stops ->
                         FilterChip(
                             selected = alertThreshold == stops,
                             onClick = { onThresholdChange(stops) },
@@ -1231,18 +1233,8 @@ private fun BusFollowContent(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(IntrinsicSize.Min),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            // 1. 左侧时间轴轨道与节点 (Canvas 占满整行高度，上下出界 1.5px 消除浮点裁切误差，实现 100% 连续无断点)
-                            Box(
-                                modifier = Modifier
-                                    .width(28.dp)
-                                    .fillMaxHeight(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Canvas(modifier = Modifier.fillMaxSize()) {
-                                    val centerX = size.width / 2f
+                                .drawBehind {
+                                    val centerX = 14.dp.toPx()
                                     val centerY = size.height / 2f
                                     val overlap = 1.5f // 消除浮点缝隙
                                     val strokeWidthPx = 3.dp.toPx()
@@ -1266,8 +1258,14 @@ private fun BusFollowContent(
                                             strokeWidth = strokeWidthPx
                                         )
                                     }
-                                }
-
+                                },
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // 1. 左侧时间轴节点（单次测量，高度由整行撑开，轨道由 drawBehind 绘制）
+                            Box(
+                                modifier = Modifier.width(28.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
                                 // 节点圆点呈现
                                 when {
                                     isCurrent -> {
@@ -1396,7 +1394,7 @@ private fun BusFollowContent(
 @Composable
 private fun BottomFloatingToolbar(
     isFavorite: Boolean,
-    flipRotation: Float,
+    flipRotation: () -> Float,
     hasReverseDirection: Boolean,
     countdownSeconds: Int,
     isRefreshing: Boolean,
@@ -1439,7 +1437,7 @@ private fun BottomFloatingToolbar(
                     )
                 }
 
-                // 2. 换向按钮（带 180° 旋转弹簧动画）
+                // 2. 换向按钮（带 180° 旋转弹簧动画，通过 lambda 延迟读取至 Draw 阶段）
                 IconButton(
                     onClick = onSwitchDirection,
                     enabled = hasReverseDirection
@@ -1447,7 +1445,7 @@ private fun BottomFloatingToolbar(
                     Icon(
                         imageVector = Icons.Rounded.SwapHoriz,
                         contentDescription = "换向",
-                        modifier = Modifier.graphicsLayer { rotationZ = flipRotation },
+                        modifier = Modifier.graphicsLayer { rotationZ = flipRotation() },
                         tint = if (hasReverseDirection) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
                     )
                 }

@@ -235,7 +235,7 @@ fun StopDetailScreen(
                 ) {
                     // 1. 多个站台切换 (例如物理站台/同名站台方向切换)
                     if (state.stops.size > 1) {
-                        item {
+                        item(key = "platform_selector", contentType = "platform_selector") {
                             Column {
                                 Text(
                                     text = "选择站台 / 位置：",
@@ -274,7 +274,7 @@ fun StopDetailScreen(
 
                     // 2. 地铁换乘信息横条
                     if (currentStop != null && currentStop.subwayLineNames.isNotEmpty()) {
-                        item {
+                        item(key = "subway_transfer_bar", contentType = "subway_transfer_bar") {
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
                                 color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f),
@@ -311,15 +311,15 @@ fun StopDetailScreen(
 
                     // 3. 途经线路列表
                     if (currentStop != null && currentStop.lines.isNotEmpty()) {
-                        itemsIndexed(
+                        items(
                             items = currentStop.lines,
-                            key = { index, item ->
+                            key = { item ->
                                 val stopKey = currentStop.stopId.ifBlank { "stop_${state.selectedStopIndex}" }
                                 val lineKey = item.line.lineId.ifBlank { item.line.name }
-                                "${stopKey}_${lineKey}_${item.targetOrder}_${item.line.direction}_$index"
+                                "${currentStop.source.name}_${stopKey}_${item.line.source.name}_${lineKey}_${item.targetOrder}_${item.line.direction}"
                             },
-                            contentType = { _, _ -> "stop_line_status" }
-                        ) { _, lineStatus ->
+                            contentType = { "stop_line_status" }
+                        ) { lineStatus ->
                             val favId = "${viewModel.cityId}_${lineStatus.line.lineId}_${lineStatus.targetOrder}"
                             val isFavorited = lineStatus.line.lineId.isNotBlank() && state.favoriteIds.contains(favId)
 
@@ -346,7 +346,7 @@ fun StopDetailScreen(
                             )
                         }
                     } else if (currentStop != null && currentStop.lines.isEmpty()) {
-                        item {
+                        item(key = "empty_lines", contentType = "empty_lines") {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
