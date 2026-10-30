@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.FavoriteGroup
 import com.trackr.domain.model.GroupCategory
+import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
 import java.util.UUID
@@ -38,6 +39,8 @@ import java.util.UUID
 fun GroupEditDialog(
     initialGroup: TransitGroup?,
     favoriteGroups: List<FavoriteGroup> = emptyList(),
+    currentCity: TransitCity = TransitCity(cityId = "0532", cityName = "青岛"),
+    defaultCustomGroupId: String? = "commute",
     onDismiss: () -> Unit,
     onSave: (TransitGroup) -> Unit
 ) {
@@ -46,7 +49,9 @@ fun GroupEditDialog(
 
     val initialName = remember(initialGroup) { initialGroup?.name.orEmpty() }
     val initialCategory = remember(initialGroup) { initialGroup?.category ?: GroupCategory.COMMUTE }
-    val initialCustomGroupId = remember(initialGroup) { initialGroup?.customGroupId }
+    val initialCustomGroupId = remember(initialGroup) {
+        initialGroup?.customGroupId ?: if (initialCategory == GroupCategory.COMMUTE) defaultCustomGroupId ?: "commute" else null
+    }
 
     val initialFrom1 = remember(leg1) { leg1?.fromStopName.orEmpty() }
     val initialTo1 = remember(leg1) { leg1?.toStopName.orEmpty() }
@@ -239,8 +244,8 @@ fun GroupEditDialog(
                             parsedLines1.mapIndexed { idx, name ->
                                 val existing = leg1?.candidateLines?.getOrNull(idx)
                                 CandidateLine(
-                                    cityId = existing?.cityId ?: leg1?.primaryLine?.cityId ?: "033",
-                                    cityName = existing?.cityName ?: leg1?.primaryLine?.cityName ?: "杭州",
+                                    cityId = existing?.cityId ?: leg1?.primaryLine?.cityId ?: currentCity.cityId,
+                                    cityName = existing?.cityName ?: leg1?.primaryLine?.cityName ?: currentCity.cityName,
                                     lineId = existing?.lineId ?: "line_1_${idx}_${UUID.randomUUID().toString().take(6)}",
                                     lineName = name,
                                     fromStopOrder = existing?.fromStopOrder ?: 1,
@@ -250,8 +255,8 @@ fun GroupEditDialog(
                         } else {
                             listOf(
                                 CandidateLine(
-                                    cityId = leg1?.primaryLine?.cityId ?: "033",
-                                    cityName = leg1?.primaryLine?.cityName ?: "杭州",
+                                    cityId = leg1?.primaryLine?.cityId ?: currentCity.cityId,
+                                    cityName = leg1?.primaryLine?.cityName ?: currentCity.cityName,
                                     lineId = leg1?.primaryLine?.lineId ?: "line_1_${UUID.randomUUID().toString().take(6)}",
                                     lineName = "156路",
                                     fromStopOrder = 1,
@@ -275,8 +280,8 @@ fun GroupEditDialog(
                             parsedLines2.mapIndexed { idx, name ->
                                 val existing = leg2?.candidateLines?.getOrNull(idx)
                                 CandidateLine(
-                                    cityId = existing?.cityId ?: leg2?.primaryLine?.cityId ?: "033",
-                                    cityName = existing?.cityName ?: leg2?.primaryLine?.cityName ?: "杭州",
+                                    cityId = existing?.cityId ?: leg2?.primaryLine?.cityId ?: currentCity.cityId,
+                                    cityName = existing?.cityName ?: leg2?.primaryLine?.cityName ?: currentCity.cityName,
                                     lineId = existing?.lineId ?: "line_2_${idx}_${UUID.randomUUID().toString().take(6)}",
                                     lineName = name,
                                     fromStopOrder = existing?.fromStopOrder ?: 1,
@@ -286,8 +291,8 @@ fun GroupEditDialog(
                         } else {
                             listOf(
                                 CandidateLine(
-                                    cityId = leg2?.primaryLine?.cityId ?: "033",
-                                    cityName = leg2?.primaryLine?.cityName ?: "杭州",
+                                    cityId = leg2?.primaryLine?.cityId ?: currentCity.cityId,
+                                    cityName = leg2?.primaryLine?.cityName ?: currentCity.cityName,
                                     lineId = leg2?.primaryLine?.lineId ?: "line_2_${UUID.randomUUID().toString().take(6)}",
                                     lineName = "地铁4号线",
                                     fromStopOrder = 1,

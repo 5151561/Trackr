@@ -88,7 +88,8 @@ class FavoritesGroupViewModelTest {
         viewModel.saveGroup(leisureGroup)
         testScheduler.runCurrent()
 
-        assertEquals(2, viewModel.groups.value.size)
+        // 早间通勤会自动在 home 分组生成返程路线，因此总数为 3
+        assertEquals(3, viewModel.groups.value.size)
 
         // 切换过滤到 LEISURE
         viewModel.selectCategory(GroupCategory.LEISURE)
@@ -99,7 +100,7 @@ class FavoritesGroupViewModelTest {
         // 切换回全部 (null)
         viewModel.selectCategory(null)
         testScheduler.runCurrent()
-        assertEquals(2, viewModel.filteredGroups.value.size)
+        assertEquals(3, viewModel.filteredGroups.value.size)
     }
 
     @Test
@@ -140,7 +141,8 @@ class FavoritesGroupViewModelTest {
         viewModel.saveGroup(route2)
         testScheduler.runCurrent()
 
-        assertEquals(2, viewModel.groups.value.size)
+        // 上班日常自动在 home 生成返程，因此总数为 3
+        assertEquals(3, viewModel.groups.value.size)
 
         // 按照自定义分组筛选
         viewModel.selectFavoriteGroup(shoppingGroupId)
@@ -161,7 +163,7 @@ class FavoritesGroupViewModelTest {
         assertNull(viewModel.favoriteGroups.value.find { it.id == shoppingGroupId })
         viewModel.selectFavoriteGroup(null)
         testScheduler.runCurrent()
-        assertEquals(2, viewModel.groups.value.size)
+        assertEquals(3, viewModel.groups.value.size)
         val kept = viewModel.groups.value.find { it.id == "route_mall" }
         assertNotNull(kept)
         assertNull(kept?.customGroupId)
@@ -343,5 +345,171 @@ class FavoritesGroupViewModelTest {
         viewModel.saveCustomAmapApiKey("test_key_123456")
         assertEquals("test_key_123456", viewModel.customAmapApiKey.value)
         assertEquals("test_key_123456", sharedPrefs.getString("custom_amap_web_key", null))
+    }
+
+    @Test
+    fun testSaveCommuteRoute_automaticallyBuildsReverseRouteInHome() = runTest {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        val forwardCommute = TransitGroup(
+            id = "group_commute_transfer",
+            name = "万达金街 ➔ 西徐村",
+            category = GroupCategory.COMMUTE,
+            customGroupId = "commute",
+            legs = listOf(
+                TransitLeg(
+                    legIndex = 0,
+                    fromStopName = "万达金街",
+                    toStopName = "西社小区",
+                    candidateLines = listOf(
+                        CandidateLine(
+                            cityId = "0532",
+                            lineId = "59",
+                            lineName = "59路",
+                            direction = 0,
+                            fromStopOrder = 1,
+                            toStopOrder = 5,
+                            startStopName = "万达金街",
+                            endStopName = "西社小区"
+                        )
+                    ),
+                    walkingDistanceMeters = 0
+                ),
+                TransitLeg(
+                    legIndex = 1,
+                    fromStopName = "西社小区",
+                    toStopName = "西徐村",
+                    candidateLines = listOf(
+                        CandidateLine(
+                            cityId = "0532",
+                            lineId = "351",
+                            lineName = "351路",
+                            direction = 0,
+                            fromStopOrder = 1,
+                            toStopOrder = 6,
+                            startStopName = "西社小区",
+                            endStopName = "西徐村"
+                        )
+                    ),
+                    walkingDistanceMeters = 0
+                )
+            )
+        )
+
+        viewModel.saveGroup(forwardCommute)
+        testScheduler.runCurrent()
+
+        val allGroups = viewModel.groups.value
+        assertEquals(2, allGroups.size)
+
+        // 验证正向路线
+        val forward = allGroups.find { it.id == "group_commute_transfer" }
+        assertNotNull(forward)
+        assertEquals("commute", forward?.customGroupId)
+        assertEquals("万达金街 ➔ 西徐村", forward?.name)
+
+        // 验证自动生成的反向路线
+        val reverse = allGroups.find { it.customGroupId == "home" }
+        assertNotNull("保存通勤路线应自动在'回家线路'中生成反向路线", reverse)
+        assertEquals("西徐村 ➔ 万达金街", reverse?.name)
+        assertEquals(2, reverse?.legs?.size)
+
+        // 第 1 程：351路 西徐村 ➔ 西社小区
+        val leg0 = reverse!!.legs[0]
+        assertEquals(0, leg0.legIndex)
+        assertEquals("西徐村", leg0.fromStopName)
+        assertEquals("西社小区", leg0.toStopName)
+        assertEquals("351路", leg0.candidateLines[0].lineName)
+        assertEquals(1, leg0.candidateLines[0].direction)
+
+        // 第 2 程：59路 西社小区 ➔ 万达金街
+        val leg1 = reverse.legs[1]
+        assertEquals(1, leg1.legIndex)
+        assertEquals("西社小区", leg1.fromStopName)
+        assertEquals("万达金街", leg1.toStopName)
+        assertEquals("59路", leg1.candidateLines[0].lineName)
+        assertEquals(1, leg1.candidateLines[0].direction)
+    }
+
+    @Test
+    fun testFilteredGroups_properlySeparatesCommuteAndHome() = runTest {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        val forwardCommute = TransitGroup(
+            id = "group_commute_1",
+            name = "万达金街 ➔ 西徐村",
+            category = GroupCategory.COMMUTE,
+            customGroupId = "commute",
+            legs = listOf(
+                TransitLeg(legIndex = 0, fromStopName = "万达金街", toStopName = "西社小区"),
+                TransitLeg(legIndex = 1, fromStopName = "西社小区", toStopName = "西徐村")
+            )
+        )
+        viewModel.saveGroup(forwardCommute)
+        testScheduler.runCurrent()
+
+        // 1. 筛选“上班通勤”
+        viewModel.selectFavoriteGroup("commute")
+        testScheduler.runCurrent()
+        assertEquals(1, viewModel.filteredGroups.value.size)
+        assertEquals("万达金街 ➔ 西徐村", viewModel.filteredGroups.value.first().name)
+
+        // 2. 筛选“回家线路”
+        viewModel.selectFavoriteGroup("home")
+        testScheduler.runCurrent()
+        assertEquals(1, viewModel.filteredGroups.value.size)
+        assertEquals("西徐村 ➔ 万达金街", viewModel.filteredGroups.value.first().name)
+
+        // 3. 筛选“全部”
+        viewModel.selectFavoriteGroup(null)
+        testScheduler.runCurrent()
+        assertEquals(2, viewModel.filteredGroups.value.size)
+    }
+
+    @Test
+    fun testCreateReverseGroup_manual() = runTest {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        val testRoute = TransitGroup(
+            id = "custom_route_1",
+            name = "青岛火车站 ➔ 五四广场",
+            category = GroupCategory.CUSTOM,
+            customGroupId = "custom_fav",
+            legs = listOf(
+                TransitLeg(
+                    legIndex = 0,
+                    fromStopName = "青岛火车站",
+                    toStopName = "五四广场",
+                    candidateLines = listOf(
+                        CandidateLine(
+                            cityId = "0532",
+                            lineId = "317",
+                            lineName = "317路",
+                            direction = 0,
+                            fromStopOrder = 1,
+                            toStopOrder = 8
+                        )
+                    )
+                )
+            )
+        )
+        viewModel.saveGroup(testRoute)
+        testScheduler.runCurrent()
+
+        // 点击生成返程
+        viewModel.createReverseGroup(testRoute)
+        testScheduler.runCurrent()
+
+        val allGroups = viewModel.groups.value
+        assertEquals(2, allGroups.size)
+        val reversed = allGroups.find { it.id != "custom_route_1" }
+        assertNotNull(reversed)
+        assertEquals("五四广场 ➔ 青岛火车站", reversed?.name)
+        assertEquals("五四广场", reversed?.legs?.first()?.fromStopName)
+        assertEquals("青岛火车站", reversed?.legs?.first()?.toStopName)
+        assertEquals(1, reversed?.legs?.first()?.candidateLines?.first()?.direction)
     }
 }

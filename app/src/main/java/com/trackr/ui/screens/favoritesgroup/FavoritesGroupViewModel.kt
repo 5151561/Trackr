@@ -75,17 +75,23 @@ class FavoritesGroupViewModel(
     val groups: StateFlow<List<TransitGroup>> = groupRepository.groups
     val favoriteGroups: StateFlow<List<FavoriteGroup>> = groupRepository.favoriteGroups
 
+    val currentCity: StateFlow<TransitCity> = transitRepository.selectedCity
+
+    fun isGroupInFavoriteGroup(group: TransitGroup, favGroupId: String): Boolean {
+        return when (favGroupId) {
+            "commute" -> group.customGroupId == "commute" || (group.customGroupId == null && group.category == GroupCategory.COMMUTE)
+            "home" -> group.customGroupId == "home" || (group.customGroupId == null && group.name.contains("返程"))
+            else -> group.customGroupId == favGroupId
+        }
+    }
+
     val filteredGroups: StateFlow<List<TransitGroup>> = combine(
         groups,
         selectedCategory,
         selectedFavoriteGroupId
     ) { allGroups, category, favGroupId ->
         when {
-            favGroupId != null -> allGroups.filter {
-                it.customGroupId == favGroupId ||
-                    (favGroupId == "commute" && it.category == GroupCategory.COMMUTE) ||
-                    (favGroupId == "home" && (it.category == GroupCategory.COMMUTE || it.name.contains("家")))
-            }
+            favGroupId != null -> allGroups.filter { isGroupInFavoriteGroup(it, favGroupId) }
             category != null -> allGroups.filter { it.category == category }
             else -> allGroups
         }
@@ -153,6 +159,42 @@ class FavoritesGroupViewModel(
         runCatching {
             AmapSdkManager.applyApiKey(TrackrApp.instance, _customAmapApiKey.value)
         }
+        viewModelScope.launch(ioDispatcher) {
+            val currentGroups = groupRepository.groups.value
+            for (g in currentGroups) {
+                var groupModified = false
+                var updated = g
+                if (updated.customGroupId == null && updated.category == GroupCategory.COMMUTE) {
+                    updated = updated.copy(customGroupId = "commute")
+                    groupModified = true
+                }
+                val hasSynthetic = updated.legs.any { leg ->
+                    leg.candidateLines.any { it.lineId.startsWith("line_") || it.fromStopOrder >= it.toStopOrder }
+                }
+                if (hasSynthetic) {
+                    updated = alignTransitGroupWithRealtimeSource(updated)
+                    groupModified = true
+                }
+                if (groupModified) {
+                    groupRepository.updateGroup(updated)
+                }
+            }
+
+            val latestGroups = groupRepository.groups.value
+            val commuteRoutes = latestGroups.filter { isGroupInFavoriteGroup(it, "commute") }
+            val homeRoutes = latestGroups.filter { isGroupInFavoriteGroup(it, "home") }
+            for (commute in commuteRoutes) {
+                val newOrigin = commute.destinationStopName
+                val newDest = commute.originStopName
+                val hasReverse = homeRoutes.any {
+                    it.originStopName == newOrigin && it.destinationStopName == newDest
+                }
+                if (!hasReverse && newOrigin.isNotBlank() && newDest.isNotBlank()) {
+                    val reversed = buildReverseTransitGroup(commute, targetGroupId = "home")
+                    groupRepository.addGroup(reversed)
+                }
+            }
+        }
         if (enableAutoRefresh) {
             viewModelScope.launch {
                 groups.collect { groupList ->
@@ -205,7 +247,24 @@ class FavoritesGroupViewModel(
 
     fun addCandidateLineToLeg(groupId: String, legIndex: Int, candidateLine: CandidateLine) {
         viewModelScope.launch {
-            groupRepository.addCandidateLineToLeg(groupId, legIndex, candidateLine)
+            val group = groupRepository.getGroupById(groupId)
+            val leg = group?.legs?.getOrNull(legIndex)
+            val alignedLine = if (leg != null) {
+                val city = if (candidateLine.cityId.isNotBlank() && candidateLine.cityId != "033") {
+                    TransitCity(candidateLine.cityId, candidateLine.cityName)
+                } else transitRepository.selectedCity.value
+                val matched = findRealtimeLineMatch(
+                    city = city,
+                    lineName = candidateLine.lineName,
+                    fromStopName = leg.fromStopName,
+                    toStopName = leg.toStopName,
+                    preferredDirection = candidateLine.direction
+                )
+                matched ?: candidateLine
+            } else candidateLine
+
+            groupRepository.addCandidateLineToLeg(groupId, legIndex, alignedLine)
+            refreshRealtimeEta(groupRepository.groups.value)
         }
     }
 
@@ -295,6 +354,10 @@ class FavoritesGroupViewModel(
         }
     }
 
+    fun clearPlanError() {
+        _planErrorMessage.value = null
+    }
+
     /**
      * 执行公交路线规划（高德云端规划 + 实时公交站点直达/换乘双引擎）
      */
@@ -315,16 +378,70 @@ class FavoritesGroupViewModel(
             var effectiveOrigin = origin
             var effectiveDest = destination
 
-            if (hasAmap) {
-                if (!effectiveOrigin.location.contains(",")) {
-                    val found = amapSdkService?.searchPoiTips(effectiveOrigin.name, city.cityName, customKey)?.getOrNull()?.firstOrNull { it.location.contains(",") }
-                    if (found != null) effectiveOrigin = found
+            // 1. 解析“我的位置”
+            if (effectiveOrigin.name == "我的位置" || effectiveOrigin.name.isBlank()) {
+                val loc = transitRepository.userLocation.value
+                var resolvedLat: Double? = loc?.first
+                var resolvedLng: Double? = loc?.second
+
+                if (resolvedLat == null || resolvedLng == null) {
+                    val locManager = runCatching {
+                        TrackrApp.instance.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+                    }.getOrNull()
+                    val lastLoc = locManager?.let { lm ->
+                        runCatching {
+                            lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
+                                ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
+                        }.getOrNull()
+                    }
+                    if (lastLoc != null) {
+                        resolvedLat = lastLoc.latitude
+                        resolvedLng = lastLoc.longitude
+                    }
                 }
-                if (!effectiveDest.location.contains(",")) {
-                    val found = amapSdkService?.searchPoiTips(effectiveDest.name, city.cityName, customKey)?.getOrNull()?.firstOrNull { it.location.contains(",") }
-                    if (found != null) effectiveDest = found
+
+                if (resolvedLat != null && resolvedLng != null) {
+                    val nearby = runCatching {
+                        transitRepository.getNearbyStops(city, resolvedLat, resolvedLng, 1).getOrNull()?.firstOrNull()
+                    }.getOrNull()
+                    effectiveOrigin = if (nearby != null) {
+                        AmapTipItem(
+                            name = "我的位置(${nearby.name})",
+                            district = city.cityName,
+                            address = nearby.name,
+                            location = "$resolvedLng,$resolvedLat"
+                        )
+                    } else {
+                        AmapTipItem(
+                            name = "我的位置",
+                            district = city.cityName,
+                            address = "当前定位",
+                            location = "$resolvedLng,$resolvedLat"
+                        )
+                    }
                 }
             }
+
+            // 2. 补全缺少经纬度的起终点坐标
+            suspend fun resolveLocation(tip: AmapTipItem): AmapTipItem {
+                if (tip.location.contains(",")) return tip
+                if (hasAmap) {
+                    val sdkFound = amapSdkService?.searchPoiTips(tip.name, city.cityName, customKey)
+                        ?.getOrNull()?.firstOrNull { it.location.contains(",") }
+                    if (sdkFound != null) return sdkFound
+
+                    val webFound = runCatching {
+                        amapApiClient.searchPoiTips(tip.name, city.cityName, customKey)
+                    }.getOrNull()?.getOrNull()?.firstOrNull { it.location.contains(",") }
+                    if (webFound != null) return webFound
+                }
+                val localFound = searchLocalStopTips(tip.name, city).firstOrNull { it.location.contains(",") }
+                if (localFound != null) return localFound
+                return tip
+            }
+
+            effectiveOrigin = resolveLocation(effectiveOrigin)
+            effectiveDest = resolveLocation(effectiveDest)
 
             var schemes: List<AmapTransitSchemeResult> = emptyList()
 
@@ -384,27 +501,66 @@ class FavoritesGroupViewModel(
         return withContext(ioDispatcher) {
             schemes.map { scheme ->
                 val newLegs = scheme.group.legs.map { leg ->
-                    val primary = leg.primaryLine
-                    if (primary != null && primary.lineId.length > 20) {
-                        val searchRes = runCatching { coord.search(city, primary.lineName, EngineMode.CHELAILE) }.getOrNull()
-                        val matchedDir = searchRes?.lines?.flatMap { it.directions }?.find {
-                            it.name.contains(primary.lineName) || primary.lineName.contains(it.name)
-                        }
-                        if (matchedDir != null) {
-                            val updatedLine = primary.copy(
-                                lineId = matchedDir.lineId,
-                                direction = matchedDir.direction,
-                                source = matchedDir.source,
-                                cityId = city.cityId,
-                                cityName = city.cityName
-                            )
-                            leg.copy(candidateLines = listOf(updatedLine))
-                        } else {
-                            leg
-                        }
-                    } else {
-                        leg
+                    val fromCore = RouteProjectionMath.coreStopName(leg.fromStopName)
+                    val toCore = RouteProjectionMath.coreStopName(leg.toStopName)
+
+                    val updatedCandidates = leg.candidateLines.map { candidate ->
+                        runCatching {
+                            val searchRes = coord.search(city, candidate.lineName, EngineMode.CHELAILE)
+                            val matchedDirs = searchRes.lines.flatMap { it.directions }.filter { dir ->
+                                dir.name.contains(candidate.lineName) || candidate.lineName.contains(dir.name)
+                            }
+                            var bestLine: CandidateLine? = null
+                            for (dir in matchedDirs) {
+                                val detail = runCatching {
+                                    coord.getLineDetail(
+                                        city,
+                                        LineDetailRequest(
+                                            lineId = dir.lineId,
+                                            source = dir.source,
+                                            lineNameHint = dir.name,
+                                            directionHint = dir.direction
+                                        )
+                                    )
+                                }.getOrNull()
+                                if (detail != null) {
+                                    val fromStop = detail.stops.find {
+                                        it.name.contains(fromCore) || fromCore.contains(RouteProjectionMath.coreStopName(it.name))
+                                    }
+                                    val toStop = detail.stops.find {
+                                        it.name.contains(toCore) || toCore.contains(RouteProjectionMath.coreStopName(it.name))
+                                    }
+                                    if (fromStop != null && toStop != null && fromStop.order < toStop.order) {
+                                        bestLine = candidate.copy(
+                                            cityId = city.cityId,
+                                            cityName = city.cityName,
+                                            lineId = dir.lineId,
+                                            direction = dir.direction,
+                                            source = dir.source,
+                                            fromStopOrder = fromStop.order,
+                                            toStopOrder = toStop.order,
+                                            startStopName = fromStop.name,
+                                            endStopName = toStop.name,
+                                            mygolbsCityCode = city.mygolbsCityCode
+                                        )
+                                        break
+                                    }
+                                }
+                                if (bestLine == null) {
+                                    bestLine = candidate.copy(
+                                        cityId = city.cityId,
+                                        cityName = city.cityName,
+                                        lineId = dir.lineId,
+                                        direction = dir.direction,
+                                        source = dir.source,
+                                        mygolbsCityCode = city.mygolbsCityCode
+                                    )
+                                }
+                            }
+                            bestLine ?: candidate
+                        }.getOrDefault(candidate)
                     }
+                    leg.copy(candidateLines = updatedCandidates)
                 }
                 scheme.copy(group = scheme.group.copy(legs = newLegs))
             }
@@ -621,20 +777,50 @@ class FavoritesGroupViewModel(
      * 将规划方案转存为正式收藏分组
      */
     fun addPlannedSchemeAsFavorite(
-        scheme: AmapTransitSchemeResult,
+        group: TransitGroup,
         customGroupId: String? = null,
         category: GroupCategory = GroupCategory.CUSTOM,
         customName: String? = null
     ) {
         viewModelScope.launch {
-            val nonTempGroup = scheme.group.copy(
+            val targetGroupId = customGroupId
+                ?: _selectedFavoriteGroupId.value
+                ?: if (group.category == GroupCategory.COMMUTE) "commute" else null
+            val targetCategory = if (targetGroupId == "commute") GroupCategory.COMMUTE else category
+            val preparedGroup = group.copy(
                 isTemporary = false,
-                customGroupId = customGroupId,
-                category = if (customGroupId == "commute") GroupCategory.COMMUTE else category,
-                name = customName?.takeIf { it.isNotBlank() } ?: scheme.group.name
+                customGroupId = targetGroupId,
+                category = targetCategory,
+                name = customName?.takeIf { it.isNotBlank() } ?: group.name
             )
-            groupRepository.addGroup(nonTempGroup)
+            val alignedGroup = alignTransitGroupWithRealtimeSource(preparedGroup)
+            groupRepository.addGroup(alignedGroup)
+
+            if (targetGroupId == "commute") {
+                val newOrigin = alignedGroup.destinationStopName
+                val newDest = alignedGroup.originStopName
+                val existingHome = groupRepository.groups.value.filter { isGroupInFavoriteGroup(it, "home") }
+                val hasReverse = existingHome.any { it.originStopName == newOrigin && it.destinationStopName == newDest }
+                if (!hasReverse && newOrigin.isNotBlank() && newDest.isNotBlank()) {
+                    val reverseGroup = buildReverseTransitGroup(alignedGroup, targetGroupId = "home")
+                    groupRepository.addGroup(reverseGroup)
+                }
+            }
         }
+    }
+
+    fun addPlannedSchemeAsFavorite(
+        scheme: AmapTransitSchemeResult,
+        customGroupId: String? = null,
+        category: GroupCategory = GroupCategory.CUSTOM,
+        customName: String? = null
+    ) {
+        addPlannedSchemeAsFavorite(
+            group = scheme.group,
+            customGroupId = customGroupId,
+            category = category,
+            customName = customName
+        )
     }
 
     fun clearPlanning() {
@@ -686,8 +872,298 @@ class FavoritesGroupViewModel(
      */
     fun saveGroup(group: TransitGroup) {
         viewModelScope.launch {
-            groupRepository.addGroup(group)
+            val targetGroupId = group.customGroupId
+                ?: _selectedFavoriteGroupId.value
+                ?: if (group.category == GroupCategory.COMMUTE) "commute" else null
+            val targetCategory = if (targetGroupId == "commute") GroupCategory.COMMUTE else group.category
+            val preparedGroup = group.copy(
+                customGroupId = targetGroupId,
+                category = targetCategory
+            )
+            val alignedGroup = alignTransitGroupWithRealtimeSource(preparedGroup)
+            groupRepository.addGroup(alignedGroup)
+
+            if (targetGroupId == "commute") {
+                val newOrigin = alignedGroup.destinationStopName
+                val newDest = alignedGroup.originStopName
+                val existingHome = groupRepository.groups.value.filter { isGroupInFavoriteGroup(it, "home") }
+                val hasReverse = existingHome.any { it.originStopName == newOrigin && it.destinationStopName == newDest }
+                if (!hasReverse && newOrigin.isNotBlank() && newDest.isNotBlank()) {
+                    val reverseGroup = buildReverseTransitGroup(alignedGroup, targetGroupId = "home")
+                    groupRepository.addGroup(reverseGroup)
+                }
+            }
         }
+    }
+
+    /**
+     * 为指定路线生成反向路线分组
+     */
+    fun createReverseGroup(group: TransitGroup) {
+        viewModelScope.launch {
+            val targetGroupId = when (group.customGroupId) {
+                "commute" -> "home"
+                "home" -> "commute"
+                else -> group.customGroupId ?: if (group.category == GroupCategory.COMMUTE) "home" else null
+            }
+            val reversed = buildReverseTransitGroup(group, targetGroupId)
+            groupRepository.addGroup(reversed)
+        }
+    }
+
+    /**
+     * 在实时公交数据源中查找精准匹配的线路走向与起止站序
+     */
+    suspend fun findRealtimeLineMatch(
+        city: TransitCity,
+        lineName: String,
+        fromStopName: String,
+        toStopName: String,
+        preferredDirection: Int? = null
+    ): CandidateLine? {
+        val fromCore = RouteProjectionMath.coreStopName(fromStopName)
+        val toCore = RouteProjectionMath.coreStopName(toStopName)
+
+        val searchRes = runCatching {
+            coordinator?.search(city, lineName, EngineMode.CHELAILE)
+        }.getOrNull() ?: runCatching {
+            transitRepository.search(city, lineName).getOrNull()
+        }.getOrNull()
+
+        val matchedDirs = searchRes?.lines?.flatMap { it.directions }?.filter { dir ->
+            dir.name.contains(lineName) || lineName.contains(dir.name)
+        }.orEmpty()
+
+        val sortedDirs = if (preferredDirection != null) {
+            matchedDirs.sortedByDescending { it.direction == preferredDirection }
+        } else {
+            matchedDirs
+        }
+
+        for (dir in sortedDirs) {
+            val detail = runCatching {
+                coordinator?.getLineDetail(
+                    city,
+                    LineDetailRequest(
+                        lineId = dir.lineId,
+                        source = dir.source,
+                        lineNameHint = dir.name,
+                        directionHint = dir.direction
+                    )
+                )
+            }.getOrNull() ?: runCatching {
+                transitRepository.getLineDetail(
+                    city = city,
+                    lineId = dir.lineId,
+                    source = dir.source,
+                    lineNameHint = dir.name,
+                    directionHint = dir.direction
+                ).getOrNull()
+            }.getOrNull()
+
+            if (detail != null) {
+                val fromStop = detail.stops.find {
+                    it.name.contains(fromCore) || fromCore.contains(RouteProjectionMath.coreStopName(it.name))
+                }
+                val toStop = detail.stops.find {
+                    it.name.contains(toCore) || toCore.contains(RouteProjectionMath.coreStopName(it.name))
+                }
+                if (fromStop != null && toStop != null && fromStop.order < toStop.order) {
+                    return CandidateLine(
+                        cityId = city.cityId,
+                        cityName = city.cityName,
+                        lineId = dir.lineId,
+                        lineName = dir.name.ifBlank { lineName },
+                        source = dir.source,
+                        direction = dir.direction,
+                        fromStopOrder = fromStop.order,
+                        toStopOrder = toStop.order,
+                        startStopName = fromStop.name,
+                        endStopName = toStop.name,
+                        mygolbsCityCode = city.mygolbsCityCode
+                    )
+                }
+
+                val rev = detail.reverseDirection
+                if (rev != null) {
+                    val revDetail = runCatching {
+                        coordinator?.getLineDetail(
+                            city,
+                            LineDetailRequest(
+                                lineId = rev.lineId,
+                                source = rev.source,
+                                lineNameHint = rev.name,
+                                directionHint = rev.direction
+                            )
+                        )
+                    }.getOrNull() ?: runCatching {
+                        transitRepository.getLineDetail(
+                            city = city,
+                            lineId = rev.lineId,
+                            source = rev.source,
+                            lineNameHint = rev.name,
+                            directionHint = rev.direction
+                        ).getOrNull()
+                    }.getOrNull()
+
+                    if (revDetail != null) {
+                        val revFromStop = revDetail.stops.find {
+                            it.name.contains(fromCore) || fromCore.contains(RouteProjectionMath.coreStopName(it.name))
+                        }
+                        val revToStop = revDetail.stops.find {
+                            it.name.contains(toCore) || toCore.contains(RouteProjectionMath.coreStopName(it.name))
+                        }
+                        if (revFromStop != null && revToStop != null && revFromStop.order < revToStop.order) {
+                            return CandidateLine(
+                                cityId = city.cityId,
+                                cityName = city.cityName,
+                                lineId = rev.lineId,
+                                lineName = rev.name.ifBlank { lineName },
+                                source = rev.source,
+                                direction = rev.direction,
+                                fromStopOrder = revFromStop.order,
+                                toStopOrder = revToStop.order,
+                                startStopName = revFromStop.name,
+                                endStopName = revToStop.name,
+                                mygolbsCityCode = city.mygolbsCityCode
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (sortedDirs.isNotEmpty()) {
+            val best = sortedDirs.first()
+            return CandidateLine(
+                cityId = city.cityId,
+                cityName = city.cityName,
+                lineId = best.lineId,
+                lineName = best.name.ifBlank { lineName },
+                source = best.source,
+                direction = best.direction,
+                fromStopOrder = 1,
+                toStopOrder = 5,
+                startStopName = fromStopName,
+                endStopName = toStopName,
+                mygolbsCityCode = city.mygolbsCityCode
+            )
+        }
+
+        return null
+    }
+
+    /**
+     * 将路线组中各段候选线路与实时公交数据源进行站序和真实 lineId 对齐
+     */
+    suspend fun alignTransitGroupWithRealtimeSource(group: TransitGroup): TransitGroup = withContext(ioDispatcher) {
+        val defaultCity = transitRepository.selectedCity.value
+        val newLegs = group.legs.map { leg ->
+            val newCandidates = leg.candidateLines.map { candidate ->
+                val isSynthetic = candidate.lineId.startsWith("line_") || candidate.fromStopOrder >= candidate.toStopOrder
+                if (isSynthetic) {
+                    val lineCity = if (candidate.cityId.isNotBlank() && candidate.cityId != "033") {
+                        TransitCity(candidate.cityId, candidate.cityName)
+                    } else defaultCity
+                    val matched = findRealtimeLineMatch(
+                        city = lineCity,
+                        lineName = candidate.lineName,
+                        fromStopName = leg.fromStopName,
+                        toStopName = leg.toStopName,
+                        preferredDirection = candidate.direction
+                    )
+                    matched ?: candidate.copy(
+                        cityId = if (candidate.cityId.isNotBlank()) candidate.cityId else lineCity.cityId,
+                        cityName = if (candidate.cityName.isNotBlank()) candidate.cityName else lineCity.cityName,
+                        fromStopOrder = candidate.fromStopOrder.coerceAtLeast(1),
+                        toStopOrder = maxOf(candidate.fromStopOrder + 1, candidate.toStopOrder, 2)
+                    )
+                } else {
+                    candidate
+                }
+            }
+            leg.copy(candidateLines = newCandidates)
+        }
+        group.copy(legs = newLegs)
+    }
+
+    /**
+     * 构建返程路线分组（自动反转行程段、调换起终点与候选线路上下行并对齐真实源数据）
+     */
+    suspend fun buildReverseTransitGroup(
+        forwardGroup: TransitGroup,
+        targetGroupId: String? = "home"
+    ): TransitGroup = withContext(ioDispatcher) {
+        val defaultCity = transitRepository.selectedCity.value
+        val reversedOriginalLegs = forwardGroup.legs.reversed()
+        val newLegs = reversedOriginalLegs.mapIndexed { reversedIdx, originalLeg ->
+            val reversedFromStop = originalLeg.toStopName
+            val reversedToStop = originalLeg.fromStopName
+            val walkingMeters = if (reversedIdx == 0) 0 else {
+                forwardGroup.legs[forwardGroup.legs.size - reversedIdx].walkingDistanceMeters
+            }
+            val reversedCandidates = originalLeg.candidateLines.map { candidate ->
+                val flippedDir = if (candidate.direction == 0) 1 else 0
+                val lineCity = if (candidate.cityId.isNotBlank() && candidate.cityId != "033") {
+                    TransitCity(candidate.cityId, candidate.cityName)
+                } else defaultCity
+                val matched = findRealtimeLineMatch(
+                    city = lineCity,
+                    lineName = candidate.lineName,
+                    fromStopName = reversedFromStop,
+                    toStopName = reversedToStop,
+                    preferredDirection = flippedDir
+                )
+                matched ?: candidate.copy(
+                    cityId = lineCity.cityId,
+                    cityName = lineCity.cityName,
+                    direction = flippedDir,
+                    startStopName = candidate.endStopName.ifEmpty { reversedFromStop },
+                    endStopName = candidate.startStopName.ifEmpty { reversedToStop },
+                    fromStopOrder = 1,
+                    toStopOrder = maxOf(2, (candidate.toStopOrder - candidate.fromStopOrder) + 1)
+                )
+            }
+            TransitLeg(
+                legIndex = reversedIdx,
+                fromStopName = reversedFromStop,
+                fromStopId = originalLeg.toStopId,
+                toStopName = reversedToStop,
+                toStopId = originalLeg.fromStopId,
+                fromStopLat = originalLeg.toStopLat,
+                fromStopLng = originalLeg.toStopLng,
+                toStopLat = originalLeg.fromStopLat,
+                toStopLng = originalLeg.fromStopLng,
+                candidateLines = reversedCandidates,
+                walkingDistanceMeters = walkingMeters
+            )
+        }
+
+        val newOrigin = newLegs.firstOrNull()?.fromStopName.orEmpty()
+        val newDest = newLegs.lastOrNull()?.toStopName.orEmpty()
+        val newName = when {
+            forwardGroup.name.contains("➔") || forwardGroup.name.contains("->") -> {
+                if (newOrigin.isNotBlank() && newDest.isNotBlank()) {
+                    "$newOrigin ➔ $newDest"
+                } else {
+                    "${forwardGroup.name} (返程)"
+                }
+            }
+            newOrigin.isNotBlank() && newDest.isNotBlank() -> "$newOrigin ➔ $newDest (${forwardGroup.name}·返程)"
+            else -> "${forwardGroup.name} (返程)"
+        }
+
+        TransitGroup(
+            id = UUID.randomUUID().toString(),
+            name = newName,
+            category = forwardGroup.category,
+            customGroupId = targetGroupId,
+            legs = newLegs,
+            isTemporary = false,
+            sortOrder = forwardGroup.sortOrder + 1,
+            createdAt = System.currentTimeMillis(),
+            updatedAt = System.currentTimeMillis()
+        )
     }
 
     /**
@@ -695,9 +1171,38 @@ class FavoritesGroupViewModel(
      */
     fun refreshRealtimeEta(groupList: List<TransitGroup> = groups.value): Job =
         viewModelScope.launch(ioDispatcher) {
+            val candidateAlignmentMap = mutableMapOf<String, CandidateLine>()
+            for (group in groupList) {
+                for (leg in group.legs) {
+                    for (candidate in leg.candidateLines) {
+                        val key = "${group.id}_${leg.legIndex}_${candidate.lineId}"
+                        if (candidate.lineId.startsWith("line_") || candidate.fromStopOrder >= candidate.toStopOrder) {
+                            val city = if (candidate.cityId.isNotBlank() && candidate.cityId != "033") {
+                                TransitCity(candidate.cityId, candidate.cityName)
+                            } else transitRepository.selectedCity.value
+                            val matched = findRealtimeLineMatch(
+                                city = city,
+                                lineName = candidate.lineName,
+                                fromStopName = leg.fromStopName,
+                                toStopName = leg.toStopName,
+                                preferredDirection = candidate.direction
+                            )
+                            if (matched != null) {
+                                candidateAlignmentMap[key] = matched
+                            }
+                        }
+                    }
+                }
+            }
+
             val allCandidates = groupList
-                .flatMap { it.legs }
-                .flatMap { it.candidateLines }
+                .flatMap { g ->
+                    g.legs.flatMap { leg ->
+                        leg.candidateLines.map { c ->
+                            candidateAlignmentMap["${g.id}_${leg.legIndex}_${c.lineId}"] ?: c
+                        }
+                    }
+                }
 
             if (allCandidates.isEmpty()) return@launch
 
@@ -761,12 +1266,13 @@ class FavoritesGroupViewModel(
                     if (legCandidates.isEmpty()) continue
 
                     val parsedInfos = legCandidates.map { candidate ->
-                        val targetOrder = if (candidate.fromStopOrder > 0) candidate.fromStopOrder else candidate.toStopOrder
-                        val detail = detailResults["${candidate.lineId}_${targetOrder}"]
+                        val effectiveCandidate = candidateAlignmentMap["${group.id}_${leg.legIndex}_${candidate.lineId}"] ?: candidate
+                        val targetOrder = if (effectiveCandidate.fromStopOrder > 0) effectiveCandidate.fromStopOrder else effectiveCandidate.toStopOrder
+                        val detail = detailResults["${effectiveCandidate.lineId}_${targetOrder}"]
 
-                        val rideStops = (candidate.toStopOrder - candidate.fromStopOrder).coerceAtLeast(0)
+                        val rideStops = (effectiveCandidate.toStopOrder - effectiveCandidate.fromStopOrder).coerceAtLeast(0)
                         val directionText = detail?.line?.endStop?.takeIf { it.isNotBlank() }?.let { "${it}方向" }
-                            ?: candidate.endStopName.takeIf { it.isNotBlank() }?.let { "${it}方向" }
+                            ?: effectiveCandidate.endStopName.takeIf { it.isNotBlank() }?.let { "${it}方向" }
                             ?: ""
 
                         if (detail != null) {
@@ -840,12 +1346,16 @@ class FavoritesGroupViewModel(
 
                     parsedInfos.forEachIndexed { idx, info ->
                         val candidate = legCandidates[idx]
+                        val effective = candidateAlignmentMap["${group.id}_${leg.legIndex}_${candidate.lineId}"] ?: candidate
                         val isFastest = (info.lineId == fastestLineId)
                         val finalInfo = info.copy(isFastest = isFastest)
 
                         updatedCandidateMap["${group.id}_${leg.legIndex}_${candidate.lineId}"] = finalInfo
+                        updatedCandidateMap["${group.id}_${leg.legIndex}_${effective.lineId}"] = finalInfo
                         updatedCandidateMap["${candidate.lineId}_${candidate.toStopOrder}"] = finalInfo
+                        updatedCandidateMap["${effective.lineId}_${effective.toStopOrder}"] = finalInfo
                         updatedSummaryMap["${candidate.lineId}_${candidate.toStopOrder}"] = finalInfo.etaText
+                        updatedSummaryMap["${effective.lineId}_${effective.toStopOrder}"] = finalInfo.etaText
                     }
                 }
             }
