@@ -60,6 +60,13 @@ class FakeTransitRepository(
         _nearbyStopsCount.value = count.coerceIn(1, 16)
     }
 
+    private val _isLiveNotificationEnabled = MutableStateFlow(true)
+    override val isLiveNotificationEnabled: StateFlow<Boolean> = _isLiveNotificationEnabled.asStateFlow()
+
+    override fun setLiveNotificationEnabled(enabled: Boolean) {
+        _isLiveNotificationEnabled.value = enabled
+    }
+
     private val _activeTrackingSession = MutableStateFlow(TrackingSessionState())
     override val activeTrackingSession: StateFlow<TrackingSessionState> = _activeTrackingSession.asStateFlow()
 

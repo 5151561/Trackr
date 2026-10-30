@@ -214,6 +214,26 @@ class LineDetailViewModelTest {
     }
 
     @Test
+    fun testSetAlertThreshold_updatesUiStateAndClamps() = runTest {
+        val viewModel = createViewModel()
+        // 默认阈值为 2 站
+        assertEquals(2, viewModel.uiState.value.alertThresholdStops)
+
+        viewModel.setAlertThreshold(1)
+        assertEquals(1, viewModel.uiState.value.alertThresholdStops)
+
+        viewModel.setAlertThreshold(3)
+        assertEquals(3, viewModel.uiState.value.alertThresholdStops)
+
+        // 边界保护 (超出 1..3 自动 coerceIn)
+        viewModel.setAlertThreshold(0)
+        assertEquals(1, viewModel.uiState.value.alertThresholdStops)
+
+        viewModel.setAlertThreshold(5)
+        assertEquals(3, viewModel.uiState.value.alertThresholdStops)
+    }
+
+    @Test
     fun testPollingLifecycle_disabledByDefaultInTest() = runTest {
         val viewModel = createViewModel()
         assertFalse(viewModel.isPollingActive)

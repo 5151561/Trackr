@@ -4,12 +4,14 @@ import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -75,6 +77,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
@@ -83,6 +86,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -104,6 +108,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.trackr.TrackrApp
@@ -124,6 +129,8 @@ import com.trackr.ui.theme.expressiveRotateSpringSpec
 import com.trackr.ui.theme.expressiveSpringSpec
 import com.trackr.util.TransitCodeHelper
 import com.trackr.domain.model.ScheduledReminder
+import com.trackr.service.vendor.XiaomiFocusAdapter
+import com.trackr.ui.components.FocusPermissionGuideDialog
 import com.trackr.ui.components.ScheduledReminderDialog
 import kotlinx.coroutines.launch
 import java.util.UUID
@@ -150,6 +157,20 @@ fun LineDetailScreen(
     val selectedStop = uiState.selectedStop
     val coroutineScope = rememberCoroutineScope()
     var showReminderDialog by remember { mutableStateOf(false) }
+    var showFocusGuideDialog by remember { mutableStateOf(false) }
+
+    val startCurrentTracking: () -> Unit = {
+        if (selectedStop != null && lineDetail != null) {
+            BusTrackingService.startTracking(
+                context = context,
+                cityId = viewModel.cityId,
+                line = lineDetail.line,
+                targetStop = selectedStop,
+                totalStops = lineDetail.stops.size,
+                alertThresholdStops = uiState.alertThresholdStops
+            )
+        }
+    }
 
     // 换向旋转弹簧动画
     val animatedFlipRotation by animateFloatAsState(
@@ -311,14 +332,13 @@ fun LineDetailScreen(
                                     if (isTrackingThis) {
                                         BusTrackingService.stopTracking(context)
                                     } else if (selectedStop != null) {
-                                        BusTrackingService.startTracking(
-                                            context = context,
-                                            cityId = viewModel.cityId,
-                                            line = lineDetail.line,
-                                            targetStop = selectedStop,
-                                            totalStops = lineDetail.stops.size,
-                                            alertThresholdStops = uiState.alertThresholdStops
-                                        )
+                                        val needFocusGuide = XiaomiFocusAdapter.isXiaomiRom() &&
+                                                !XiaomiFocusAdapter.canShowFocus(context)
+                                        if (needFocusGuide) {
+                                            showFocusGuideDialog = true
+                                        } else {
+                                            startCurrentTracking()
+                                        }
                                     }
                                 },
                                 onOpenScheduledReminder = { showReminderDialog = true }
@@ -496,6 +516,22 @@ fun LineDetailScreen(
                         Toast.LENGTH_SHORT
                     ).show()
                 }
+            }
+        )
+    }
+
+    // 7. 小米澎湃OS 焦点通知权限未授权引导弹窗
+    if (showFocusGuideDialog) {
+        FocusPermissionGuideDialog(
+            onDismissRequest = { showFocusGuideDialog = false },
+            onContinueWithoutSettings = {
+                showFocusGuideDialog = false
+                startCurrentTracking()
+            },
+            onGoToSettings = {
+                showFocusGuideDialog = false
+                XiaomiFocusAdapter.openNotificationSettings(context)
+                startCurrentTracking()
             }
         )
     }
@@ -860,7 +896,7 @@ private fun StationArrivalContent(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 提醒阈值单选芯片（1 站 / 2 站 / 3 站）
+            // 提醒阈值单选芯片（1 站 / 2 站 / 3 站）：未选中仅显示数字，选中展开为“提前 x 站”
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -872,15 +908,50 @@ private fun StationArrivalContent(
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ALERT_THRESHOLD_OPTIONS.forEach { stops ->
-                        FilterChip(
-                            selected = alertThreshold == stops,
-                            onClick = { onThresholdChange(stops) },
-                            label = { Text("提前 ${stops} 站", fontSize = 11.sp) },
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.height(28.dp)
-                        )
+                CompositionLocalProvider(LocalMinimumInteractiveComponentSize provides Dp.Unspecified) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ALERT_THRESHOLD_OPTIONS.forEach { stops ->
+                            val isSelected = alertThreshold == stops
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { onThresholdChange(stops) },
+                                label = {
+                                    AnimatedContent(
+                                        targetState = isSelected,
+                                        transitionSpec = {
+                                            (fadeIn(animationSpec = tween(180, delayMillis = 40)) +
+                                                scaleIn(initialScale = 0.88f, animationSpec = tween(180, delayMillis = 40)))
+                                                .togetherWith(
+                                                    fadeOut(animationSpec = tween(90))
+                                                )
+                                        },
+                                        label = "AlertThresholdChipLabel_$stops"
+                                    ) { selected ->
+                                        Text(
+                                            text = if (selected) "提前 ${stops} 站" else "$stops",
+                                            fontSize = 11.sp,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1,
+                                            softWrap = false
+                                        )
+                                    }
+                                },
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .defaultMinSize(minWidth = 32.dp)
+                                    .height(28.dp)
+                                    .animateContentSize(
+                                        animationSpec = spring(
+                                            dampingRatio = Spring.DampingRatioLowBouncy,
+                                            stiffness = Spring.StiffnessMediumLow
+                                        )
+                                    )
+                            )
+                        }
                     }
                 }
             }
