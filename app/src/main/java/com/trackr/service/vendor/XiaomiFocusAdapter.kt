@@ -116,6 +116,7 @@ object XiaomiFocusAdapter {
         }
 
         val (span, maxProgress) = LiveProgressNotificationHelper.calculateSpanAndMaxProgress(
+            state.startTrackingOrder,
             state.targetOrder
         )
         val currentProgress = LiveProgressNotificationHelper.calculateCurrentProgress(state, isArrived)

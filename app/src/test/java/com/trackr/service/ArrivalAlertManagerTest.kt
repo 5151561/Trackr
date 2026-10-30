@@ -20,18 +20,21 @@ class ArrivalAlertManagerTest {
 
     private lateinit var app: TrackrApp
     private lateinit var notificationManager: NotificationManager
+    private var liveEnabled = true
 
     @Before
     fun setup() {
         app = ApplicationProvider.getApplicationContext()
         notificationManager = app.getSystemService(Application.NOTIFICATION_SERVICE) as NotificationManager
-        app.repository.setLiveNotificationEnabled(true)
+        liveEnabled = true
+        ArrivalAlertManager.liveNotificationEnabledProvider = { liveEnabled }
         ArrivalAlertManager.liveUpdateActiveChecker = { true }
     }
 
     @After
     fun tearDown() {
         ArrivalAlertManager.resetLiveUpdateActiveChecker()
+        ArrivalAlertManager.resetLiveNotificationEnabledProvider()
     }
 
     @Test
@@ -67,7 +70,7 @@ class ArrivalAlertManagerTest {
 
     @Test
     fun testTriggerApproachingAlert_postsNotificationWhenLiveUpdateDisabled() {
-        app.repository.setLiveNotificationEnabled(false)
+        liveEnabled = false
 
         ArrivalAlertManager.triggerApproachingAlert(app, activeTrackingState(stopsRemaining = 2))
 

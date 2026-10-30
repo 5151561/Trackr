@@ -13,6 +13,7 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.trackr.R
+import com.trackr.TrackrApp
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.service.vendor.LiveUpdatePromotion
@@ -33,6 +34,21 @@ object LiveProgressNotificationHelper {
 
     private val COLOR_COMPLETED = Color.parseColor("#FF1B8755") // 已行驶绿色段
     private val COLOR_REMAINING = Color.parseColor("#FF3B608C") // 剩余蓝色段
+
+    /**
+     * 是否开启常驻实时通知，以可注入 provider 的形式提供，
+     * 避免直接耦合 TrackrApp 全局单例，同时保证单例未初始化时安全降级。
+     * 兜底值为 true：读取失败时保持既有的实时活动参数注入行为，避免静默丢失流体云/胶囊能力。
+     */
+    internal var liveNotificationEnabledProvider: () -> Boolean = {
+        runCatching { TrackrApp.instance.repository.isLiveNotificationEnabled.value }.getOrDefault(true)
+    }
+
+    internal fun resetLiveNotificationEnabledProvider() {
+        liveNotificationEnabledProvider = {
+            runCatching { TrackrApp.instance.repository.isLiveNotificationEnabled.value }.getOrDefault(true)
+        }
+    }
 
     /**
      * 确保常驻低干扰渠道创建
@@ -59,29 +75,30 @@ object LiveProgressNotificationHelper {
     }
 
     /**
-     * 计算进度标尺：以「线路起点站 → 目标候车站」的全区间为基准，
+     * 计算进度标尺：以「追踪起始站 → 目标候车站」的追踪区间为基准，
      * 保证进度条填充比例与「剩 N 站」文案始终一致
      */
-    fun calculateSpanAndMaxProgress(targetOrder: Int): Pair<Int, Int> {
-        val hops = (targetOrder - 1).coerceAtLeast(1)
+    fun calculateSpanAndMaxProgress(startTrackingOrder: Int, targetOrder: Int): Pair<Int, Int> {
+        val hops = (targetOrder - startTrackingOrder).coerceAtLeast(1)
         return hops to (hops * 100)
     }
 
     /**
-     * 计算当前车辆相对于线路起点站的进度 [0, maxProgress]
-     * 剩余站数是唯一基准：已完成站间数 = 全区间站间数 - (剩余站数 + 未走完的当前站间比例)
+     * 计算当前车辆相对于追踪区间的进度 [0, maxProgress]
+     * 剩余站数是唯一基准：已完成站间数 = 区间站间数 - (剩余站数 + 未走完的当前站间比例)
      */
     fun calculateCurrentProgress(
         state: TrackingSessionState,
         isArrived: Boolean = state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45)
     ): Int {
-        val (hops, maxProgress) = calculateSpanAndMaxProgress(state.targetOrder)
+        val (hops, maxProgress) = calculateSpanAndMaxProgress(state.startTrackingOrder, state.targetOrder)
         if (isArrived) return maxProgress
         if (state.currentBusOrder <= 0 || state.stopsRemaining < 0) return 0
 
-        val segmentFraction = state.currentBusProgress.coerceIn(0f, 1f)
-        val remainingHops = state.stopsRemaining + (1f - segmentFraction)
-        val completedHops = (hops - remainingHops).coerceIn(0f, hops.toFloat())
+        // 用 Double 计算，避免 1 - 0.6f 之类的浮点误差把 260 截断成 259
+        val segmentFraction = state.currentBusProgress.coerceIn(0f, 1f).toDouble()
+        val remainingHops = state.stopsRemaining + (1.0 - segmentFraction)
+        val completedHops = (hops - remainingHops).coerceIn(0.0, hops.toDouble())
         return (completedHops / hops * maxProgress).toInt().coerceIn(0, maxProgress)
     }
 
@@ -113,7 +130,7 @@ object LiveProgressNotificationHelper {
     fun buildNotification(context: Context, state: TrackingSessionState): Notification {
         ensureNotificationChannel(context)
 
-        val (span, maxProgress) = calculateSpanAndMaxProgress(state.targetOrder)
+        val (span, maxProgress) = calculateSpanAndMaxProgress(state.startTrackingOrder, state.targetOrder)
         val isArrived = state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45)
         val currentProgress = calculateCurrentProgress(state, isArrived)
 
@@ -225,11 +242,7 @@ object LiveProgressNotificationHelper {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val isLiveEnabled = try {
-            com.trackr.TrackrApp.instance.repository.isLiveNotificationEnabled.value
-        } catch (_: Exception) {
-            true
-        }
+        val isLiveEnabled = liveNotificationEnabledProvider()
 
         val builder = NotificationCompat.Builder(context, CHANNEL_ID_LIVE_PROGRESS)
             .setSmallIcon(R.drawable.ic_stat_trackr)

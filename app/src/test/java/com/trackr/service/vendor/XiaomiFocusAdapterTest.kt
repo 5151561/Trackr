@@ -115,9 +115,11 @@ class XiaomiFocusAdapterTest {
         assertEquals("即将进站", capsule.getString("text"))
         assertEquals(0, capsule.getInt("status"))
 
+        // 追踪区间：第 7 → 第 10 站，共 3 个站间，maxProgress = 300
+        // 剩 0 站且行驶到站间中点：completed = 3 - (0 + 0.5) = 2.5 → 250/300
         val progress = paramV2.getJSONObject("progress")
-        assertEquals(900, progress.getInt("max"))
-        assertEquals(850, progress.getInt("current"))
+        assertEquals(300, progress.getInt("max"))
+        assertEquals(250, progress.getInt("current"))
     }
 
     @Test

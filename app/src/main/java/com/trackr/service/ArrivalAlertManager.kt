@@ -13,6 +13,7 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.trackr.R
+import com.trackr.TrackrApp
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.service.vendor.LiveUpdatePromotion
@@ -196,14 +197,23 @@ object ArrivalAlertManager {
         }
     }
 
+    /**
+     * 是否开启常驻实时通知，以可注入 provider 的形式提供，
+     * 避免直接耦合 TrackrApp 全局单例，同时保证单例未初始化时安全降级
+     */
+    internal var liveNotificationEnabledProvider: () -> Boolean = {
+        runCatching { TrackrApp.instance.repository.isLiveNotificationEnabled.value }.getOrDefault(false)
+    }
+
+    internal fun resetLiveNotificationEnabledProvider() {
+        liveNotificationEnabledProvider = {
+            runCatching { TrackrApp.instance.repository.isLiveNotificationEnabled.value }.getOrDefault(false)
+        }
+    }
+
     private fun shouldPostStandaloneNotification(context: Context, state: TrackingSessionState): Boolean {
         if (!state.isActive) return true
-        val liveEnabled = try {
-            com.trackr.TrackrApp.instance.repository.isLiveNotificationEnabled.value
-        } catch (_: Exception) {
-            false
-        }
-        if (!liveEnabled) return true
+        if (!liveNotificationEnabledProvider()) return true
         return !liveUpdateActiveChecker(context)
     }
 
