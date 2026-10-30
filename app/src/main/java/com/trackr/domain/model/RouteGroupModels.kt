@@ -14,6 +14,17 @@ enum class GroupCategory(val displayName: String) {
 }
 
 /**
+ * 收藏中心自定义分组实体
+ */
+@Serializable
+data class FavoriteGroup(
+    val id: String,
+    val name: String,
+    val sortOrder: Int = 0,
+    val isDefault: Boolean = false
+)
+
+/**
  * 单段行程中可乘坐的候选公交/地铁线路
  */
 @Serializable
@@ -29,6 +40,23 @@ data class CandidateLine(
     val startStopName: String = "",
     val endStopName: String = "",
     val mygolbsCityCode: String? = null
+)
+
+/**
+ * 候选线路实时状态信息（多线同达卡片胶囊与详情）
+ */
+@Serializable
+data class CandidateLineRealtimeInfo(
+    val lineId: String,
+    val lineName: String,
+    val etaText: String = "",          // e.g. "1 站 · 约 2 分钟"
+    val shortChipEta: String = "",     // e.g. "1站" or "等待发车"
+    val stopsAway: Int = Int.MAX_VALUE,
+    val estimatedMinutes: Int = Int.MAX_VALUE,
+    val directionText: String = "",    // e.g. "恒丰工业城方向"
+    val vehiclePlate: String = "",     // e.g. "粤B·58921"
+    val rideStopsCount: Int = 0,
+    val isFastest: Boolean = false
 )
 
 /**
@@ -63,6 +91,7 @@ data class TransitGroup(
     val legs: List<TransitLeg> = emptyList(),
     val isTemporary: Boolean = false,
     val sortOrder: Int = 0,
+    val customGroupId: String? = null,
     val createdAt: Long = System.currentTimeMillis(),
     val updatedAt: Long = System.currentTimeMillis()
 ) {

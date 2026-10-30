@@ -3,10 +3,9 @@ package com.trackr.data.repository
 import android.content.Context
 import android.content.SharedPreferences
 import com.trackr.domain.model.CandidateLine
-import com.trackr.domain.model.DataSourceType
+import com.trackr.domain.model.FavoriteGroup
 import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.TransitGroup
-import com.trackr.domain.model.TransitLeg
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,7 +18,7 @@ import kotlinx.serialization.json.Json
 import java.util.UUID
 
 /**
- * 基于 SharedPreferences 与 JSON 的路线分组持久化仓库实现
+ * 基于 SharedPreferences 与 JSON 的路线分组与自定义收藏持久化仓库实现
  */
 class RouteGroupRepository(
     private val context: Context,
@@ -38,6 +37,9 @@ class RouteGroupRepository(
 
     private val _groups = MutableStateFlow<List<TransitGroup>>(loadInitialGroups())
     override val groups: StateFlow<List<TransitGroup>> = _groups.asStateFlow()
+
+    private val _favoriteGroups = MutableStateFlow<List<FavoriteGroup>>(loadInitialFavoriteGroups())
+    override val favoriteGroups: StateFlow<List<FavoriteGroup>> = _favoriteGroups.asStateFlow()
 
     private fun loadInitialGroups(): List<TransitGroup> {
         val rawJson = prefs.getString(KEY_GROUPS_JSON, null)
@@ -60,6 +62,24 @@ class RouteGroupRepository(
         } catch (_: Exception) {
             emptyList()
         }
+    }
+
+    private fun loadInitialFavoriteGroups(): List<FavoriteGroup> {
+        val rawJson = prefs.getString(KEY_FAVORITE_GROUPS_JSON, null)
+        if (!rawJson.isNullOrBlank()) {
+            try {
+                val loaded = json.decodeFromString<List<FavoriteGroup>>(rawJson)
+                if (loaded.isNotEmpty()) {
+                    return loaded.sortedBy { it.sortOrder }
+                }
+            } catch (_: Exception) {}
+        }
+        val defaultGroups = listOf(
+            FavoriteGroup(id = "commute", name = "上班通勤", sortOrder = 0, isDefault = true),
+            FavoriteGroup(id = "home", name = "回家线路", sortOrder = 1, isDefault = true)
+        )
+        persistFavoriteGroupsInternal(defaultGroups)
+        return defaultGroups
     }
 
     override suspend fun addGroup(group: TransitGroup) = withContext(ioDispatcher) {
@@ -91,13 +111,15 @@ class RouteGroupRepository(
     override suspend fun saveOrConvertTemporaryGroup(
         groupId: String,
         newName: String?,
-        newCategory: GroupCategory?
+        newCategory: GroupCategory?,
+        customGroupId: String?
     ) = withContext(ioDispatcher) {
         val current = _groups.value.map { group ->
             if (group.id == groupId) {
                 group.copy(
                     name = newName?.takeIf { it.isNotBlank() } ?: group.name,
                     category = newCategory ?: if (group.category == GroupCategory.TEMPORARY) GroupCategory.CUSTOM else group.category,
+                    customGroupId = customGroupId ?: group.customGroupId,
                     isTemporary = false,
                     updatedAt = System.currentTimeMillis()
                 )
@@ -127,6 +149,94 @@ class RouteGroupRepository(
         return _groups.value.find { it.id == groupId }
     }
 
+    override suspend fun createFavoriteGroup(name: String): FavoriteGroup = withContext(ioDispatcher) {
+        val current = _favoriteGroups.value.toMutableList()
+        val maxOrder = current.maxOfOrNull { it.sortOrder } ?: -1
+        val newGroup = FavoriteGroup(
+            id = UUID.randomUUID().toString(),
+            name = name.trim(),
+            sortOrder = maxOrder + 1,
+            isDefault = false
+        )
+        current.add(newGroup)
+        persistFavoriteGroups(current.sortedBy { it.sortOrder })
+        newGroup
+    }
+
+    override suspend fun renameFavoriteGroup(groupId: String, newName: String) = withContext(ioDispatcher) {
+        val current = _favoriteGroups.value.toMutableList()
+        val index = current.indexOfFirst { it.id == groupId }
+        if (index >= 0) {
+            current[index] = current[index].copy(name = newName.trim())
+            persistFavoriteGroups(current.sortedBy { it.sortOrder })
+        }
+    }
+
+    override suspend fun deleteFavoriteGroup(groupId: String) = withContext(ioDispatcher) {
+        // 1. 从收藏分组列表中移除
+        val updatedFavoriteGroups = _favoriteGroups.value.filterNot { it.id == groupId }
+        persistFavoriteGroups(updatedFavoriteGroups)
+
+        // 2. 属于该分组的路线不删除，仅解除 customGroupId 关联归入未分组
+        val currentGroups = _groups.value.toMutableList()
+        var changed = false
+        for (i in currentGroups.indices) {
+            if (currentGroups[i].customGroupId == groupId) {
+                currentGroups[i] = currentGroups[i].copy(
+                    customGroupId = null,
+                    updatedAt = System.currentTimeMillis()
+                )
+                changed = true
+            }
+        }
+        if (changed) {
+            persistGroups(currentGroups)
+        }
+    }
+
+    override suspend fun reorderFavoriteGroups(groupIds: List<String>) = withContext(ioDispatcher) {
+        val groupMap = _favoriteGroups.value.associateBy { it.id }
+        val reordered = mutableListOf<FavoriteGroup>()
+        groupIds.forEachIndexed { index, id ->
+            groupMap[id]?.let {
+                reordered.add(it.copy(sortOrder = index))
+            }
+        }
+        _favoriteGroups.value.filterNot { it.id in groupIds }.forEachIndexed { extraIndex, group ->
+            reordered.add(group.copy(sortOrder = groupIds.size + extraIndex))
+        }
+        persistFavoriteGroups(reordered)
+    }
+
+    override suspend fun addCandidateLineToLeg(
+        groupId: String,
+        legIndex: Int,
+        candidateLine: CandidateLine
+    ) = withContext(ioDispatcher) {
+        val currentGroups = _groups.value.toMutableList()
+        val groupIndex = currentGroups.indexOfFirst { it.id == groupId }
+        if (groupIndex >= 0) {
+            val group = currentGroups[groupIndex]
+            val updatedLegs = group.legs.map { leg ->
+                if (leg.legIndex == legIndex) {
+                    val alreadyHas = leg.candidateLines.any { it.lineId == candidateLine.lineId }
+                    if (alreadyHas) {
+                        leg
+                    } else {
+                        leg.copy(candidateLines = leg.candidateLines + candidateLine)
+                    }
+                } else {
+                    leg
+                }
+            }
+            currentGroups[groupIndex] = group.copy(
+                legs = updatedLegs,
+                updatedAt = System.currentTimeMillis()
+            )
+            persistGroups(currentGroups)
+        }
+    }
+
     private fun persistGroups(list: List<TransitGroup>) {
         _groups.value = list
         persistGroupsInternal(list)
@@ -139,9 +249,21 @@ class RouteGroupRepository(
         } catch (_: Exception) {}
     }
 
+    private fun persistFavoriteGroups(list: List<FavoriteGroup>) {
+        _favoriteGroups.value = list
+        persistFavoriteGroupsInternal(list)
+    }
+
+    private fun persistFavoriteGroupsInternal(list: List<FavoriteGroup>) {
+        try {
+            val rawJson = json.encodeToString(list)
+            prefs.edit().putString(KEY_FAVORITE_GROUPS_JSON, rawJson).apply()
+        } catch (_: Exception) {}
+    }
 
     companion object {
         private const val PREFS_NAME = "trackr_route_groups"
         private const val KEY_GROUPS_JSON = "groups_list_json"
+        private const val KEY_FAVORITE_GROUPS_JSON = "favorite_groups_list_json"
     }
 }

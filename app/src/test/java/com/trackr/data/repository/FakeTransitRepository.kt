@@ -79,6 +79,7 @@ class FakeTransitRepository(
     var stopDetailResult: Result<List<NearbyStop>> = Result.success(emptyList())
     var searchResult: Result<TransitSearchResult> = Result.success(TransitSearchResult(keyword = ""))
     var lineDetailResult: Result<BusLineDetail>? = null
+    val lineDetailsMap: MutableMap<String, BusLineDetail> = mutableMapOf()
     var timetableResult: Result<LineTimetable> = Result.success(LineTimetable(lineId = "", lineName = ""))
     var favoritesRealtimeResult: Result<Map<String, NearbyStop>> = Result.success(emptyMap())
 
@@ -141,6 +142,7 @@ class FakeTransitRepository(
         lineNameHint: String,
         directionHint: Int
     ): Result<BusLineDetail> {
+        lineDetailsMap[lineId]?.let { return Result.success(it) }
         lineDetailResult?.let { return it }
         val direction = BusLineDirection(
             lineId = lineId,

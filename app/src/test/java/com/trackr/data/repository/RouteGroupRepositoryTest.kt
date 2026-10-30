@@ -57,6 +57,125 @@ class RouteGroupRepositoryTest {
     }
 
     @Test
+    fun testInitialFavoriteGroupsSeeded() {
+        val favGroups = repository.favoriteGroups.value
+        assertEquals(2, favGroups.size)
+        assertEquals("commute", favGroups[0].id)
+        assertEquals("上班通勤", favGroups[0].name)
+        assertEquals("home", favGroups[1].id)
+        assertEquals("回家线路", favGroups[1].name)
+    }
+
+    @Test
+    fun testCreateAndRenameFavoriteGroup() = runTest(testDispatcher) {
+        val created = repository.createFavoriteGroup("健身房")
+        assertNotNull(created.id)
+        assertEquals("健身房", created.name)
+        assertEquals(2, created.sortOrder)
+
+        val list = repository.favoriteGroups.value
+        assertEquals(3, list.size)
+
+        repository.renameFavoriteGroup(created.id, "瑜伽馆")
+        val updated = repository.favoriteGroups.value.find { it.id == created.id }
+        assertNotNull(updated)
+        assertEquals("瑜伽馆", updated?.name)
+    }
+
+    @Test
+    fun testDeleteFavoriteGroupKeepsTransitGroups() = runTest(testDispatcher) {
+        val fav = repository.createFavoriteGroup("外勤出行")
+        val transitGroup = TransitGroup(
+            id = "tg_field_1",
+            name = "外勤拜访客户",
+            category = GroupCategory.CUSTOM,
+            customGroupId = fav.id,
+            legs = listOf(TransitLeg(legIndex = 0, fromStopName = "A", toStopName = "B"))
+        )
+        repository.addGroup(transitGroup)
+
+        assertEquals("外勤出行", repository.favoriteGroups.value.find { it.id == fav.id }?.name)
+        assertEquals(fav.id, repository.getGroupById("tg_field_1")?.customGroupId)
+
+        // 删除该收藏分组
+        repository.deleteFavoriteGroup(fav.id)
+
+        // 验证收藏分组已移除
+        assertNull(repository.favoriteGroups.value.find { it.id == fav.id })
+
+        // 验证原有的 TransitGroup 仍然存在，但 customGroupId 已被置空归入未分组
+        val keptGroup = repository.getGroupById("tg_field_1")
+        assertNotNull(keptGroup)
+        assertNull(keptGroup?.customGroupId)
+        assertEquals("外勤拜访客户", keptGroup?.name)
+    }
+
+    @Test
+    fun testReorderFavoriteGroups() = runTest(testDispatcher) {
+        repository.createFavoriteGroup("分组C")
+        val initialList = repository.favoriteGroups.value
+        assertEquals(3, initialList.size)
+
+        // 将顺序反转
+        val reversedIds = initialList.map { it.id }.reversed()
+        repository.reorderFavoriteGroups(reversedIds)
+
+        val reordered = repository.favoriteGroups.value
+        assertEquals(reversedIds[0], reordered[0].id)
+        assertEquals(reversedIds[1], reordered[1].id)
+        assertEquals(reversedIds[2], reordered[2].id)
+    }
+
+    @Test
+    fun testAddCandidateLineToLeg() = runTest(testDispatcher) {
+        val group = TransitGroup(
+            id = "group_direct_multi",
+            name = "高新园通勤",
+            legs = listOf(
+                TransitLeg(
+                    legIndex = 0,
+                    fromStopName = "深大北门",
+                    toStopName = "高新园",
+                    candidateLines = listOf(
+                        CandidateLine(
+                            cityId = "0755",
+                            lineId = "line_320",
+                            lineName = "320路",
+                            source = DataSourceType.CHELAILE,
+                            fromStopOrder = 2,
+                            toStopOrder = 6
+                        )
+                    )
+                )
+            )
+        )
+        repository.addGroup(group)
+
+        val candidateM194 = CandidateLine(
+            cityId = "0755",
+            lineId = "line_m194",
+            lineName = "M194路",
+            source = DataSourceType.CHELAILE,
+            fromStopOrder = 4,
+            toStopOrder = 9
+        )
+
+        // 添加候选线路
+        repository.addCandidateLineToLeg(group.id, 0, candidateM194)
+
+        val updatedGroup = repository.getGroupById(group.id)
+        assertNotNull(updatedGroup)
+        assertEquals(2, updatedGroup!!.legs[0].candidateLines.size)
+        assertEquals("line_320", updatedGroup.legs[0].candidateLines[0].lineId)
+        assertEquals("line_m194", updatedGroup.legs[0].candidateLines[1].lineId)
+
+        // 重复添加相同 lineId 不会产生重复项
+        repository.addCandidateLineToLeg(group.id, 0, candidateM194)
+        val deduplicatedGroup = repository.getGroupById(group.id)
+        assertEquals(2, deduplicatedGroup!!.legs[0].candidateLines.size)
+    }
+
+    @Test
     fun testAddAndRetrieveGroup() = runTest(testDispatcher) {
         val newGroup = TransitGroup(
             id = "group_weekend",
