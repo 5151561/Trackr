@@ -70,7 +70,7 @@ class TransitProviderCoordinator(
         val matchedMgKeys = HashSet<String>()
         val result = ArrayList<TransitCity>()
 
-        // 1. 以车来了城市列表为主干，归一化名称匹配并填充 mygolbsCityCode
+        // 1. 以车来了城市为主干进行聚合去重，统一采用前者简洁名称（如“上海”而非“上海市”）
         for (cCity in chelaileCities) {
             val cleanName = ProvinceCityCatalog.cleanCityName(cCity.cityName)
             val mgMatch = mgMap[cleanName]
@@ -79,23 +79,20 @@ class TransitProviderCoordinator(
             } else {
                 ProvinceCityCatalog.inferProvince(cCity.cityName)
             }
-            val effectiveMgCode = if (!cCity.mygolbsCityCode.isNullOrBlank()) {
-                cCity.mygolbsCityCode
-            } else {
-                mgMatch?.mygolbsCityCode
-            }
             if (mgMatch != null) {
                 matchedMgKeys.add(cleanName)
             }
+            val displayName = cleanName.ifBlank { cCity.cityName }
             result.add(
                 cCity.copy(
+                    cityName = displayName,
                     province = effectiveProv,
-                    mygolbsCityCode = effectiveMgCode
+                    mygolbsCityCode = mgMatch?.mygolbsCityCode
                 )
             )
         }
 
-        // 2. 将掌上公交独有的城市（如县级市）追加合入列表
+        // 2. 掌上公交独有的城市列表追加合入（只留简洁名称）
         for ((cleanName, mgCity) in mgMap) {
             if (!matchedMgKeys.contains(cleanName)) {
                 val effectiveProv = if (mgCity.province.isNotBlank()) {
@@ -103,8 +100,13 @@ class TransitProviderCoordinator(
                 } else {
                     ProvinceCityCatalog.inferProvince(mgCity.cityName)
                 }
+                val displayName = cleanName.ifBlank { mgCity.cityName }
                 result.add(
-                    mgCity.copy(province = effectiveProv)
+                    mgCity.copy(
+                        cityId = "",
+                        cityName = displayName,
+                        province = effectiveProv
+                    )
                 )
             }
         }
@@ -135,44 +137,30 @@ class TransitProviderCoordinator(
     }
 
     /**
-     * 获取周边站点：根据 EngineMode 与 AggregatedSourcePriority 策略路由至支持位置雷达能力的 Provider
+     * 获取周边站点：根据 EngineMode 单源路由至支持位置雷达能力的 Provider
      */
     suspend fun getNearbyStops(
         city: TransitCity,
         wgsLat: Double,
         wgsLng: Double,
         limit: Int = 4,
-        mode: EngineMode = EngineMode.ALL,
+        mode: EngineMode = EngineMode.CHELAILE,
         priority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST
     ): List<NearbyStop> {
         val targetProvider = when (mode) {
             EngineMode.CHELAILE -> providers[DataSourceType.CHELAILE]
             EngineMode.MYGOLBS -> providers[DataSourceType.MYGOLBS]
-            EngineMode.ALL -> {
-                providers[priority.primarySource]?.takeIf { it.supportsLocationRadar() }
-                    ?: providers[priority.secondarySource]?.takeIf { it.supportsLocationRadar() }
-                    ?: providers.values.firstOrNull { it.supportsLocationRadar() }
-            }
         }
 
         if (targetProvider != null && targetProvider.supportsLocationRadar()) {
-            val stops = runCatching { targetProvider.getNearbyStops(city, wgsLat, wgsLng, limit) }.getOrDefault(emptyList())
-            if (stops.isNotEmpty()) return stops
-        }
-
-        // 双引擎模式下：若主优先源未查到周边站点，自动跨源降级至副优先源雷达
-        if (mode == EngineMode.ALL) {
-            val fallbackProvider = providers[priority.secondarySource]?.takeIf { it.supportsLocationRadar() }
-            if (fallbackProvider != null && fallbackProvider !== targetProvider) {
-                return runCatching { fallbackProvider.getNearbyStops(city, wgsLat, wgsLng, limit) }.getOrDefault(emptyList())
-            }
+            return runCatching { targetProvider.getNearbyStops(city, wgsLat, wgsLng, limit) }.getOrDefault(emptyList())
         }
 
         return emptyList()
     }
 
     /**
-     * 搜索：根据 EngineMode 策略路由单源或并发请求双源，由 SearchResultAggregator 根据优先级统一聚合
+     * 搜索：根据 EngineMode 策略直接单源路由，由 SearchResultAggregator 规范化输出
      */
     suspend fun search(
         city: TransitCity,
@@ -198,30 +186,11 @@ class TransitProviderCoordinator(
                 }
                 aggregator.aggregate(keyword, mode, mygolbsResult = res, priority = priority)
             }
-            EngineMode.ALL -> {
-                val clDeferred = async {
-                    chelaileProvider?.let {
-                        runCatching { it.search(city, keyword, userLat, userLng) }.getOrNull()
-                    }
-                }
-                val mgDeferred = async {
-                    mygolbsProvider?.let {
-                        runCatching { it.search(city, keyword, userLat, userLng) }.getOrNull()
-                    }
-                }
-                aggregator.aggregate(
-                    keyword = keyword,
-                    mode = mode,
-                    chelaileResult = clDeferred.await(),
-                    mygolbsResult = mgDeferred.await(),
-                    priority = priority
-                )
-            }
         }
     }
 
     /**
-     * 站点详情：实现三级降级调度（特征识别 -> 主源查询含同源兜底 -> 跨源降级至副优先源）
+     * 站点详情：根据 EngineMode 或请求显式特征精准单源路由
      */
     suspend fun getStopDetail(
         city: TransitCity,
@@ -232,41 +201,18 @@ class TransitProviderCoordinator(
         val chelaileProvider = providers[DataSourceType.CHELAILE]
         val mygolbsProvider = providers[DataSourceType.MYGOLBS]
 
-        // 显式命中掌上公交特征或当前引擎模式为掌上公交
-        val isExplicitMygolbs = mode == EngineMode.MYGOLBS ||
-                (mygolbsProvider?.supportsStop(request) == true && mode != EngineMode.CHELAILE)
-
-        if (isExplicitMygolbs) {
-            return mygolbsProvider?.getStopDetail(city, request).orEmpty()
+        // 若请求明确包含掌上公交前缀特征，或当前引擎模式为掌上公交，路由至掌上公交
+        val isExplicitMygolbs = when {
+            mygolbsProvider?.supportsStop(request) == true -> true
+            chelaileProvider?.supportsStop(request) == false -> true
+            else -> mode == EngineMode.MYGOLBS
         }
 
-        if (mode == EngineMode.CHELAILE) {
-            return chelaileProvider?.getStopDetail(city, request).orEmpty()
+        return if (isExplicitMygolbs) {
+            mygolbsProvider?.getStopDetail(city, request).orEmpty()
+        } else {
+            chelaileProvider?.getStopDetail(city, request).orEmpty()
         }
-
-        // EngineMode.ALL：优先调用主源（根据 priority 设置）
-        val primaryProvider = providers[priority.primarySource]
-        val secondaryProvider = providers[priority.secondarySource]
-
-        val primaryStops = primaryProvider?.let {
-            runCatching { it.getStopDetail(city, request) }.getOrNull()
-        }.orEmpty()
-
-        if (primaryStops.isNotEmpty()) {
-            return primaryStops
-        }
-
-        // 阶段 3：跨源降级至副优先源
-        if (!request.stopName.isNullOrBlank() && secondaryProvider != null) {
-            val secondaryStops = runCatching {
-                secondaryProvider.getStopDetail(city, request)
-            }.getOrNull().orEmpty()
-            if (secondaryStops.any { it.lines.isNotEmpty() }) {
-                return secondaryStops
-            }
-        }
-
-        return emptyList()
     }
 
     /**

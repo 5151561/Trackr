@@ -91,7 +91,7 @@ class TransitProviderCoordinatorTest {
     }
 
     @Test
-    fun testSearch_inAllMode_mergesAndDeduplicatesAndAppendsSuffix() = runBlocking {
+    fun testSearch_inChelaileMode_onlyQueriesChelaile() = runBlocking {
         // Arrange
         fakeChelaileProvider.searchResult = TransitSearchResult(
             keyword = "1",
@@ -118,41 +118,30 @@ class TransitProviderCoordinatorTest {
             )
         )
 
-        // Act
-        val result = coordinator.search(testCity, "1", EngineMode.ALL)
+        // Act: 车来了单源搜索
+        val result = coordinator.search(testCity, "1", EngineMode.CHELAILE)
 
         // Assert
         assertEquals(1, fakeChelaileProvider.searchCallCount)
-        assertEquals(1, fakeMygolbsProvider.searchCallCount)
+        assertEquals(0, fakeMygolbsProvider.searchCallCount)
 
         // 地铁1号线应被过滤
         assertFalse(result.lines.any { it.name.contains("地铁") || it.isSubway })
 
-        // 同名线路应被追加 [掌上公交] 并并存展示
         val lineNames = result.lines.map { it.name }
         assertTrue(lineNames.contains("1路"))
-        assertTrue(lineNames.contains("1路 [掌上公交]"))
-        assertTrue(lineNames.contains("2路"))
         assertTrue(lineNames.contains("10路"))
-
-        // 自然排序：1路, 1路 [掌上公交], 2路, 10路
-        assertEquals("1路", result.lines[0].name)
-        assertEquals("1路 [掌上公交]", result.lines[1].name)
-        assertEquals("2路", result.lines[2].name)
-        assertEquals("10路", result.lines[3].name)
+        assertFalse(lineNames.contains("2路"))
 
         // 纯地铁站点人民广场(M)应被过滤
         assertFalse(result.stops.any { it.name.contains("(M)") })
-
-        // 同名站点应追加 (掌上公交)
         val stopNames = result.stops.map { it.name }
         assertTrue(stopNames.contains("人民广场"))
-        assertTrue(stopNames.contains("人民广场 (掌上公交)"))
-        assertTrue(stopNames.contains("五角场"))
+        assertFalse(stopNames.contains("五角场"))
     }
 
     @Test
-    fun testSearch_inAllMode_withMygolbsPriority_mergesAndAppendsChelaileSuffix() = runBlocking {
+    fun testSearch_inMygolbsMode_onlyQueriesMygolbs() = runBlocking {
         // Arrange
         fakeChelaileProvider.searchResult = TransitSearchResult(
             keyword = "1",
@@ -177,32 +166,19 @@ class TransitProviderCoordinatorTest {
             )
         )
 
-        // Act (指定掌上公交优先)
+        // Act: 掌上公交单源
         val result = coordinator.search(
             city = testCity,
             keyword = "1",
-            mode = EngineMode.ALL,
-            priority = AggregatedSourcePriority.MYGOLBS_FIRST
+            mode = EngineMode.MYGOLBS
         )
 
-        // Assert: 掌上公交保留原名，车来了同名线路被追加 [车来了]
+        assertEquals(0, fakeChelaileProvider.searchCallCount)
+        assertEquals(1, fakeMygolbsProvider.searchCallCount)
         val lineNames = result.lines.map { it.name }
         assertTrue(lineNames.contains("1路"))
-        assertTrue(lineNames.contains("1路 [车来了]"))
         assertTrue(lineNames.contains("2路"))
-        assertTrue(lineNames.contains("10路"))
-
-        // 自然排序且主源排在前面：1路(MYGOLBS), 1路 [车来了](CHELAILE), 2路, 10路
-        assertEquals("1路", result.lines[0].name)
-        assertEquals(DataSourceType.MYGOLBS, result.lines[0].source)
-        assertEquals("1路 [车来了]", result.lines[1].name)
-        assertEquals(DataSourceType.CHELAILE, result.lines[1].source)
-
-        // 站点同名：掌上公交保留原名，车来了追加 (车来了)
-        val stopNames = result.stops.map { it.name }
-        assertTrue(stopNames.contains("人民广场"))
-        assertTrue(stopNames.contains("人民广场 (车来了)"))
-        assertTrue(stopNames.contains("五角场"))
+        assertFalse(lineNames.contains("10路"))
     }
 
     @Test
@@ -263,7 +239,7 @@ class TransitProviderCoordinatorTest {
         fakeMygolbsProvider.stopDetailResult = listOf(mgStop)
 
         val request = StopDetailRequest(stopId = "mg:450900:玉林:一中", stopName = "一中")
-        val result = coordinator.getStopDetail(testCity, request, EngineMode.ALL)
+        val result = coordinator.getStopDetail(testCity, request, EngineMode.CHELAILE)
 
         assertEquals(0, fakeChelaileProvider.stopDetailCallCount)
         assertEquals(1, fakeMygolbsProvider.stopDetailCallCount)
@@ -305,10 +281,7 @@ class TransitProviderCoordinatorTest {
     }
 
     @Test
-    fun testGetStopDetail_inAllMode_fallsBackToMygolbsWhenChelaileReturnsEmpty() = runBlocking {
-        // Stage 1 + 2 (Chelaile) returns empty
-        fakeChelaileProvider.stopDetailResult = emptyList()
-
+    fun testGetStopDetail_inMygolbsMode_queriesMygolbs() = runBlocking {
         val dir = BusLineDirection(
             lineId = "mg:l1",
             name = "1路",
@@ -316,7 +289,6 @@ class TransitProviderCoordinatorTest {
             endStop = "B",
             source = DataSourceType.MYGOLBS
         )
-        // Stage 3 (Mygolbs) returns stop with line info
         val mgStop = NearbyStop(
             stopId = "mg:s1",
             name = "人民广场",
@@ -332,45 +304,12 @@ class TransitProviderCoordinatorTest {
         fakeMygolbsProvider.stopDetailResult = listOf(mgStop)
 
         val request = StopDetailRequest(stopId = "normal_id", stopName = "人民广场")
-        val result = coordinator.getStopDetail(testCity, request, EngineMode.ALL)
+        val result = coordinator.getStopDetail(testCity, request, EngineMode.MYGOLBS)
 
-        assertEquals(1, fakeChelaileProvider.stopDetailCallCount)
+        assertEquals(0, fakeChelaileProvider.stopDetailCallCount)
         assertEquals(1, fakeMygolbsProvider.stopDetailCallCount)
         assertEquals(1, result.size)
         assertEquals("人民广场", result[0].name)
-    }
-
-    @Test
-    fun testGetStopDetail_inAllMode_doesNotFallbackIfStopNameIsBlank() = runBlocking {
-        fakeChelaileProvider.stopDetailResult = emptyList()
-        val dir = BusLineDirection(
-            lineId = "mg:l1",
-            name = "1路",
-            startStop = "A",
-            endStop = "B",
-            source = DataSourceType.MYGOLBS
-        )
-        fakeMygolbsProvider.stopDetailResult = listOf(
-            NearbyStop(
-                stopId = "mg:s1",
-                name = "人民广场",
-                lines = listOf(
-                    NearbyStopLineStatus(
-                        line = dir,
-                        targetOrder = 1,
-                        targetStopId = "s1",
-                        targetStopName = "人民广场"
-                    )
-                )
-            )
-        )
-
-        val request = StopDetailRequest(stopId = "normal_id", stopName = null)
-        val result = coordinator.getStopDetail(testCity, request, EngineMode.ALL)
-
-        assertEquals(1, fakeChelaileProvider.stopDetailCallCount)
-        assertEquals(0, fakeMygolbsProvider.stopDetailCallCount)
-        assertTrue(result.isEmpty())
     }
 
     @Test
@@ -431,11 +370,13 @@ class TransitProviderCoordinatorTest {
 
         val cities = coordinator.getSupportedCities(forceRefresh = true)
 
+        // 验证城市列表聚合去重：上海与上海市只保留前者“上海”，北流追加合入，共4个城市
         assertEquals(4, cities.size)
 
         val shanghai = cities.first { it.cityName == "上海" }
         assertEquals("034", shanghai.cityId)
         assertEquals("310000", shanghai.mygolbsCityCode)
+        assertFalse(cities.any { it.cityName == "上海市" })
 
         val beijing = cities.first { it.cityName == "北京" }
         assertEquals("027", beijing.cityId)
@@ -444,11 +385,11 @@ class TransitProviderCoordinatorTest {
         val yulin = cities.first { it.cityName == "玉林" }
         assertEquals("440", yulin.cityId)
         assertEquals("450900", yulin.mygolbsCityCode)
+        assertFalse(cities.any { it.cityName == "玉林市" })
 
-        // 掌上公交独有城市追加合入
-        val beiliu = cities.first { it.cityName == "北流市" }
+        val beiliu = cities.first { it.cityName == "北流" }
+        assertEquals("", beiliu.cityId)
         assertEquals("450981", beiliu.mygolbsCityCode)
-        assertEquals("广西", beiliu.province)
 
         // 验证缓存有效：forceRefresh = false 时不再调用底层 provider
         val cached = coordinator.getSupportedCities(forceRefresh = false)
@@ -499,101 +440,27 @@ class TransitProviderCoordinatorTest {
     }
 
     @Test
-    fun testGetNearbyStops_withAllMode_chelaileEmpty_fallsBackToMygolbsRadar() = runBlocking {
-        fakeChelaileProvider.nearbyStopsResult = emptyList()
-        fakeMygolbsProvider.nearbyStopsResult = listOf(
-            NearbyStop(stopId = "s_mg", name = "掌上兜底站台")
-        )
-
-        val stops = coordinator.getNearbyStops(testCity, 31.23, 121.47, mode = EngineMode.ALL)
-
-        assertEquals(1, stops.size)
-        assertEquals("掌上兜底站台", stops[0].name)
-        assertEquals(1, fakeChelaileProvider.nearbyStopsCallCount)
-        assertEquals(1, fakeMygolbsProvider.nearbyStopsCallCount)
-    }
-
-    @Test
-    fun testGetNearbyStops_withAllMode_mygolbsPriority_prefersMygolbsRadar() = runBlocking {
+    fun testGetNearbyStops_routesDirectlyByMode() = runBlocking {
         fakeChelaileProvider.nearbyStopsResult = listOf(
             NearbyStop(stopId = "s_cl", name = "车来了站台")
         )
         fakeMygolbsProvider.nearbyStopsResult = listOf(
-            NearbyStop(stopId = "s_mg", name = "掌上优先站台")
+            NearbyStop(stopId = "s_mg", name = "掌上站台")
         )
 
-        val stops = coordinator.getNearbyStops(
-            city = testCity,
-            wgsLat = 31.23,
-            wgsLng = 121.47,
-            mode = EngineMode.ALL,
-            priority = AggregatedSourcePriority.MYGOLBS_FIRST
-        )
-
-        assertEquals(1, stops.size)
-        assertEquals("掌上优先站台", stops[0].name)
-        assertEquals(0, fakeChelaileProvider.nearbyStopsCallCount)
-        assertEquals(1, fakeMygolbsProvider.nearbyStopsCallCount)
-    }
-
-    @Test
-    fun testGetNearbyStops_withAllMode_mygolbsPriority_fallsBackToChelaileRadar() = runBlocking {
-        fakeMygolbsProvider.nearbyStopsResult = emptyList()
-        fakeChelaileProvider.nearbyStopsResult = listOf(
-            NearbyStop(stopId = "s_cl", name = "车来了降级站台")
-        )
-
-        val stops = coordinator.getNearbyStops(
-            city = testCity,
-            wgsLat = 31.23,
-            wgsLng = 121.47,
-            mode = EngineMode.ALL,
-            priority = AggregatedSourcePriority.MYGOLBS_FIRST
-        )
-
-        assertEquals(1, stops.size)
-        assertEquals("车来了降级站台", stops[0].name)
-        assertEquals(1, fakeMygolbsProvider.nearbyStopsCallCount)
+        // 1. CHELAILE 模式
+        val clStops = coordinator.getNearbyStops(testCity, 31.23, 121.47, mode = EngineMode.CHELAILE)
+        assertEquals(1, clStops.size)
+        assertEquals("车来了站台", clStops[0].name)
         assertEquals(1, fakeChelaileProvider.nearbyStopsCallCount)
-    }
+        assertEquals(0, fakeMygolbsProvider.nearbyStopsCallCount)
 
-    @Test
-    fun testGetStopDetail_inAllMode_mygolbsPriority_prefersMygolbsAndFallsBackToChelaile() = runBlocking {
-        val dir = BusLineDirection(
-            lineId = "l1",
-            name = "1路",
-            startStop = "A",
-            endStop = "B",
-            source = DataSourceType.CHELAILE
-        )
-        fakeMygolbsProvider.stopDetailResult = emptyList()
-        fakeChelaileProvider.stopDetailResult = listOf(
-            NearbyStop(
-                stopId = "cl_s1",
-                name = "人民广场",
-                lines = listOf(
-                    NearbyStopLineStatus(
-                        line = dir,
-                        targetOrder = 1,
-                        targetStopId = "s1",
-                        targetStopName = "人民广场"
-                    )
-                )
-            )
-        )
-
-        val request = StopDetailRequest(stopId = "normal_id", stopName = "人民广场")
-        val result = coordinator.getStopDetail(
-            city = testCity,
-            request = request,
-            mode = EngineMode.ALL,
-            priority = AggregatedSourcePriority.MYGOLBS_FIRST
-        )
-
-        assertEquals(1, fakeMygolbsProvider.stopDetailCallCount)
-        assertEquals(1, fakeChelaileProvider.stopDetailCallCount)
-        assertEquals(1, result.size)
-        assertEquals("人民广场", result[0].name)
+        // 2. MYGOLBS 模式
+        val mgStops = coordinator.getNearbyStops(testCity, 31.23, 121.47, mode = EngineMode.MYGOLBS)
+        assertEquals(1, mgStops.size)
+        assertEquals("掌上站台", mgStops[0].name)
+        assertEquals(1, fakeChelaileProvider.nearbyStopsCallCount)
+        assertEquals(1, fakeMygolbsProvider.nearbyStopsCallCount)
     }
 
     @Test

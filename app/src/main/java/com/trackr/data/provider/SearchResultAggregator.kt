@@ -38,49 +38,6 @@ class SearchResultAggregator {
                     mergedStops.addAll(chelaileResult.stops)
                 }
             }
-            EngineMode.ALL -> {
-                val primaryResult = if (priority.primarySource == DataSourceType.CHELAILE) chelaileResult else mygolbsResult
-                val secondaryResult = if (priority.primarySource == DataSourceType.CHELAILE) mygolbsResult else chelaileResult
-                val secondaryLineTag = if (priority.primarySource == DataSourceType.CHELAILE) " [掌上公交]" else " [车来了]"
-                val secondaryStopTag = if (priority.primarySource == DataSourceType.CHELAILE) " (掌上公交)" else " (车来了)"
-
-                val primaryLines = primaryResult?.lines.orEmpty()
-                val primaryStops = primaryResult?.stops.orEmpty()
-                val secondaryLines = secondaryResult?.lines.orEmpty()
-                val secondaryStops = secondaryResult?.stops.orEmpty()
-
-                fun cleanLineName(name: String): String =
-                    name.removeSuffix(" [掌上公交]").removeSuffix("[掌上公交]")
-                        .removeSuffix(" [车来了]").removeSuffix("[车来了]").trim()
-
-                fun cleanStopName(name: String): String =
-                    name.removeSuffix(" (掌上公交)").removeSuffix("(掌上公交)").removeSuffix("（掌上公交）")
-                        .removeSuffix(" (车来了)").removeSuffix("(车来了)").removeSuffix("（车来了）").trim()
-
-                // 主源线路优先放入
-                mergedLines.addAll(primaryLines)
-                val existingLineNames = primaryLines.map { cleanLineName(it.name) }.toSet()
-                for (sLine in secondaryLines) {
-                    val rawName = cleanLineName(sLine.name)
-                    if (existingLineNames.contains(rawName)) {
-                        mergedLines.add(sLine.copy(name = "$rawName$secondaryLineTag"))
-                    } else {
-                        mergedLines.add(sLine)
-                    }
-                }
-
-                // 主源站点优先放入
-                mergedStops.addAll(primaryStops)
-                val existingStopNames = primaryStops.map { cleanStopName(it.name) }.toSet()
-                for (sStop in secondaryStops) {
-                    val rawName = cleanStopName(sStop.name)
-                    if (existingStopNames.contains(rawName)) {
-                        mergedStops.add(sStop.copy(name = "$rawName$secondaryStopTag"))
-                    } else {
-                        mergedStops.add(sStop)
-                    }
-                }
-            }
         }
 
         // 过滤纯地铁线路（第三方源无在途实时列车追踪数据）

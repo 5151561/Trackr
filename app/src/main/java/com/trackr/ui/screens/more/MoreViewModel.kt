@@ -20,7 +20,7 @@ import kotlinx.coroutines.launch
  * 更多页 UI 状态
  */
 data class MoreUiState(
-    val engineMode: EngineMode = EngineMode.ALL,
+    val engineMode: EngineMode = EngineMode.CHELAILE,
     val aggregatedPriority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST,
     val nearbyStopsCount: Int = 4,
     val preferredTransitCode: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,

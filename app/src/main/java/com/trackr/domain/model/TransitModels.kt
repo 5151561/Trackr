@@ -12,11 +12,10 @@ enum class DataSourceType(val displayName: String) {
 }
 
 /**
- * 引擎运行模式：双引擎融合 / 仅车来了 / 仅掌上公交
+ * 引擎运行模式：车来了 / 掌上公交（独立单源模式）
  */
 @Serializable
 enum class EngineMode(val displayName: String, val shortLabel: String) {
-    ALL("双引擎融合", "双引擎"),
     CHELAILE("车来了", "车来了"),
     MYGOLBS("掌上公交", "掌上公交")
 }

@@ -1241,14 +1241,29 @@ private fun CityPickerBottomSheet(
                                             )
                                         }
                                     }
-                                    if (city.cityId.isNotBlank() && !city.mygolbsCityCode.isNullOrBlank()) {
+                                    if (city.cityId.isNotBlank()) {
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = Color(0xFFE8F5E9)
+                                        ) {
+                                            Text(
+                                                text = "车来了",
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Color(0xFF2E7D32),
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                    if (!city.mygolbsCityCode.isNullOrBlank()) {
                                         Surface(
                                             shape = RoundedCornerShape(4.dp),
                                             color = Color(0xFFFFF3E0)
                                         ) {
                                             Text(
-                                                text = "双源",
+                                                text = "掌上公交",
                                                 fontSize = 10.sp,
+                                                fontWeight = FontWeight.Medium,
                                                 color = Color(0xFFE65100),
                                                 modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                             )
@@ -1539,14 +1554,29 @@ private fun CityPickerBottomSheet(
                                                     )
                                                 }
                                             }
-                                            if (city.cityId.isNotBlank() && !city.mygolbsCityCode.isNullOrBlank()) {
+                                            if (city.cityId.isNotBlank()) {
+                                                Surface(
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = Color(0xFFE8F5E9)
+                                                ) {
+                                                    Text(
+                                                        text = "车来了",
+                                                        fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = Color(0xFF2E7D32),
+                                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                                    )
+                                                }
+                                            }
+                                            if (!city.mygolbsCityCode.isNullOrBlank()) {
                                                 Surface(
                                                     shape = RoundedCornerShape(4.dp),
                                                     color = Color(0xFFFFF3E0)
                                                 ) {
                                                     Text(
-                                                        text = "双源",
+                                                        text = "掌上公交",
                                                         fontSize = 10.sp,
+                                                        fontWeight = FontWeight.Medium,
                                                         color = Color(0xFFE65100),
                                                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
                                                     )

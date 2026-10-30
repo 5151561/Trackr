@@ -46,13 +46,13 @@ class MoreViewModelTest {
 
     @Test
     fun testInitialState_reflectsRepositoryValues() = runTest {
-        assertEquals(EngineMode.ALL, viewModel.engineMode.value)
+        assertEquals(EngineMode.CHELAILE, viewModel.engineMode.value)
         assertEquals(4, viewModel.nearbyStopsCount.value)
         assertEquals(TransitCodeProvider.ASK_ALWAYS, viewModel.preferredTransitCode.value)
         assertTrue(viewModel.reminders.value.isEmpty())
 
         // 验证统一 MoreUiState
-        assertEquals(EngineMode.ALL, viewModel.uiState.value.engineMode)
+        assertEquals(EngineMode.CHELAILE, viewModel.uiState.value.engineMode)
         assertEquals(AggregatedSourcePriority.CHELAILE_FIRST, viewModel.uiState.value.aggregatedPriority)
         assertEquals(4, viewModel.uiState.value.nearbyStopsCount)
         assertEquals(TransitCodeProvider.ASK_ALWAYS, viewModel.uiState.value.preferredTransitCode)

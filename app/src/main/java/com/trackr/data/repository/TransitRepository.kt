@@ -165,8 +165,8 @@ class TransitRepository(
     }
 
     private fun loadInitialEngineMode(): EngineMode {
-        val modeStr = prefs.getString("engine_mode", EngineMode.ALL.name)
-        return runCatching { EngineMode.valueOf(modeStr ?: EngineMode.ALL.name) }.getOrDefault(EngineMode.ALL)
+        val modeStr = prefs.getString("engine_mode", EngineMode.CHELAILE.name)
+        return runCatching { EngineMode.valueOf(modeStr ?: EngineMode.CHELAILE.name) }.getOrDefault(EngineMode.CHELAILE)
     }
 
     private fun loadInitialAggregatedPriority(): AggregatedSourcePriority {

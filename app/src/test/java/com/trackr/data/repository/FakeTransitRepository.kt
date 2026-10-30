@@ -30,7 +30,7 @@ class FakeTransitRepository(
     private val _selectedCity = MutableStateFlow(initialCity)
     override val selectedCity: StateFlow<TransitCity> = _selectedCity.asStateFlow()
 
-    private val _engineMode = MutableStateFlow(EngineMode.ALL)
+    private val _engineMode = MutableStateFlow(EngineMode.CHELAILE)
     override val engineMode: StateFlow<EngineMode> = _engineMode.asStateFlow()
 
     override fun setEngineMode(mode: EngineMode) {

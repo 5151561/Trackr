@@ -815,4 +815,64 @@ class TransitProviderTest {
         assertEquals("108路", stops[0].lines[0].line.name)
         assertEquals("2站到达", stops[0].lines[0].statusText)
     }
+
+    @Test
+    fun testMygolbsProvider_getStopLines_mapsWaitingToNoRealtimeWhenHasRealIsZero() = runBlocking {
+        val interceptor = Interceptor { chain ->
+            val request = chain.request()
+            val body = extractRequestBody(request)
+
+            if (body.contains("CMD=105")) {
+                val jsonLines = """
+                {
+                  "status": "1",
+                  "data": [
+                    {
+                      "lineName": "312路",
+                      "upperOrDown": "2",
+                      "from": "呼兰路通河路",
+                      "to": "人民广场",
+                      "neartext": "等待发车",
+                      "routeBean": {
+                        "hasReal": 0
+                      }
+                    },
+                    {
+                      "lineName": "1路",
+                      "upperOrDown": "1",
+                      "from": "起点",
+                      "to": "终点",
+                      "neartext": "等待发车",
+                      "routeBean": {
+                        "hasReal": 1
+                      }
+                    }
+                  ]
+                }
+                """.trimIndent()
+                mockResponse(request, jsonLines)
+            } else {
+                mockResponse(request, """{"status": "1", "data": []}""")
+            }
+        }
+
+        val okHttpClient = OkHttpClient.Builder().addInterceptor(interceptor).build()
+        val mygolbsClient = MygolbsApiClient(okHttpClient)
+        val provider = MygolbsTransitProvider(mygolbsClient)
+
+        val request = StopDetailRequest(stopId = "mg:上海市:人民广场", stopName = "人民广场")
+        val stops = provider.getStopDetail(testCity, request)
+
+        assertEquals(1, stops.size)
+        val lines = stops[0].lines
+        assertEquals(2, lines.size)
+
+        // hasReal == 0 应当被正确映射为 "未开通实时" 而不是盲目的 "等待发车"
+        assertEquals("312路", lines[0].line.name)
+        assertEquals("未开通实时", lines[0].statusText)
+
+        // hasReal == 1 的真实发车保持原状 "等待发车"
+        assertEquals("1路", lines[1].line.name)
+        assertEquals("等待发车", lines[1].statusText)
+    }
 }

@@ -162,7 +162,7 @@ class HomeViewModelTest {
         val viewModel = createViewModel()
         testScheduler.runCurrent()
 
-        assertEquals(com.trackr.domain.model.EngineMode.ALL, viewModel.uiState.value.engineMode)
+        assertEquals(com.trackr.domain.model.EngineMode.CHELAILE, viewModel.uiState.value.engineMode)
 
         viewModel.toggleEngineMode()
         testScheduler.runCurrent()
@@ -172,9 +172,9 @@ class HomeViewModelTest {
         testScheduler.runCurrent()
         assertEquals(com.trackr.domain.model.EngineMode.CHELAILE, viewModel.uiState.value.engineMode)
 
-        viewModel.setEngineMode(com.trackr.domain.model.EngineMode.ALL)
+        viewModel.setEngineMode(com.trackr.domain.model.EngineMode.MYGOLBS)
         testScheduler.runCurrent()
-        assertEquals(com.trackr.domain.model.EngineMode.ALL, viewModel.uiState.value.engineMode)
+        assertEquals(com.trackr.domain.model.EngineMode.MYGOLBS, viewModel.uiState.value.engineMode)
     }
 
     @Test
@@ -189,7 +189,7 @@ class HomeViewModelTest {
 
         // 切换引擎模式前更新 mock 数据，模拟切换后数据源的数据
         fakeRepository.nearbyStopsResult = Result.success(listOf(stopB))
-        viewModel.setEngineMode(com.trackr.domain.model.EngineMode.CHELAILE)
+        viewModel.setEngineMode(com.trackr.domain.model.EngineMode.MYGOLBS)
         testScheduler.runCurrent()
 
         // 验证无需重启，周边站点即刻被重新拉取并更新为站点B
@@ -243,10 +243,10 @@ class HomeViewModelTest {
         val viewModel = createViewModel()
         testScheduler.runCurrent()
 
-        // 1. ALL 模式包含全部
-        viewModel.setEngineMode(com.trackr.domain.model.EngineMode.ALL)
+        // 1. CHELAILE 模式包含车来了城市 (clCity, bothCity)
+        viewModel.setEngineMode(com.trackr.domain.model.EngineMode.CHELAILE)
         testScheduler.runCurrent()
-        assertEquals(3, viewModel.uiState.value.filteredCities.size)
+        assertEquals(2, viewModel.uiState.value.filteredCities.size)
 
         // 2. MYGOLBS 模式只包含有 mygolbsCityCode 的城市 (mgCity, bothCity)
         viewModel.setEngineMode(com.trackr.domain.model.EngineMode.MYGOLBS)

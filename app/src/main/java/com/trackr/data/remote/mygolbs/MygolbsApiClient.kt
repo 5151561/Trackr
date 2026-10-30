@@ -362,7 +362,12 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
                     mygolbsCityName = normalizedCity
                 )
 
+                val hasReal = routeBean?.let { rb ->
+                    if (rb.has("hasReal")) rb.optInt("hasReal", 1) else 1
+                } ?: 1
+
                 val statusText = when {
+                    hasReal == 0 -> "未开通实时"
                     neartext.isNotBlank() -> neartext
                     neartime.isNotBlank() -> "预计 $neartime 到达"
                     else -> "正在运营中"
@@ -375,7 +380,7 @@ class MygolbsApiClient(private val httpClient: OkHttpClient) {
                         targetStopId = stopId,
                         targetStopName = cleanStation,
                         statusText = statusText,
-                        preArrivalTime = neartime.takeIf { it.isNotBlank() }
+                        preArrivalTime = if (hasReal == 0) null else neartime.takeIf { it.isNotBlank() }
                     )
                 )
             }

@@ -56,7 +56,7 @@ data class HomeUiState(
     val isSearching: Boolean = false,
     val searchHistory: List<String> = emptyList(),
     val isRefreshing: Boolean = false,
-    val engineMode: EngineMode = EngineMode.ALL,
+    val engineMode: EngineMode = EngineMode.CHELAILE,
     val aggregatedPriority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST
 ) {
     val filteredCities: List<TransitCity>
@@ -64,7 +64,6 @@ data class HomeUiState(
             val baseList = when (engineMode) {
                 EngineMode.MYGOLBS -> cities.filter { !it.mygolbsCityCode.isNullOrBlank() }
                 EngineMode.CHELAILE -> cities.filter { it.cityId.isNotBlank() }
-                EngineMode.ALL -> cities
             }
             if (citySearchQuery.isBlank()) return baseList
             val q = citySearchQuery.trim().lowercase()
@@ -180,7 +179,7 @@ class HomeViewModel(
             repository.aggregatedPriority.collect { priority ->
                 val prevPriority = _uiState.value.aggregatedPriority
                 _uiState.update { it.copy(aggregatedPriority = priority) }
-                if (prevPriority != priority && _uiState.value.engineMode == EngineMode.ALL) {
+                if (prevPriority != priority) {
                     val currentQuery = _uiState.value.searchQuery
                     if (currentQuery.isNotBlank()) {
                         updateSearchQuery(currentQuery)
@@ -557,6 +556,14 @@ class HomeViewModel(
             } else {
                 ProvinceCityCatalog.getCityCenterCoordinates(city.cityName)
             }
+
+            // 若所选城市仅某单一数据源支持，自动联动切换至支持的引擎
+            if (city.cityId.isBlank() && !city.mygolbsCityCode.isNullOrBlank() && state.engineMode != EngineMode.MYGOLBS) {
+                setEngineMode(EngineMode.MYGOLBS)
+            } else if (city.cityId.isNotBlank() && city.mygolbsCityCode.isNullOrBlank() && state.engineMode != EngineMode.CHELAILE) {
+                setEngineMode(EngineMode.CHELAILE)
+            }
+
             _uiState.update {
                 it.copy(
                     currentCity = city,
@@ -642,9 +649,8 @@ class HomeViewModel(
 
     fun toggleEngineMode() {
         val nextMode = when (_uiState.value.engineMode) {
-            EngineMode.ALL -> EngineMode.MYGOLBS
             EngineMode.MYGOLBS -> EngineMode.CHELAILE
-            EngineMode.CHELAILE -> EngineMode.ALL
+            EngineMode.CHELAILE -> EngineMode.MYGOLBS
         }
         setEngineMode(nextMode)
     }

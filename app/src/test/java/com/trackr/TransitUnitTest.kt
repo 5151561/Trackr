@@ -284,7 +284,6 @@ class TransitUnitTest {
 
     @Test
     fun testEngineMode_propertiesAndCycles() {
-        assertEquals("双引擎", com.trackr.domain.model.EngineMode.ALL.shortLabel)
         assertEquals("掌上公交", com.trackr.domain.model.EngineMode.MYGOLBS.shortLabel)
         assertEquals("车来了", com.trackr.domain.model.EngineMode.CHELAILE.shortLabel)
     }
