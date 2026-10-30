@@ -477,11 +477,11 @@ private fun SelectedStationPulseHalo() {
  * 走向条站点节点（支持呼吸光晕高亮胶囊与条件停靠站空心描边）
  */
 @Composable
-private fun StationNode(
+internal fun StationNode(
     isSelected: Boolean,
     isPassed: Boolean,
-    isConditionStop: Boolean,
-    onClick: () -> Unit
+    isConditionStop: Boolean = false,
+    onClick: () -> Unit = {}
 ) {
     val busColors = MaterialTheme.busColors
 
@@ -695,6 +695,40 @@ internal fun getRouteSegmentColor(
 }
 
 /**
+ * 绘制纵向时间轴单站行轨道连接线（消除浮点接缝，统一轨道宽度与连贯色）
+ */
+fun Modifier.drawVerticalTrackLine(
+    isFirst: Boolean,
+    isLast: Boolean,
+    topTrackColor: Color,
+    bottomTrackColor: Color,
+    centerX: Dp = 14.dp,
+    strokeWidth: Dp = 3.dp
+): Modifier = this.drawBehind {
+    val centerXPx = centerX.toPx()
+    val centerY = size.height / 2f
+    val overlap = 1.5f
+    val strokeWidthPx = strokeWidth.toPx()
+
+    if (!isFirst) {
+        drawLine(
+            color = topTrackColor,
+            start = Offset(centerXPx, -overlap),
+            end = Offset(centerXPx, centerY),
+            strokeWidth = strokeWidthPx
+        )
+    }
+    if (!isLast) {
+        drawLine(
+            color = bottomTrackColor,
+            start = Offset(centerXPx, centerY),
+            end = Offset(centerXPx, size.height + overlap),
+            strokeWidth = strokeWidthPx
+        )
+    }
+}
+
+/**
  * 纵向时间轴单站行
  */
 @Composable
@@ -720,29 +754,13 @@ private fun VerticalTimelineRow(
             .background(rowBg, shape = RoundedCornerShape(8.dp))
             .clickable { onSelectStop() }
             .padding(horizontal = 8.dp)
-            .drawBehind {
-                val strokeWidthPx = 3.dp.toPx()
-                val overlap = 1.5f
-                val centerX = 26.dp.toPx() + 14.dp.toPx()
-                val centerY = size.height / 2f
-
-                if (!isFirst) {
-                    drawLine(
-                        color = topTrackColor,
-                        start = Offset(centerX, -overlap),
-                        end = Offset(centerX, centerY),
-                        strokeWidth = strokeWidthPx
-                    )
-                }
-                if (!isLast) {
-                    drawLine(
-                        color = bottomTrackColor,
-                        start = Offset(centerX, centerY),
-                        end = Offset(centerX, size.height + overlap),
-                        strokeWidth = strokeWidthPx
-                    )
-                }
-            },
+            .drawVerticalTrackLine(
+                isFirst = isFirst,
+                isLast = isLast,
+                topTrackColor = topTrackColor,
+                bottomTrackColor = bottomTrackColor,
+                centerX = 40.dp
+            ),
         verticalAlignment = Alignment.CenterVertically
     ) {
         // 1. 站序号
