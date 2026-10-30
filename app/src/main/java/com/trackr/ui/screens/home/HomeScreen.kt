@@ -64,6 +64,7 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.runtime.Composable
@@ -109,7 +110,8 @@ fun HomeScreen(
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit,
     onNavigateToStopDetail: ((cityId: String, stopId: String, stopName: String, physicalStId: String, namesakeStId: String, lat: Double, lng: Double) -> Unit)? = null,
     onNavigateToSearch: () -> Unit,
-    onNavigateToMore: () -> Unit = {}
+    onNavigateToMore: () -> Unit = {},
+    onNavigateToFavoritesGroup: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -188,6 +190,7 @@ fun HomeScreen(
                 FavoritesSection(
                     favorites = state.favorites,
                     favoritesRealtime = state.favoritesRealtime,
+                    onManageGroupsClick = onNavigateToFavoritesGroup,
                     onFavoriteClick = { fav ->
                         onNavigateToLineDetail(
                             fav.cityId,
@@ -546,6 +549,7 @@ private fun LocationHintBar(
 private fun FavoritesSection(
     favorites: List<FavoriteStationLine>,
     favoritesRealtime: Map<String, NearbyStop>,
+    onManageGroupsClick: () -> Unit = {},
     onFavoriteClick: (FavoriteStationLine) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
@@ -577,6 +581,16 @@ private fun FavoritesSection(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+            }
+            TextButton(
+                onClick = onManageGroupsClick,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = "管理路线组 / 查看全部 ›",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
             }
         }
 

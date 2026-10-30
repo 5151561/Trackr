@@ -27,8 +27,10 @@ object ArrivalAlertManager {
 
     const val NOTIFICATION_ID_APPROACHING = 10002
     const val NOTIFICATION_ID_ARRIVED = 10003
+    const val NOTIFICATION_ID_TRANSFER = 10004
 
     private val APPROACHING_VIBRATION_PATTERN = longArrayOf(0, 280, 120, 280, 120, 400)
+    private val TRANSFER_VIBRATION_PATTERN = longArrayOf(0, 300, 100, 300, 100, 300)
     private const val ARRIVED_VIBRATION_DURATION_MS = 800L
 
     /**
@@ -126,6 +128,40 @@ object ArrivalAlertManager {
         }
 
         performOneShotVibration(context, ARRIVED_VIBRATION_DURATION_MS)
+    }
+
+    /**
+     * 当换乘行程第一程到达换乘站时触发换乘提醒及节拍震动，通知用户准备下车换乘
+     */
+    fun triggerTransferAlert(context: Context, transferStationName: String, nextLineName: String) {
+        ensureNotificationChannel(context)
+
+        val title = "【换乘提醒】到达 $transferStationName"
+        val content = "已到达换乘站 $transferStationName，已自动切换追踪下一程：$nextLineName"
+
+        val contentPendingIntent = createMainActivityPendingIntent(context, NOTIFICATION_ID_TRANSFER)
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID_ALERT)
+            .setSmallIcon(context.applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(content)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(content))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setContentIntent(contentPendingIntent)
+            .build()
+
+        try {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_TRANSFER, notification)
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Cannot post transfer alert: missing POST_NOTIFICATIONS permission", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to post transfer alert notification", e)
+        }
+
+        performWaveformVibration(context, TRANSFER_VIBRATION_PATTERN)
     }
 
     private fun createMainActivityPendingIntent(context: Context, requestCode: Int): PendingIntent {

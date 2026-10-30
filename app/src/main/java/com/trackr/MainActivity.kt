@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.AltRoute
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material3.AlertDialog
@@ -68,6 +69,8 @@ import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.ui.navigation.PendingDeepLink
 import com.trackr.ui.navigation.ScreenKey
 import com.trackr.ui.navigation.dropUnlessResumed
+import com.trackr.ui.screens.favoritesgroup.FavoritesGroupScreen
+import com.trackr.ui.screens.favoritesgroup.FavoritesGroupViewModel
 import com.trackr.ui.screens.home.HomeScreen
 import com.trackr.ui.screens.home.HomeViewModel
 import com.trackr.ui.screens.linedetail.LineDetailScreen
@@ -164,11 +167,17 @@ fun TrackrNavApp(
 ) {
     val context = LocalContext.current
     val homeBackStack = rememberNavBackStack(ScreenKey.Home)
+    val groupBackStack = rememberNavBackStack(ScreenKey.FavoritesGroup)
     val moreBackStack = rememberNavBackStack(ScreenKey.More)
     var selectedTab by rememberSaveable { mutableStateOf("home") }
 
-    val activeBackStack = if (selectedTab == "home") homeBackStack else moreBackStack
+    val activeBackStack = when (selectedTab) {
+        "home" -> homeBackStack
+        "group" -> groupBackStack
+        else -> moreBackStack
+    }
     val homeViewModel: HomeViewModel = viewModel()
+    val favoritesGroupViewModel: FavoritesGroupViewModel = viewModel()
 
     // 自动同步收藏到桌面快捷方式 (App Shortcuts) 与桌面小组件 (AppWidget)，切离主线程调度
     val favorites by TrackrApp.instance.repository.favorites.collectAsStateWithLifecycle()
@@ -286,6 +295,7 @@ fun TrackrNavApp(
 
     val currentKey = activeBackStack.lastOrNull()
     val isTopLevel = (selectedTab == "home" && currentKey is ScreenKey.Home) ||
+        (selectedTab == "group" && currentKey is ScreenKey.FavoritesGroup) ||
         (selectedTab == "more" && currentKey is ScreenKey.More)
 
     // 控制滑动时底部导航栏平滑收起与展开
@@ -376,6 +386,25 @@ fun TrackrNavApp(
                         label = { Text("首页") }
                     )
                     NavigationBarItem(
+                        selected = selectedTab == "group",
+                        onClick = dropUnlessResumed {
+                            if (selectedTab == "group") {
+                                while (groupBackStack.size > 1) {
+                                    groupBackStack.removeLastOrNull()
+                                }
+                            } else {
+                                selectedTab = "group"
+                            }
+                        },
+                        icon = {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.AltRoute,
+                                contentDescription = "路线组"
+                            )
+                        },
+                        label = { Text("路线组") }
+                    )
+                    NavigationBarItem(
                         selected = selectedTab == "more",
                         onClick = dropUnlessResumed {
                             if (selectedTab == "more") {
@@ -411,8 +440,8 @@ fun TrackrNavApp(
             entryDecorators = entryDecorators,
             modifier = Modifier.fillMaxSize(),
             transitionSpec = {
-                val isTopLevelSwitch = (initialState.key is ScreenKey.Home && targetState.key is ScreenKey.More) ||
-                    (initialState.key is ScreenKey.More && targetState.key is ScreenKey.Home)
+                val isTopLevelSwitch = (initialState.key is ScreenKey.Home || initialState.key is ScreenKey.FavoritesGroup || initialState.key is ScreenKey.More) &&
+                    (targetState.key is ScreenKey.Home || targetState.key is ScreenKey.FavoritesGroup || targetState.key is ScreenKey.More)
                 if (isTopLevelSwitch) {
                     fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
                 } else {
@@ -421,8 +450,8 @@ fun TrackrNavApp(
                 }
             },
             popTransitionSpec = {
-                val isTopLevelSwitch = (initialState.key is ScreenKey.Home && targetState.key is ScreenKey.More) ||
-                    (initialState.key is ScreenKey.More && targetState.key is ScreenKey.Home)
+                val isTopLevelSwitch = (initialState.key is ScreenKey.Home || initialState.key is ScreenKey.FavoritesGroup || initialState.key is ScreenKey.More) &&
+                    (targetState.key is ScreenKey.Home || targetState.key is ScreenKey.FavoritesGroup || targetState.key is ScreenKey.More)
                 if (isTopLevelSwitch) {
                     fadeIn(animationSpec = tween(220)) togetherWith fadeOut(animationSpec = tween(220))
                 } else {
@@ -468,6 +497,28 @@ fun TrackrNavApp(
                         onNavigateToSearch = dropUnlessResumed {
                             if (activeBackStack.lastOrNull() != ScreenKey.Search) {
                                 activeBackStack.add(ScreenKey.Search)
+                            }
+                        },
+                        onNavigateToFavoritesGroup = dropUnlessResumed {
+                            selectedTab = "group"
+                        }
+                    )
+                }
+
+                entry<ScreenKey.FavoritesGroup> {
+                    FavoritesGroupScreen(
+                        viewModel = favoritesGroupViewModel,
+                        onNavigateToLineDetail = dropUnlessResumed { cityId, lineId, targetOrder, stopId, source, lineName ->
+                            val key = ScreenKey.LineDetail(
+                                cityId = cityId,
+                                lineId = lineId,
+                                targetOrder = targetOrder,
+                                stopId = stopId,
+                                source = source,
+                                lineName = lineName
+                            )
+                            if (activeBackStack.lastOrNull() != key) {
+                                activeBackStack.add(key)
                             }
                         }
                     )

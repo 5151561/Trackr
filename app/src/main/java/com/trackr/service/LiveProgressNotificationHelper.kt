@@ -122,7 +122,11 @@ object LiveProgressNotificationHelper {
             .setProgressPoints(points)
 
         // 5. Android 16 状态栏胶囊 Live Updates 短文本（<= 7 字符）
+        val isMultiLeg = state.totalLegs > 1
+        val currentLegNum = state.currentLegIndex + 1
+
         val shortCriticalText = when {
+            isArrived && isMultiLeg && currentLegNum < state.totalLegs -> "换乘中"
             isArrived -> "已到站"
             state.stopsRemaining == 0 -> "即将进站"
             state.stopsRemaining > 0 -> "剩${state.stopsRemaining}站"
@@ -130,7 +134,10 @@ object LiveProgressNotificationHelper {
         }
 
         // 6. 文案与展开大文本
-        val title = if (state.endStopName.isNotEmpty()) {
+        val title = if (isMultiLeg) {
+            val destination = state.endStopName.ifEmpty { state.targetStopName }
+            "[$currentLegNum/${state.totalLegs}程] ${state.lineName} 开往 $destination"
+        } else if (state.endStopName.isNotEmpty()) {
             "${state.lineName} 开往 ${state.endStopName}"
         } else {
             "${state.lineName} 实时在途追踪"
@@ -138,14 +145,26 @@ object LiveProgressNotificationHelper {
 
         val etaFormatted = RouteProjectionMath.formatEtaText(state.etaSeconds, state.isBusArrivedAtStop)
         val contentText = when {
+            isArrived && isMultiLeg && currentLegNum < state.totalLegs ->
+                "到达换乘站 ${state.targetStopName}，自动切换下一程"
             isArrived ->
                 "目标站 ${state.targetStopName}：车辆已到达！"
+            state.stopsRemaining == 0 && isMultiLeg ->
+                "即将到达换乘站 ${state.targetStopName}（$etaFormatted）"
             state.stopsRemaining == 0 ->
                 "目标站 ${state.targetStopName}：即将进站（$etaFormatted）"
+            state.stopsRemaining > 0 && isMultiLeg ->
+                "[$currentLegNum/${state.totalLegs}程 换乘] 距换乘站 ${state.targetStopName} 还有 ${state.stopsRemaining} 站"
             state.stopsRemaining > 0 ->
                 "目标站 ${state.targetStopName}：剩 ${state.stopsRemaining} 站（$etaFormatted）"
             else ->
                 "目标站 ${state.targetStopName}：${state.statusSummary}"
+        }
+
+        val subText = if (isMultiLeg) {
+            "换乘追踪 · 第$currentLegNum/${state.totalLegs}程"
+        } else {
+            "候车追踪 · 第${state.targetOrder}站"
         }
 
         val bigSummaryText = buildString {
@@ -203,7 +222,7 @@ object LiveProgressNotificationHelper {
             .setSmallIcon(context.applicationInfo.icon.takeIf { it != 0 } ?: android.R.drawable.ic_dialog_info)
             .setContentTitle(title)
             .setContentText(contentText)
-            .setSubText("候车追踪 · 第${state.targetOrder}站")
+            .setSubText(subText)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setCategory(NotificationCompat.CATEGORY_PROGRESS)

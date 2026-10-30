@@ -66,6 +66,13 @@ class BusTrackingService : LifecycleService() {
         mygolbsCityCode = intent.getStringExtra(EXTRA_MYGOLBS_CITY_CODE).orEmpty()
         lineDirection = intent.getIntExtra(EXTRA_DIRECTION, 0)
 
+        val groupId = intent.getStringExtra(EXTRA_GROUP_ID)
+        val groupName = intent.getStringExtra(EXTRA_GROUP_NAME)
+        val legIndex = intent.getIntExtra(EXTRA_LEG_INDEX, 0)
+        val totalLegs = intent.getIntExtra(EXTRA_TOTAL_LEGS, 1)
+        val explicitStartOrder = intent.getIntExtra(EXTRA_START_TRACKING_ORDER, -1)
+        val startTrackingOrder = if (explicitStartOrder > 0) explicitStartOrder else (targetOrder - 1).coerceAtLeast(1)
+
         currentSession = TrackingSessionState(
             isActive = true,
             cityId = cityId,
@@ -76,8 +83,12 @@ class BusTrackingService : LifecycleService() {
             targetStopName = targetStopName,
             targetOrder = targetOrder,
             totalStops = totalStops,
-            startTrackingOrder = (targetOrder - 1).coerceAtLeast(1),
+            startTrackingOrder = startTrackingOrder,
             alertThresholdStops = alertThreshold,
+            groupId = groupId,
+            groupName = groupName,
+            currentLegIndex = legIndex,
+            totalLegs = totalLegs,
             statusSummary = "正在连接实时公交数据…",
             updatedAtMillis = System.currentTimeMillis()
         )
@@ -109,7 +120,8 @@ class BusTrackingService : LifecycleService() {
             // 首次立即刷新
             pollLineDetail()
             while (isActive) {
-                delay(10_000L) // 每 10 秒刷新一次
+                val intervalMs = TransferAutoSwitchManager.calculateAdaptivePollingInterval(currentSession)
+                delay(intervalMs) // 自适应防刷轮询退避
                 pollLineDetail()
             }
         }
@@ -241,6 +253,10 @@ class BusTrackingService : LifecycleService() {
             currentSession = updatedState
             repository.updateTrackingSession(updatedState)
             LiveProgressNotificationHelper.updateNotification(this@BusTrackingService, updatedState)
+
+            if (!updatedState.groupId.isNullOrEmpty()) {
+                TransferAutoSwitchManager.onLegProgressUpdated(this@BusTrackingService, updatedState)
+            }
         }.onFailure { e ->
             Log.w(TAG, "Failed to refresh line detail", e)
             val updated = currentSession.copy(
@@ -310,6 +326,56 @@ class BusTrackingService : LifecycleService() {
         private const val EXTRA_LINE_SOURCE = "extra_line_source"
         private const val EXTRA_MYGOLBS_CITY_CODE = "extra_mygolbs_city_code"
         private const val EXTRA_DIRECTION = "extra_direction"
+        private const val EXTRA_GROUP_ID = "extra_group_id"
+        private const val EXTRA_GROUP_NAME = "extra_group_name"
+        private const val EXTRA_LEG_INDEX = "extra_leg_index"
+        private const val EXTRA_TOTAL_LEGS = "extra_total_legs"
+        private const val EXTRA_START_TRACKING_ORDER = "extra_start_tracking_order"
+
+        /**
+         * 启动多程换乘组中的特定程段追踪
+         */
+        fun startTrackingGroupLeg(
+            context: Context,
+            groupId: String,
+            groupName: String,
+            legIndex: Int,
+            totalLegs: Int,
+            cityId: String,
+            lineId: String,
+            lineName: String,
+            lineDirection: Int,
+            source: DataSourceType,
+            mygolbsCityCode: String = "",
+            targetStopName: String,
+            targetStopId: String = "",
+            targetOrder: Int,
+            startTrackingOrder: Int,
+            endStopName: String = "",
+            alertThresholdStops: Int = 2
+        ) {
+            val intent = Intent(context, BusTrackingService::class.java).apply {
+                action = ACTION_START_TRACKING
+                putExtra(EXTRA_GROUP_ID, groupId)
+                putExtra(EXTRA_GROUP_NAME, groupName)
+                putExtra(EXTRA_LEG_INDEX, legIndex)
+                putExtra(EXTRA_TOTAL_LEGS, totalLegs)
+                putExtra(EXTRA_CITY_ID, cityId)
+                putExtra(EXTRA_LINE_ID, lineId)
+                putExtra(EXTRA_LINE_NAME, lineName)
+                putExtra(EXTRA_DIRECTION, lineDirection)
+                putExtra(EXTRA_LINE_SOURCE, source.name)
+                putExtra(EXTRA_MYGOLBS_CITY_CODE, mygolbsCityCode)
+                putExtra(EXTRA_TARGET_STOP_NAME, targetStopName)
+                putExtra(EXTRA_TARGET_STOP_ID, targetStopId)
+                putExtra(EXTRA_TARGET_ORDER, targetOrder)
+                putExtra(EXTRA_START_TRACKING_ORDER, startTrackingOrder)
+                putExtra(EXTRA_TOTAL_STOPS, targetOrder.coerceAtLeast(startTrackingOrder))
+                putExtra(EXTRA_END_STOP, endStopName)
+                putExtra(EXTRA_ALERT_THRESHOLD, alertThresholdStops)
+            }
+            ContextCompat.startForegroundService(context, intent)
+        }
 
         /**
          * 启动实时公交在途追踪前台服务

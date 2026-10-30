@@ -371,6 +371,10 @@ data class TrackingSessionState(
     val alertThresholdStops: Int = 2,
     val hasTriggeredApproachingAlert: Boolean = false,
     val hasTriggeredArrivedAlert: Boolean = false,
+    val groupId: String? = null,
+    val groupName: String? = null,
+    val currentLegIndex: Int = 0,
+    val totalLegs: Int = 1,
     val statusSummary: String = "正在连接实时公交数据…",
     val updatedAtMillis: Long = System.currentTimeMillis()
 )
