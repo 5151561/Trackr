@@ -1,5 +1,6 @@
 package com.trackr.ui.screens.routeplan
 
+import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -134,6 +135,12 @@ import com.trackr.util.SignatureUtils
 import kotlinx.coroutines.launch
 
 /**
+ * 是否运行在 Robolectric/无高德 SDK 的测试环境，用于决定地图是否走矢量降级实现
+ */
+internal fun isTestEnvironment(): Boolean =
+    Build.FINGERPRINT.contains("robolectric", ignoreCase = true)
+
+/**
  * 路线规划全屏界面 (RoutePlanScreen - 路线规划 Tab)
  * 采用 全屏矢量地图底座 + 顶部悬浮搜索岛 + 底部方案抽屉 架构
  */
@@ -142,7 +149,8 @@ fun RoutePlanScreen(
     viewModel: FavoritesGroupViewModel,
     onNavigateToFavorites: () -> Unit = {},
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit = { _, _, _, _, _, _ -> },
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    useVectorMapFallback: Boolean = isTestEnvironment()
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -173,10 +181,6 @@ fun RoutePlanScreen(
     var mapScale by remember { mutableFloatStateOf(1f) }
     var mapOffset by remember { mutableStateOf(Offset.Zero) }
     var recenterTrigger by rememberSaveable { mutableIntStateOf(0) }
-
-    val isRobolectric = remember {
-        android.os.Build.FINGERPRINT.contains("robolectric", ignoreCase = true)
-    }
 
     val triggerPlan: () -> Unit = {
         if (destText.isNotBlank()) {
@@ -228,7 +232,7 @@ fun RoutePlanScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
         // 1. 全屏矢量地图视窗 (真实高德 3D 矢量地图 / Robolectric Canvas 测试降级)
-        if (isRobolectric) {
+        if (useVectorMapFallback) {
             RoutePlanVectorMapCanvas(
                 selectedScheme = currentScheme,
                 scale = mapScale,
@@ -1614,20 +1618,49 @@ fun AmapRealVectorMapView(
         )
     }
 
+    // 幂等保护：Activity 销毁时 ON_DESTROY 与 onDispose 都会触发 onDestroy，重复调用会破坏高德内部状态；
+    // 重复 onResume/onPause 同理。以 mapViewInstance 为 key，地图实例重建（如切换 Key）时状态随之重建。
+    val isMapDestroyed = remember(mapViewInstance) { mutableStateOf(false) }
+    val isMapResumed = remember(mapViewInstance) { mutableStateOf(false) }
+
     DisposableEffect(lifecycleOwner, mapViewInstance) {
         val mapView = mapViewInstance ?: return@DisposableEffect onDispose {}
+
+        fun resumeOnce() {
+            if (!isMapDestroyed.value && !isMapResumed.value) {
+                isMapResumed.value = true
+                mapView.onResume()
+            }
+        }
+
+        fun pauseOnce() {
+            if (isMapResumed.value) {
+                isMapResumed.value = false
+                mapView.onPause()
+            }
+        }
+
+        fun destroyOnce() {
+            if (!isMapDestroyed.value) {
+                isMapDestroyed.value = true
+                isMapResumed.value = false
+                mapView.onDestroy()
+            }
+        }
+
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                Lifecycle.Event.ON_DESTROY -> mapView.onDestroy()
+                Lifecycle.Event.ON_RESUME -> resumeOnce()
+                Lifecycle.Event.ON_PAUSE -> pauseOnce()
+                Lifecycle.Event.ON_DESTROY -> destroyOnce()
                 else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            mapView.onDestroy()
+            pauseOnce()
+            destroyOnce()
         }
     }
 

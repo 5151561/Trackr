@@ -80,6 +80,7 @@ fun GroupEditDialog(
     var line2 by remember { mutableStateOf(initialLine2) }
 
     var showDiscardConfirmDialog by remember { mutableStateOf(false) }
+    var showValidationError by remember { mutableStateOf(false) }
 
     val isDirty = groupName != initialName ||
         selectedCategory != initialCategory ||
@@ -107,6 +108,12 @@ fun GroupEditDialog(
     fun parseLineNames(raw: String): List<String> {
         return raw.split(Regex("[,，、\\s]+")).map { it.trim() }.filter { it.isNotBlank() }
     }
+
+    /** 某一段填了起终点却没填线路名，视为表单未填写完整（不伪造默认线路） */
+    fun isLegLineMissing(from: String, to: String, line: String): Boolean =
+        from.isNotBlank() && to.isNotBlank() && parseLineNames(line).isEmpty()
+
+    val isLineMissing = isLegLineMissing(from1, to1, line1) || isLegLineMissing(from2, to2, line2)
 
     AlertDialog(
         onDismissRequest = handleDismissRequest,
@@ -231,85 +238,83 @@ fun GroupEditDialog(
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
+
+                if (showValidationError && isLineMissing) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "请填写每段行程的乘坐线路（多条线路用逗号分隔）",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = {
+                    // 不伪造线路名：填了起终点必须填线路，否则提示用户补全后返回
+                    if (isLineMissing) {
+                        showValidationError = true
+                        return@Button
+                    }
+
                     val finalName = groupName.trim().ifEmpty { "${from1} ➔ ${to2.ifEmpty { to1 }}" }
                     val legs = mutableListOf<TransitLeg>()
                     if (from1.isNotBlank() && to1.isNotBlank()) {
                         val parsedLines1 = parseLineNames(line1)
-                        val candidates1 = if (parsedLines1.isNotEmpty()) {
-                            parsedLines1.mapIndexed { idx, name ->
-                                val existing = leg1?.candidateLines?.getOrNull(idx)
-                                CandidateLine(
-                                    cityId = existing?.cityId ?: leg1?.primaryLine?.cityId ?: currentCity.cityId,
-                                    cityName = existing?.cityName ?: leg1?.primaryLine?.cityName ?: currentCity.cityName,
-                                    lineId = existing?.lineId ?: "line_1_${idx}_${UUID.randomUUID().toString().take(6)}",
-                                    lineName = name,
-                                    fromStopOrder = existing?.fromStopOrder ?: 1,
-                                    toStopOrder = existing?.toStopOrder ?: 5
-                                )
-                            }
-                        } else {
-                            listOf(
-                                CandidateLine(
-                                    cityId = leg1?.primaryLine?.cityId ?: currentCity.cityId,
-                                    cityName = leg1?.primaryLine?.cityName ?: currentCity.cityName,
-                                    lineId = leg1?.primaryLine?.lineId ?: "line_1_${UUID.randomUUID().toString().take(6)}",
-                                    lineName = "156路",
-                                    fromStopOrder = 1,
-                                    toStopOrder = 5
-                                )
+                        // 按线路名匹配既有候选线路，避免用户增删线路导致按下标错配 lineId / 站序
+                        val existingByName1 = leg1?.candidateLines.orEmpty().associateBy { it.lineName }
+                        val candidates1 = parsedLines1.mapIndexed { idx, name ->
+                            val existing = existingByName1[name]
+                            CandidateLine(
+                                cityId = existing?.cityId ?: leg1?.primaryLine?.cityId ?: currentCity.cityId,
+                                cityName = existing?.cityName ?: leg1?.primaryLine?.cityName ?: currentCity.cityName,
+                                // "line_" 前缀 = 尚未与实时数据源对齐的占位 lineId
+                                lineId = existing?.lineId ?: "line_1_${idx}_${UUID.randomUUID().toString().take(6)}",
+                                lineName = name,
+                                // 0 表示站序待对齐，交由 ViewModel 的 isSynthetic 判定后解析
+                                fromStopOrder = existing?.fromStopOrder ?: 0,
+                                toStopOrder = existing?.toStopOrder ?: 0
                             )
                         }
 
-                        legs.add(
-                            TransitLeg(
-                                legIndex = 0,
-                                fromStopName = from1.trim(),
-                                toStopName = to1.trim(),
-                                candidateLines = candidates1
+                        if (candidates1.isNotEmpty()) {
+                            legs.add(
+                                TransitLeg(
+                                    legIndex = 0,
+                                    fromStopName = from1.trim(),
+                                    toStopName = to1.trim(),
+                                    candidateLines = candidates1
+                                )
                             )
-                        )
+                        }
                     }
                     if (from2.isNotBlank() && to2.isNotBlank()) {
                         val parsedLines2 = parseLineNames(line2)
-                        val candidates2 = if (parsedLines2.isNotEmpty()) {
-                            parsedLines2.mapIndexed { idx, name ->
-                                val existing = leg2?.candidateLines?.getOrNull(idx)
-                                CandidateLine(
-                                    cityId = existing?.cityId ?: leg2?.primaryLine?.cityId ?: currentCity.cityId,
-                                    cityName = existing?.cityName ?: leg2?.primaryLine?.cityName ?: currentCity.cityName,
-                                    lineId = existing?.lineId ?: "line_2_${idx}_${UUID.randomUUID().toString().take(6)}",
-                                    lineName = name,
-                                    fromStopOrder = existing?.fromStopOrder ?: 1,
-                                    toStopOrder = existing?.toStopOrder ?: 6
-                                )
-                            }
-                        } else {
-                            listOf(
-                                CandidateLine(
-                                    cityId = leg2?.primaryLine?.cityId ?: currentCity.cityId,
-                                    cityName = leg2?.primaryLine?.cityName ?: currentCity.cityName,
-                                    lineId = leg2?.primaryLine?.lineId ?: "line_2_${UUID.randomUUID().toString().take(6)}",
-                                    lineName = "地铁4号线",
-                                    fromStopOrder = 1,
-                                    toStopOrder = 6
-                                )
+                        val existingByName2 = leg2?.candidateLines.orEmpty().associateBy { it.lineName }
+                        val candidates2 = parsedLines2.mapIndexed { idx, name ->
+                            val existing = existingByName2[name]
+                            CandidateLine(
+                                cityId = existing?.cityId ?: leg2?.primaryLine?.cityId ?: currentCity.cityId,
+                                cityName = existing?.cityName ?: leg2?.primaryLine?.cityName ?: currentCity.cityName,
+                                lineId = existing?.lineId ?: "line_2_${idx}_${UUID.randomUUID().toString().take(6)}",
+                                lineName = name,
+                                fromStopOrder = existing?.fromStopOrder ?: 0,
+                                toStopOrder = existing?.toStopOrder ?: 0
                             )
                         }
 
-                        legs.add(
-                            TransitLeg(
-                                legIndex = 1,
-                                fromStopName = from2.trim(),
-                                toStopName = to2.trim(),
-                                candidateLines = candidates2,
-                                walkingDistanceMeters = 60
+                        if (candidates2.isNotEmpty()) {
+                            legs.add(
+                                TransitLeg(
+                                    legIndex = 1,
+                                    fromStopName = from2.trim(),
+                                    toStopName = to2.trim(),
+                                    candidateLines = candidates2,
+                                    walkingDistanceMeters = 60
+                                )
                             )
-                        )
+                        }
                     }
 
                     val updated = initialGroup?.copy(
