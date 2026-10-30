@@ -55,26 +55,43 @@ object LiveProgressNotificationHelper {
     }
 
     /**
+     * 计算当前追踪任务的站间跨度与最大进度标尺
+     */
+    fun calculateSpanAndMaxProgress(startTrackingOrder: Int, targetOrder: Int): Pair<Int, Int> {
+        val span = (targetOrder - startTrackingOrder).coerceAtLeast(1)
+        return span to (span * 100)
+    }
+
+    /**
+     * 计算当前车辆相对于追踪起点的插值进度 [0, maxProgress]
+     */
+    fun calculateCurrentProgress(
+        state: TrackingSessionState,
+        isArrived: Boolean = state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45)
+    ): Int {
+        val (span, maxProgress) = calculateSpanAndMaxProgress(state.startTrackingOrder, state.targetOrder)
+        if (state.currentBusOrder <= 0) return 0
+        if (isArrived) return maxProgress
+
+        // 车辆在全线上的 1-based 连续物理坐标：在 (currentBusOrder - 1) 与 currentBusOrder 之间
+        // 例如：order=8, progress=0.2 时，车辆位于第 7 站到第 8 站之间，坐标为 7.2
+        val busContinuous = ((state.currentBusOrder - 1) + state.currentBusProgress.coerceIn(0f, 1f))
+            .coerceAtLeast(1.0f)
+        // 起始基准站的 1-based 物理坐标：第 startTrackingOrder 站对应坐标 startTrackingOrder.toFloat()
+        val startContinuous = state.startTrackingOrder.toFloat()
+        val completedHops = (busContinuous - startContinuous).coerceIn(0f, span.toFloat())
+        return (completedHops * 100).toInt().coerceIn(0, maxProgress)
+    }
+
+    /**
      * 构建适合前台服务与常驻通知栏的 NotificationCompat 实例
      */
     fun buildNotification(context: Context, state: TrackingSessionState): Notification {
         ensureNotificationChannel(context)
 
-        // 1. 计算站间跨度与最大进度
-        val span = (state.targetOrder - state.startTrackingOrder).coerceAtLeast(1)
-        val maxProgress = span * 100
-
-        // 2. 将当前车辆位置映射到 [0, maxProgress]
-        val currentProgress = if (state.currentBusOrder <= 0) {
-            0
-        } else if (state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45)) {
-            maxProgress
-        } else {
-            val busContinuous = (state.currentBusOrder - 1) + state.currentBusProgress.coerceIn(0f, 1f)
-            val startContinuous = (state.startTrackingOrder - 1).toFloat()
-            val completedHops = (busContinuous - startContinuous).coerceIn(0f, span.toFloat())
-            (completedHops * 100).toInt().coerceIn(0, maxProgress)
-        }
+        val (span, maxProgress) = calculateSpanAndMaxProgress(state.startTrackingOrder, state.targetOrder)
+        val isArrived = state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45)
+        val currentProgress = calculateCurrentProgress(state, isArrived)
 
         // 3. 构建 Android 16 ProgressStyle 分段（已行驶绿色段与剩余蓝色段）
         val completedLength = currentProgress.coerceIn(1, maxProgress)
@@ -106,8 +123,9 @@ object LiveProgressNotificationHelper {
 
         // 5. Android 16 状态栏胶囊 Live Updates 短文本（<= 7 字符）
         val shortCriticalText = when {
-            state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45) -> "已到站"
-            state.stopsRemaining >= 0 -> "剩${state.stopsRemaining}站"
+            isArrived -> "已到站"
+            state.stopsRemaining == 0 -> "即将进站"
+            state.stopsRemaining > 0 -> "剩${state.stopsRemaining}站"
             else -> "追踪中"
         }
 
@@ -119,18 +137,24 @@ object LiveProgressNotificationHelper {
         }
 
         val etaFormatted = RouteProjectionMath.formatEtaText(state.etaSeconds, state.isBusArrivedAtStop)
-        val contentText = if (state.stopsRemaining >= 0) {
-            "目标站 ${state.targetStopName}：剩 ${state.stopsRemaining} 站（$etaFormatted）"
-        } else {
-            "目标站 ${state.targetStopName}：${state.statusSummary}"
+        val contentText = when {
+            isArrived ->
+                "目标站 ${state.targetStopName}：车辆已到达！"
+            state.stopsRemaining == 0 ->
+                "目标站 ${state.targetStopName}：即将进站（$etaFormatted）"
+            state.stopsRemaining > 0 ->
+                "目标站 ${state.targetStopName}：剩 ${state.stopsRemaining} 站（$etaFormatted）"
+            else ->
+                "目标站 ${state.targetStopName}：${state.statusSummary}"
         }
 
         val bigSummaryText = buildString {
             appendLine("目标候车站：${state.targetStopName}（第 ${state.targetOrder} 站）")
-            if (state.stopsRemaining >= 0) {
-                appendLine("车辆动态：还有 ${state.stopsRemaining} 站到达，预估时间 $etaFormatted")
-            } else {
-                appendLine("状态：${state.statusSummary}")
+            when {
+                isArrived -> appendLine("车辆动态：车辆已到达！请准备上车")
+                state.stopsRemaining == 0 -> appendLine("车辆动态：即将进站，预估时间 $etaFormatted")
+                state.stopsRemaining > 0 -> appendLine("车辆动态：还有 ${state.stopsRemaining} 站到达，预估时间 $etaFormatted")
+                else -> appendLine("状态：${state.statusSummary}")
             }
             if (!state.expectedArrivalTime.isNullOrEmpty()) {
                 appendLine("预计到达时刻：${state.expectedArrivalTime}")

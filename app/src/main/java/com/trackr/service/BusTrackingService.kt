@@ -76,7 +76,7 @@ class BusTrackingService : LifecycleService() {
             targetStopName = targetStopName,
             targetOrder = targetOrder,
             totalStops = totalStops,
-            startTrackingOrder = 1,
+            startTrackingOrder = (targetOrder - 1).coerceAtLeast(1),
             alertThresholdStops = alertThreshold,
             statusSummary = "正在连接实时公交数据…",
             updatedAtMillis = System.currentTimeMillis()
@@ -144,8 +144,11 @@ class BusTrackingService : LifecycleService() {
             val targetOrder = currentSession.targetOrder
             // 筛选未过站车辆（bus.order <= targetOrder）
             val candidateBuses = detail.buses.filter { it.order <= targetOrder }
-            // 取离目标站点最近的一辆车
-            val bestBus = candidateBuses.maxByOrNull { it.order.toFloat() + it.segmentProgress }
+            // 优先沿用当前正在追踪的车辆，若不存在或初次则选离目标站点最近的一辆车
+            val trackedBus = if (currentSession.currentBusId != null) {
+                candidateBuses.find { it.busId == currentSession.currentBusId }
+            } else null
+            val bestBus = trackedBus ?: candidateBuses.maxByOrNull { it.order.toFloat() + it.segmentProgress }
 
             val updatedState: TrackingSessionState
 
@@ -153,8 +156,15 @@ class BusTrackingService : LifecycleService() {
                 val stopsRemaining = (targetOrder - bestBus.order).coerceAtLeast(0)
                 val isArrivedAtStop = stopsRemaining == 0 && (bestBus.isArrived || bestBus.segmentProgress >= 0.98f)
 
-                val startOrder = if (currentSession.currentBusId == null) {
-                    (bestBus.order - 1).coerceAtLeast(1)
+                // 换车或初次锁定判定：当未锁定车辆或追踪的车辆发生变更时，重新确定起始追踪基准站
+                val isNewVehicle = currentSession.currentBusId == null || currentSession.currentBusId != bestBus.busId
+
+                val startOrder = if (isNewVehicle) {
+                    if (bestBus.isArrived || bestBus.segmentProgress >= 0.95f) {
+                        bestBus.order.coerceAtMost(targetOrder - 1).coerceAtLeast(1)
+                    } else {
+                        (bestBus.order - 1).coerceAtMost(targetOrder - 1).coerceAtLeast(1)
+                    }
                 } else {
                     currentSession.startTrackingOrder
                 }

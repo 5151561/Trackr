@@ -92,6 +92,35 @@ class XiaomiFocusAdapterTest {
     }
 
     @Test
+    fun testBuildJsonPayload_approachingState_showsApproachingText() {
+        val state = TrackingSessionState(
+            isActive = true,
+            lineName = "37路",
+            targetStopName = "文博城",
+            targetOrder = 10,
+            startTrackingOrder = 7,
+            currentBusOrder = 10,
+            currentBusProgress = 0.5f,
+            stopsRemaining = 0,
+            etaSeconds = 80,
+            isBusArrivedAtStop = false
+        )
+
+        val jsonString = XiaomiFocusAdapter.buildJsonPayload(state)
+        val root = JSONObject(jsonString)
+        val paramV2 = root.getJSONObject("param_v2")
+        val capsule = paramV2.getJSONObject("capsule")
+
+        // 验证即将在途进站时胶囊文案为“即将进站”，绝不显示“剩0站”
+        assertEquals("即将进站", capsule.getString("text"))
+        assertEquals(0, capsule.getInt("status"))
+
+        val progress = paramV2.getJSONObject("progress")
+        assertEquals(300, progress.getInt("max"))
+        assertEquals(250, progress.getInt("current"))
+    }
+
+    @Test
     fun testBuildJsonPayload_noBusState() {
         val state = TrackingSessionState(
             isActive = true,

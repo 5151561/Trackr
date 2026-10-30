@@ -96,7 +96,8 @@ object XiaomiFocusAdapter {
 
         val capsuleText = when {
             isArrived -> "已到站"
-            state.stopsRemaining >= 0 -> "剩${state.stopsRemaining}站"
+            state.stopsRemaining == 0 -> "即将进站"
+            state.stopsRemaining > 0 -> "剩${state.stopsRemaining}站"
             else -> "追踪中"
         }
 
@@ -107,24 +108,18 @@ object XiaomiFocusAdapter {
         }
 
         val etaFormatted = RouteProjectionMath.formatEtaText(state.etaSeconds, state.isBusArrivedAtStop)
-        val content = if (state.stopsRemaining >= 0) {
-            "目标站 ${state.targetStopName}：剩 ${state.stopsRemaining} 站（$etaFormatted）"
-        } else {
-            "目标站 ${state.targetStopName}：${state.statusSummary}"
+        val content = when {
+            isArrived -> "目标站 ${state.targetStopName}：车辆已到达！"
+            state.stopsRemaining == 0 -> "目标站 ${state.targetStopName}：即将进站（$etaFormatted）"
+            state.stopsRemaining > 0 -> "目标站 ${state.targetStopName}：剩 ${state.stopsRemaining} 站（$etaFormatted）"
+            else -> "目标站 ${state.targetStopName}：${state.statusSummary}"
         }
 
-        val span = (state.targetOrder - state.startTrackingOrder).coerceAtLeast(1)
-        val maxProgress = span * 100
-        val currentProgress = if (state.currentBusOrder <= 0) {
-            0
-        } else if (isArrived) {
-            maxProgress
-        } else {
-            val busContinuous = (state.currentBusOrder - 1) + state.currentBusProgress.coerceIn(0f, 1f)
-            val startContinuous = (state.startTrackingOrder - 1).toFloat()
-            val completedHops = (busContinuous - startContinuous).coerceIn(0f, span.toFloat())
-            (completedHops * 100).toInt().coerceIn(0, maxProgress)
-        }
+        val (span, maxProgress) = LiveProgressNotificationHelper.calculateSpanAndMaxProgress(
+            state.startTrackingOrder,
+            state.targetOrder
+        )
+        val currentProgress = LiveProgressNotificationHelper.calculateCurrentProgress(state, isArrived)
 
         val baseInfo = JSONObject().apply {
             put("title", title)
