@@ -45,6 +45,13 @@ class FakeTransitRepository(
     private val _preferredTransitCodeProvider = MutableStateFlow(initialTransitCodeProvider)
     override val preferredTransitCodeProvider: StateFlow<TransitCodeProvider> = _preferredTransitCodeProvider.asStateFlow()
 
+    private val _nearbyStopsCount = MutableStateFlow(4)
+    override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
+
+    override fun setNearbyStopsCount(count: Int) {
+        _nearbyStopsCount.value = count.coerceIn(1, 16)
+    }
+
     private val _activeTrackingSession = MutableStateFlow(TrackingSessionState())
     override val activeTrackingSession: StateFlow<TrackingSessionState> = _activeTrackingSession.asStateFlow()
 

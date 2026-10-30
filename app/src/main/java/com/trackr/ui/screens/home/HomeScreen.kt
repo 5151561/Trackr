@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DirectionsBus
 import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.NotificationsActive
@@ -105,24 +106,18 @@ fun HomeScreen(
     viewModel: HomeViewModel = viewModel(),
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit,
     onNavigateToStopDetail: ((cityId: String, stopId: String, stopName: String, physicalStId: String, namesakeStId: String, lat: Double, lng: Double) -> Unit)? = null,
-    onNavigateToSearch: () -> Unit
+    onNavigateToSearch: () -> Unit,
+    onNavigateToMore: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val state by viewModel.uiState.collectAsStateWithLifecycle()
-    val reminders by TrackrApp.instance.reminderRepository.reminders.collectAsStateWithLifecycle()
-    var showRemindersSheet by remember { mutableStateOf(false) }
-    val coroutineScope = rememberCoroutineScope()
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             HomeTopBar(
                 city = state.currentCity,
-                engineMode = state.engineMode,
-                reminderCount = reminders.size,
-                onCityClick = { viewModel.setCityPickerOpen(true) },
-                onOpenReminders = { showRemindersSheet = true },
-                onSelectEngineMode = { mode -> viewModel.setEngineMode(mode) }
+                onCityClick = { viewModel.setCityPickerOpen(true) }
             )
         }
     ) { paddingValues ->
@@ -276,50 +271,16 @@ fun HomeScreen(
             onDismiss = { viewModel.setCityPickerOpen(false) }
         )
     }
-
-    // 定时通勤提醒管理面板
-    if (showRemindersSheet) {
-        ScheduledRemindersBottomSheet(
-            reminders = reminders,
-            onDismissRequest = { showRemindersSheet = false },
-            onToggleReminder = { id, enabled ->
-                coroutineScope.launch {
-                    TrackrApp.instance.reminderRepository.toggleReminder(id, enabled)
-                }
-            },
-            onDeleteReminder = { id ->
-                coroutineScope.launch {
-                    TrackrApp.instance.reminderRepository.deleteReminder(id)
-                }
-            },
-            onNavigateToLine = { reminder ->
-                onNavigateToLineDetail(
-                    reminder.cityId,
-                    reminder.lineId,
-                    reminder.targetOrder,
-                    reminder.targetStopId,
-                    reminder.dataSourceType,
-                    reminder.lineName
-                )
-            }
-        )
-    }
 }
 
 /**
- * 顶部导航与大标题栏（包含数据引擎切换开关与城市选择）
+ * 顶部导航与大标题栏（包含城市选择与「更多」设置入口）
  */
 @Composable
 private fun HomeTopBar(
     city: TransitCity,
-    engineMode: EngineMode,
-    reminderCount: Int = 0,
-    onCityClick: () -> Unit,
-    onOpenReminders: () -> Unit,
-    onSelectEngineMode: (EngineMode) -> Unit
+    onCityClick: () -> Unit
 ) {
-    var menuExpanded by remember { mutableStateOf(false) }
-
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
@@ -333,132 +294,42 @@ private fun HomeTopBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "车在路上",
-                    style = MaterialTheme.typography.headlineMedium.copy(
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-0.5).sp
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-                Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = "车在路上",
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = (-0.5).sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+            )
 
-                // 引擎切换胶囊开关
-                Box {
-                    val (containerColor, contentColor) = when (engineMode) {
-                        EngineMode.ALL -> MaterialTheme.colorScheme.primaryContainer to MaterialTheme.colorScheme.primary
-                        EngineMode.MYGOLBS -> Color(0xFFFFF3E0) to Color(0xFFE65100)
-                        EngineMode.CHELAILE -> Color(0xFFE8F5E9) to Color(0xFF2E7D32)
-                    }
-
-                    Surface(
-                        onClick = { menuExpanded = true },
-                        shape = RoundedCornerShape(12.dp),
-                        color = containerColor,
-                        shadowElevation = 0.5.dp
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = engineMode.shortLabel,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = contentColor
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Icon(
-                                imageVector = Icons.Default.SwapHoriz,
-                                contentDescription = "切换引擎模式",
-                                tint = contentColor,
-                                modifier = Modifier.size(13.dp)
-                            )
-                        }
-                    }
-
-                    DropdownMenu(
-                        expanded = menuExpanded,
-                        onDismissRequest = { menuExpanded = false }
-                    ) {
-                        EngineMode.values().forEach { mode ->
-                            DropdownMenuItem(
-                                text = {
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Text(
-                                            text = mode.displayName,
-                                            fontWeight = if (mode == engineMode) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (mode == engineMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                        if (mode == engineMode) {
-                                            Spacer(modifier = Modifier.width(8.dp))
-                                            Text(
-                                                text = "✓",
-                                                color = MaterialTheme.colorScheme.primary,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
-                                },
-                                onClick = {
-                                    menuExpanded = false
-                                    onSelectEngineMode(mode)
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // 城市选择胶囊按钮
-                Surface(
-                    onClick = onCityClick,
-                    shape = RoundedCornerShape(20.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Place,
-                            contentDescription = "城市",
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = city.cityName,
-                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Icon(
-                            imageVector = Icons.Default.ArrowDropDown,
-                            contentDescription = "选择城市",
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(6.dp))
-
-                // 定时通勤提醒按钮
-                IconButton(
-                    onClick = onOpenReminders,
-                    modifier = Modifier.size(36.dp)
+            // 城市选择胶囊按钮
+            Surface(
+                onClick = onCityClick,
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Alarm,
-                        contentDescription = "定时通勤提醒",
-                        tint = if (reminderCount > 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(20.dp)
+                        imageVector = Icons.Default.Place,
+                        contentDescription = "城市",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = city.cityName,
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ArrowDropDown,
+                        contentDescription = "选择城市",
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

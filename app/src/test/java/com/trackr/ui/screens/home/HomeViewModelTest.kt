@@ -196,6 +196,23 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun testNearbyStopsCountChange_refreshesNearbyStops() = runTest {
+        val stop1 = NearbyStop(stopId = "stop_1", name = "站点1")
+        val stop2 = NearbyStop(stopId = "stop_2", name = "站点2")
+        fakeRepository.nearbyStopsResult = Result.success(listOf(stop1))
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals(1, viewModel.uiState.value.nearbyStops.size)
+
+        fakeRepository.nearbyStopsResult = Result.success(listOf(stop1, stop2))
+        fakeRepository.setNearbyStopsCount(8)
+        testScheduler.runCurrent()
+
+        assertEquals(2, viewModel.uiState.value.nearbyStops.size)
+    }
+
+    @Test
     fun testFilteredCities_filtersByEngineMode() = runTest {
         val clCity = TransitCity(cityId = "034", cityName = "上海", mygolbsCityCode = null)
         val mgCity = TransitCity(cityId = "", cityName = "玉林", mygolbsCityCode = "450900")

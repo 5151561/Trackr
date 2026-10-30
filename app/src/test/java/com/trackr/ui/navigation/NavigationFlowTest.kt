@@ -85,4 +85,29 @@ class NavigationFlowTest {
         // At Home, cannot pop further
         assertTrue(backStack.size == 1)
     }
+
+    @Test
+    fun testNavigateToMore_andAbout_andBackHandling() {
+        val backStack = mutableListOf<ScreenKey>(ScreenKey.Home)
+
+        // 1. Home -> More
+        backStack.add(ScreenKey.More)
+        assertEquals(2, backStack.size)
+        assertEquals(ScreenKey.More, backStack.last())
+
+        // 2. More -> About
+        backStack.add(ScreenKey.About)
+        assertEquals(3, backStack.size)
+        assertEquals(ScreenKey.About, backStack.last())
+
+        // 3. Back from About -> More
+        val poppedAbout = backStack.removeLastOrNull()
+        assertEquals(ScreenKey.About, poppedAbout)
+        assertEquals(ScreenKey.More, backStack.last())
+
+        // 4. Back from More -> Home
+        val poppedMore = backStack.removeLastOrNull()
+        assertEquals(ScreenKey.More, poppedMore)
+        assertEquals(ScreenKey.Home, backStack.last())
+    }
 }

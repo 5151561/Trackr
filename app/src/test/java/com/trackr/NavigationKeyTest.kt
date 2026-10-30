@@ -29,6 +29,22 @@ class NavigationKeyTest {
     }
 
     @Test
+    fun testScreenKey_moreSerialization() {
+        val key: ScreenKey = ScreenKey.More
+        val serialized = json.encodeToString(key)
+        val deserialized = json.decodeFromString<ScreenKey>(serialized)
+        assertEquals(ScreenKey.More, deserialized)
+    }
+
+    @Test
+    fun testScreenKey_aboutSerialization() {
+        val key: ScreenKey = ScreenKey.About
+        val serialized = json.encodeToString(key)
+        val deserialized = json.decodeFromString<ScreenKey>(serialized)
+        assertEquals(ScreenKey.About, deserialized)
+    }
+
+    @Test
     fun testScreenKey_lineDetailSerialization_preservesFields() {
         val key: ScreenKey = ScreenKey.LineDetail(
             cityId = "021",

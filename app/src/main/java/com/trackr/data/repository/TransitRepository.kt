@@ -82,6 +82,9 @@ class TransitRepository(
     private val _preferredTransitCodeProvider = MutableStateFlow(loadInitialTransitCodeProvider())
     override val preferredTransitCodeProvider: StateFlow<TransitCodeProvider> = _preferredTransitCodeProvider.asStateFlow()
 
+    private val _nearbyStopsCount = MutableStateFlow(loadInitialNearbyStopsCount())
+    override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
+
     private val _activeTrackingSession = MutableStateFlow(TrackingSessionState())
     override val activeTrackingSession: StateFlow<TrackingSessionState> = _activeTrackingSession.asStateFlow()
 
@@ -133,6 +136,16 @@ class TransitRepository(
     private fun loadInitialTransitCodeProvider(): TransitCodeProvider {
         val providerId = prefs.getString("preferred_transit_code_provider", TransitCodeProvider.ASK_ALWAYS.id)
         return TransitCodeProvider.fromId(providerId)
+    }
+
+    private fun loadInitialNearbyStopsCount(): Int {
+        return prefs.getInt("nearby_stops_count", 4).coerceIn(1, 16)
+    }
+
+    override fun setNearbyStopsCount(count: Int) {
+        val clamped = count.coerceIn(1, 16)
+        _nearbyStopsCount.value = clamped
+        prefs.edit().putInt("nearby_stops_count", clamped).apply()
     }
 
     private fun loadInitialEngineMode(): EngineMode {

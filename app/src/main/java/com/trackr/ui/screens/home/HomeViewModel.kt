@@ -166,6 +166,16 @@ class HomeViewModel(
             }
         }
 
+        // 观察附近站点展示数量设置变化
+        viewModelScope.launch {
+            repository.nearbyStopsCount.collect { count ->
+                val state = _uiState.value
+                if (state.currentLat > 0.0 && state.currentLng > 0.0) {
+                    loadNearbyStops(state.currentLat, state.currentLng, showLoading = false)
+                }
+            }
+        }
+
         // 初始化加载支持的城市
         loadSupportedCities()
 
@@ -330,7 +340,7 @@ class HomeViewModel(
                 _uiState.update { it.copy(isLoadingNearby = true) }
             }
             val targetCity = cityOverride ?: _uiState.value.currentCity
-            val result = repository.getNearbyStops(targetCity, lat, lng, limit = NEARBY_STOPS_LIMIT)
+            val result = repository.getNearbyStops(targetCity, lat, lng, limit = repository.nearbyStopsCount.value)
             val stops = result.getOrNull().orEmpty()
             _uiState.update {
                 it.copy(
@@ -421,7 +431,7 @@ class HomeViewModel(
                     Triple(lat, lng, currentCity)
                 }
 
-                val nearbyResult = repository.getNearbyStops(targetCity, lat, lng, limit = NEARBY_STOPS_LIMIT)
+                val nearbyResult = repository.getNearbyStops(targetCity, lat, lng, limit = repository.nearbyStopsCount.value)
                 _uiState.update {
                     it.copy(
                         nearbyStops = nearbyResult.getOrNull().orEmpty(),
@@ -442,7 +452,7 @@ class HomeViewModel(
                 delay(15_000L)
                 val state = _uiState.value
                 if (!state.isRefreshing && !state.isLoadingNearby && !state.isLocating) {
-                    val nearbyResult = repository.getNearbyStops(state.currentCity, state.currentLat, state.currentLng, limit = NEARBY_STOPS_LIMIT)
+                    val nearbyResult = repository.getNearbyStops(state.currentCity, state.currentLat, state.currentLng, limit = repository.nearbyStopsCount.value)
                     val favResult = repository.refreshFavoritesRealtime()
                     _uiState.update {
                         it.copy(
@@ -585,6 +595,8 @@ class HomeViewModel(
     }
 
     companion object {
+        const val DEFAULT_NEARBY_STOPS_LIMIT = 4
+        const val MAX_NEARBY_STOPS_LIMIT = 16
         const val NEARBY_STOPS_LIMIT = 4
     }
 }

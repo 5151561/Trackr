@@ -32,4 +32,10 @@ sealed interface ScreenKey : NavKey {
         val lat: Double = 0.0,
         val lng: Double = 0.0
     ) : ScreenKey
+
+    @Serializable
+    data object More : ScreenKey
+
+    @Serializable
+    data object About : ScreenKey
 }
