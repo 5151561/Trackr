@@ -16,6 +16,7 @@ import com.trackr.domain.model.ProvinceCityCatalog
 import com.trackr.domain.model.TimetableSegment
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitSearchResult
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -243,19 +244,18 @@ class ChelaileApiClient(httpClient: OkHttpClient) : BaseTransitApiClient(httpCli
         reverseGeocode(wgsLat, wgsLng)?.rawDistrict
 
     /**
-     * 同一坐标 30 秒内复用上次结果，避免先查区县、再查城市时重复请求
+     * 同一坐标 30 秒内复用上次结果（含 null 结果），避免先查区县、再查城市时重复请求
      */
     private suspend fun reverseGeocode(wgsLat: Double, wgsLng: Double): ReverseGeocodeResult? {
         val now = System.currentTimeMillis()
         lastReverseGeocode?.let { cached ->
-            if (cached.lat == wgsLat && cached.lng == wgsLng && now - cached.atMillis < 30_000L) {
+            if (cached.lat == wgsLat && cached.lng == wgsLng && now - cached.atMillis in 0 until 30_000L) {
                 return cached.result
             }
         }
         val result = fetchReverseGeocode(wgsLat, wgsLng)
-        if (result != null) {
-            lastReverseGeocode = ReverseGeocodeCacheEntry(wgsLat, wgsLng, now, result)
-        }
+        // null 结果也短时缓存：接口无数据时不必紧接着再请求一次
+        lastReverseGeocode = ReverseGeocodeCacheEntry(wgsLat, wgsLng, now, result)
         return result
     }
 
@@ -318,6 +318,9 @@ class ChelaileApiClient(httpClient: OkHttpClient) : BaseTransitApiClient(httpCli
                 return@withContext null
             }
             ReverseGeocodeResult(cityName = cleaned, rawDistrict = rawDistrict)
+        } catch (ce: CancellationException) {
+            // 取消不是"无结果"，不能被缓存成 null
+            throw ce
         } catch (_: Exception) {
             null
         }

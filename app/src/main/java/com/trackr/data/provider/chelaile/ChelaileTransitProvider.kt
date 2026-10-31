@@ -4,6 +4,7 @@ import com.trackr.data.provider.ITransitProvider
 import com.trackr.data.provider.model.LineDetailRequest
 import com.trackr.data.provider.model.StopDetailRequest
 import com.trackr.data.remote.chelaile.ChelaileApiClient
+import com.trackr.data.remote.common.SingleFlightCache
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
@@ -17,16 +18,41 @@ import com.trackr.domain.model.isPureSubwayStation
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 车来了（Chelaile）数据源 Provider
  * 内聚加密请求、多物理站台并发补全、同源经纬度就近兜底与纯地铁过滤
  */
 class ChelaileTransitProvider(
-    private val chelaileClient: ChelaileApiClient
+    private val chelaileClient: ChelaileApiClient,
+    /** 单调时钟（毫秒）；测试可注入 */
+    private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000L }
 ) : ITransitProvider {
 
     override val sourceType: DataSourceType = DataSourceType.CHELAILE
+
+    /** 附近站实时补全（encryptedPhyStnDetail）短缓存：同一站台 20 秒内复用，首页轮询不再每轮补全 */
+    private val nearbyCompletionCache = SingleFlightCache<String, List<NearbyStop>>(
+        ttlMillis = NEARBY_COMPLETION_TTL_MS,
+        maxEntries = 64,
+        nowMillis = nowMillis
+    )
+
+    /** 站点详情中其他物理站台的补全缓存：只在首次（或缓存过期后）补全一次 */
+    private val platformCompletionCache = SingleFlightCache<String, List<NearbyStop>>(
+        ttlMillis = PLATFORM_COMPLETION_TTL_MS,
+        maxEntries = 64,
+        nowMillis = nowMillis
+    )
+
+    /** 补全请求并发上限，避免附近站数量调大时同时打出十几个请求 */
+    private val completionSemaphore = Semaphore(MAX_CONCURRENT_COMPLETIONS)
+
+    /** 主查询返回空结果的站点 key -> 记录时刻；有效期内直接走经纬度兜底，不再重复主查询 */
+    private val emptyMainQueryAt = ConcurrentHashMap<String, Long>()
 
     override fun supportsLine(lineId: String): Boolean = !lineId.startsWith("mg:")
 
@@ -104,15 +130,21 @@ class ChelaileTransitProvider(
                             (!stop.physicalStId.isNullOrBlank() || stop.stopId.isNotBlank())
 
                     if (needsFetch) {
+                        // 补全只取线路与实时状态，与用户坐标无关，可按站台复用
+                        val cacheKey = "${city.cityId}|${stop.physicalStId.orEmpty()}|${stop.stopId}"
                         val subResult = runCatching {
-                            chelaileClient.getStopDetail(
-                                cityId = city.cityId,
-                                physicalStId = stop.physicalStId.orEmpty(),
-                                namesakeStId = stop.namesakeStId,
-                                stationId = stop.stopId,
-                                userLat = wgsLat,
-                                userLng = wgsLng
-                            )
+                            nearbyCompletionCache.get(cacheKey) {
+                                completionSemaphore.withPermit {
+                                    chelaileClient.getStopDetail(
+                                        cityId = city.cityId,
+                                        physicalStId = stop.physicalStId.orEmpty(),
+                                        namesakeStId = stop.namesakeStId,
+                                        stationId = stop.stopId,
+                                        userLat = wgsLat,
+                                        userLng = wgsLng
+                                    )
+                                }
+                            }
                         }.getOrNull()
 
                         val matched = subResult?.firstOrNull {
@@ -136,15 +168,27 @@ class ChelaileTransitProvider(
         city: TransitCity,
         request: StopDetailRequest
     ): List<NearbyStop> {
-        // 阶段 1：主查询
-        val rawStops = chelaileClient.getStopDetail(
-            cityId = city.cityId,
-            physicalStId = request.physicalStId.orEmpty(),
-            namesakeStId = request.namesakeStId,
-            stationId = request.stopId,
-            userLat = request.userLat,
-            userLng = request.userLng
-        )
+        val stationLat = request.stationLat
+        val stationLng = request.stationLng
+        val hasFallbackCoords = stationLat != null && stationLng != null && stationLat > 0.0 && stationLng > 0.0
+        val mainQueryKey = "${city.cityId}|${request.physicalStId.orEmpty()}|${request.namesakeStId.orEmpty()}|${request.stopId.orEmpty()}"
+
+        // 阶段 1：主查询（近期已确认主查询为空且有经纬度兜底时跳过，直接走兜底）
+        val skipMainQuery = hasFallbackCoords && emptyMainQueryAt[mainQueryKey]?.let { at ->
+            nowMillis() - at in 0 until EMPTY_MAIN_QUERY_TTL_MS
+        } == true
+        val rawStops = if (skipMainQuery) {
+            emptyList()
+        } else {
+            chelaileClient.getStopDetail(
+                cityId = city.cityId,
+                physicalStId = request.physicalStId.orEmpty(),
+                namesakeStId = request.namesakeStId,
+                stationId = request.stopId,
+                userLat = request.userLat,
+                userLng = request.userLng
+            )
+        }
 
         // 车来了接口只为当前查询的 physicalStId 返回完整线路与实时数据，其他物理站台为占位空壳
         // 当存在多个物理站台且其他站台尚未填充完整线路时，并发补全各物理站台的完整线路信息
@@ -154,15 +198,22 @@ class ChelaileTransitProvider(
                     async {
                         val needsFetch = stop.lines.isNotEmpty() && stop.lines.all { it.line.lineId.isBlank() }
                         if (needsFetch && !stop.physicalStId.isNullOrBlank()) {
+                            // 其他物理站台的补全按站台缓存，10 秒轮询时不再每轮重复补全；
+                            // 用户切到该站台后，页面会以它为主查询拿到最新实时数据
+                            val cacheKey = "${city.cityId}|${stop.physicalStId}"
                             val subResult = runCatching {
-                                chelaileClient.getStopDetail(
-                                    cityId = city.cityId,
-                                    physicalStId = stop.physicalStId,
-                                    namesakeStId = stop.namesakeStId ?: request.namesakeStId,
-                                    stationId = stop.stopId.takeIf { it.isNotBlank() } ?: request.stopId,
-                                    userLat = request.userLat,
-                                    userLng = request.userLng
-                                )
+                                platformCompletionCache.get(cacheKey) {
+                                    completionSemaphore.withPermit {
+                                        chelaileClient.getStopDetail(
+                                            cityId = city.cityId,
+                                            physicalStId = stop.physicalStId,
+                                            namesakeStId = stop.namesakeStId ?: request.namesakeStId,
+                                            stationId = stop.stopId.takeIf { it.isNotBlank() } ?: request.stopId,
+                                            userLat = request.userLat,
+                                            userLng = request.userLng
+                                        )
+                                    }
+                                }
                             }.getOrNull()
                             val matched = subResult?.firstOrNull { it.physicalStId == stop.physicalStId && it.lines.any { l -> l.line.lineId.isNotBlank() } }
                                 ?: subResult?.firstOrNull { it.lines.any { l -> l.line.lineId.isNotBlank() } }
@@ -182,13 +233,15 @@ class ChelaileTransitProvider(
 
         val filteredStops = stops.filter { !it.isPureSubwayStation }
         if (filteredStops.isNotEmpty()) {
+            emptyMainQueryAt.remove(mainQueryKey)
             return filteredStops
         }
 
         // 阶段 2：同源经纬度就近兜底与距离计算
-        val stationLat = request.stationLat
-        val stationLng = request.stationLng
-        if (stationLat != null && stationLng != null && stationLat > 0.0 && stationLng > 0.0) {
+        if (stationLat != null && stationLng != null && hasFallbackCoords) {
+            if (!skipMainQuery) {
+                emptyMainQueryAt[mainQueryKey] = nowMillis()
+            }
             val nearby = chelaileClient.getNearbyStops(
                 cityId = city.cityId,
                 wgsLat = stationLat,
@@ -247,5 +300,12 @@ class ChelaileTransitProvider(
             direction = line.direction,
             atTimeHHMM = atTimeHHMM
         )
+    }
+
+    companion object {
+        const val NEARBY_COMPLETION_TTL_MS = 20_000L
+        const val PLATFORM_COMPLETION_TTL_MS = 120_000L
+        const val EMPTY_MAIN_QUERY_TTL_MS = 180_000L
+        const val MAX_CONCURRENT_COMPLETIONS = 4
     }
 }
