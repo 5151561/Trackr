@@ -163,6 +163,14 @@ class FavoritesGroupViewModel(
     private val _planErrorMessage = MutableStateFlow<String?>(null)
     val planErrorMessage: StateFlow<String?> = _planErrorMessage.asStateFlow()
 
+    /** 追踪相关的一次性提示（如未能对齐真实站序时） */
+    private val _trackingMessage = MutableStateFlow<String?>(null)
+    val trackingMessage: StateFlow<String?> = _trackingMessage.asStateFlow()
+
+    fun clearTrackingMessage() {
+        _trackingMessage.value = null
+    }
+
     /** 高德 Android 平台 Key（地图渲染 / 搜索 / 定位 SDK），与包名 + SHA-1 绑定 */
     private val _customAmapApiKey = MutableStateFlow<String?>(
         prefs?.let { p ->
@@ -191,6 +199,14 @@ class FavoritesGroupViewModel(
             viewModelScope.launch {
                 groups.collect { groupList ->
                     refreshRealtimeEta(groupList)
+                }
+            }
+            // 将设备实时定位（WGS-84）喂给换乘引擎，作为 ON_BOARD 阶段到达下车站的辅助判定
+            viewModelScope.launch {
+                transitRepository.userLocation.collect { loc ->
+                    if (loc != null) {
+                        TransferAutoSwitchManager.updateUserLocation(loc.first, loc.second)
+                    }
                 }
             }
         }
@@ -888,10 +904,68 @@ class FavoritesGroupViewModel(
     }
 
     /**
-     * 启动整组全程自动换乘追踪
+     * 启动整组全程自动换乘追踪。
+     *
+     * 启动前：
+     * 1. 若候选线路为合成的（lineId 以 line_ 开头 / fromStopOrder>=toStopOrder / fromStopOrder<=0），
+     *    先调用 [findRealtimeLineMatch] 对齐并把结果写回仓库（[groupRepository.updateGroup]）；
+     *    匹配不到则保持未对齐并通过 [trackingMessage] 提示，不使用假站序启动追踪。
+     * 2. 追踪使用用户在卡片上选中的候选线路（[selectedLineKeys]）。
      */
-    fun startGroupTracking(context: Context, group: TransitGroup, startingLegIndex: Int = 0) {
-        TransferAutoSwitchManager.startGroupTracking(context, group, startingLegIndex)
+    fun startGroupTracking(context: Context, group: TransitGroup, startingLegIndex: Int = 0): Job =
+        viewModelScope.launch {
+            val alignedGroup = ensureGroupAligned(group)
+
+            // 若对齐后仍存在合成/无效站序的要追踪线路，则不启动，给出提示
+            val selectedIds = resolveSelectedLineIds(alignedGroup)
+            val startLeg = alignedGroup.legs.getOrNull(startingLegIndex.coerceIn(0, alignedGroup.legs.lastIndex))
+            val startLine = startLeg?.let { leg ->
+                leg.candidateLines.firstOrNull { it.lineId == selectedIds[leg.legIndex] } ?: leg.primaryLine
+            }
+            if (startLine == null || isSyntheticLine(startLine)) {
+                _trackingMessage.value = "未能对齐【${group.name}】的真实线路站序，暂无法开启追踪，请稍后重试或检查候选线路。"
+                return@launch
+            }
+
+            TransferAutoSwitchManager.startGroupTracking(
+                context = context,
+                group = alignedGroup,
+                startingLegIndex = startingLegIndex,
+                selectedLineIds = selectedIds
+            )
+        }
+
+    /** 手动确认“我已上车”，跳过等车阶段 */
+    fun confirmBoarded(context: Context) {
+        TransferAutoSwitchManager.confirmBoarded(context)
+    }
+
+    /** 判断候选线路是否为合成/未对齐（合成 id / 非法站序） */
+    private fun isSyntheticLine(line: CandidateLine): Boolean =
+        line.lineId.startsWith("line_") || line.fromStopOrder <= 0 || line.fromStopOrder >= line.toStopOrder
+
+    /** 对齐该组内所有合成线路并写回仓库；若无需对齐则原样返回 */
+    private suspend fun ensureGroupAligned(group: TransitGroup): TransitGroup {
+        val needsAlign = group.legs.any { leg -> leg.candidateLines.any { isSyntheticLine(it) } }
+        if (!needsAlign) return group
+        val aligned = alignTransitGroupWithRealtimeSource(group)
+        if (aligned != group) {
+            runCatching { groupRepository.updateGroup(aligned) }
+        }
+        return aligned
+    }
+
+    /** 从 selectedLineKeys 解析每程选中的 lineId（legIndex -> lineId） */
+    private fun resolveSelectedLineIds(group: TransitGroup): Map<Int, String> {
+        val keys = selectedLineKeys.value
+        val result = mutableMapOf<Int, String>()
+        for (leg in group.legs) {
+            val chosen = keys["${group.id}_${leg.legIndex}"]
+            if (chosen != null && leg.candidateLines.any { it.lineId == chosen }) {
+                result[leg.legIndex] = chosen
+            }
+        }
+        return result
     }
 
     /**
@@ -1090,23 +1164,7 @@ class FavoritesGroupViewModel(
             }
         }
 
-        if (sortedDirs.isNotEmpty()) {
-            val best = sortedDirs.first()
-            return CandidateLine(
-                cityId = city.cityId,
-                cityName = city.cityName,
-                lineId = best.lineId,
-                lineName = best.name.ifBlank { lineName },
-                source = best.source,
-                direction = best.direction,
-                fromStopOrder = 1,
-                toStopOrder = 5,
-                startStopName = fromStopName,
-                endStopName = toStopName,
-                mygolbsCityCode = city.mygolbsCityCode
-            )
-        }
-
+        // 匹配不到真实站序：返回 null，保持未对齐，绝不使用写死的假站序（原先的 1->5）
         return null
     }
 
@@ -1129,12 +1187,8 @@ class FavoritesGroupViewModel(
                         toStopName = leg.toStopName,
                         preferredDirection = candidate.direction
                     )
-                    matched ?: candidate.copy(
-                        cityId = if (candidate.cityId.isNotBlank()) candidate.cityId else lineCity.cityId,
-                        cityName = if (candidate.cityName.isNotBlank()) candidate.cityName else lineCity.cityName,
-                        fromStopOrder = candidate.fromStopOrder.coerceAtLeast(1),
-                        toStopOrder = maxOf(candidate.fromStopOrder + 1, candidate.toStopOrder, 2)
-                    )
+                    // 匹配不到则保持原候选（仍是合成/未对齐），由启动追踪处拦截并提示，不编造假站序
+                    matched ?: candidate
                 } else {
                     candidate
                 }

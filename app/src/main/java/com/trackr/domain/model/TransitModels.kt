@@ -347,6 +347,19 @@ data class FavoriteStationLine(
 )
 
 /**
+ * 分组换乘单程的追踪阶段：
+ * - [WAITING_BOARD] 等车阶段，目标是上车站（fromStopOrder），只考虑未过上车站的车
+ * - [ON_BOARD] 已上车阶段，锁定具体车辆，目标是下车站（toStopOrder）
+ * - [SINGLE] 单线路（非分组）追踪，保留原有“车到我所在站”语义
+ */
+@Serializable
+enum class LegPhase {
+    SINGLE,
+    WAITING_BOARD,
+    ON_BOARD
+}
+
+/**
  * 实时乘车/候车通知栏追踪会话状态
  */
 @Serializable
@@ -376,5 +389,15 @@ data class TrackingSessionState(
     val currentLegIndex: Int = 0,
     val totalLegs: Int = 1,
     val statusSummary: String = "正在连接实时公交数据…",
-    val updatedAtMillis: Long = System.currentTimeMillis()
+    val updatedAtMillis: Long = System.currentTimeMillis(),
+    // 分组换乘两阶段追踪字段
+    val legPhase: LegPhase = LegPhase.SINGLE,
+    /** 上车站站序（WAITING_BOARD 阶段目标；ON_BOARD 阶段锁定车辆的 fromStopOrder） */
+    val boardStopOrder: Int = 0,
+    /** 上车站名称 */
+    val boardStopName: String = "",
+    /** 已上车后锁定的车辆 busId */
+    val lockedBusId: String? = null,
+    /** 锁定车辆当前是否信号丢失（从实时数据中消失） */
+    val isSignalLost: Boolean = false
 )

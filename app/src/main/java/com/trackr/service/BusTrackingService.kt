@@ -14,7 +14,9 @@ import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.DataSourceType
+import com.trackr.domain.model.LegPhase
 import com.trackr.domain.model.LineOperatingState
+import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +44,7 @@ class BusTrackingService : LifecycleService() {
             ACTION_START_TRACKING -> handleStartTracking(intent)
             ACTION_STOP_TRACKING -> handleStopTracking()
             ACTION_CYCLE_THRESHOLD -> handleCycleThreshold()
+            ACTION_CONFIRM_BOARDED -> handleConfirmBoarded()
         }
 
         return START_NOT_STICKY
@@ -70,8 +73,18 @@ class BusTrackingService : LifecycleService() {
         val groupName = intent.getStringExtra(EXTRA_GROUP_NAME)
         val legIndex = intent.getIntExtra(EXTRA_LEG_INDEX, 0)
         val totalLegs = intent.getIntExtra(EXTRA_TOTAL_LEGS, 1)
-        val explicitStartOrder = intent.getIntExtra(EXTRA_START_TRACKING_ORDER, -1)
-        val startTrackingOrder = if (explicitStartOrder > 0) explicitStartOrder else (targetOrder - 1).coerceAtLeast(1)
+
+        val isGroup = !groupId.isNullOrEmpty()
+        // 分组换乘：上车站 A（boardStopOrder）作为 WAITING_BOARD 阶段目标
+        val boardOrder = intent.getIntExtra(EXTRA_BOARD_ORDER, -1)
+        val boardStopName = intent.getStringExtra(EXTRA_BOARD_STOP_NAME).orEmpty()
+        // 单线路保持旧语义：从 (targetOrder-1) 作为起始基准
+        val startTrackingOrder = if (isGroup && boardOrder > 0) {
+            boardOrder
+        } else {
+            (targetOrder - 1).coerceAtLeast(1)
+        }
+        val legPhase = if (isGroup) LegPhase.WAITING_BOARD else LegPhase.SINGLE
 
         currentSession = TrackingSessionState(
             isActive = true,
@@ -89,7 +102,10 @@ class BusTrackingService : LifecycleService() {
             groupName = groupName,
             currentLegIndex = legIndex,
             totalLegs = totalLegs,
-            statusSummary = "正在连接实时公交数据…",
+            legPhase = legPhase,
+            boardStopOrder = if (boardOrder > 0) boardOrder else 0,
+            boardStopName = boardStopName,
+            statusSummary = if (isGroup) "正在连接实时公交数据，等待上车站车辆…" else "正在连接实时公交数据…",
             updatedAtMillis = System.currentTimeMillis()
         )
 
@@ -153,6 +169,12 @@ class BusTrackingService : LifecycleService() {
         )
 
         result.onSuccess { detail ->
+            // 分组换乘使用两阶段追踪核心（等车站 A / 锁定车 -> 下车站 B）
+            if (currentSession.legPhase != LegPhase.SINGLE) {
+                handleGroupPollSuccess(detail.buses)
+                return@onSuccess
+            }
+
             val targetOrder = currentSession.targetOrder
             // 筛选未过站车辆（bus.order <= targetOrder）
             val candidateBuses = detail.buses.filter { it.order <= targetOrder }
@@ -269,6 +291,78 @@ class BusTrackingService : LifecycleService() {
         }
     }
 
+    /**
+     * 分组换乘两阶段轮询处理：委托纯函数 [GroupLegTracker]，再处理提醒与换乘流转。
+     */
+    private fun handleGroupPollSuccess(buses: List<LiveBus>) {
+        val repository = TrackrApp.instance.repository
+        val update = GroupLegTracker.processPoll(currentSession, buses)
+        var state = update.state
+
+        // 到站/临近提醒：WAITING_BOARD 针对上车站；ON_BOARD 针对下车站
+        if (state.legPhase == LegPhase.WAITING_BOARD) {
+            if (update.reachedBoardStop && !state.hasTriggeredArrivedAlert) {
+                ArrivalAlertManager.triggerArrivedAlert(
+                    this,
+                    state.copy(targetStopName = currentSession.boardStopName, stopsRemaining = 0, isBusArrivedAtStop = true)
+                )
+                state = state.copy(hasTriggeredArrivedAlert = true, hasTriggeredApproachingAlert = true)
+            } else if (!update.reachedBoardStop && state.stopsRemaining in 0..state.alertThresholdStops &&
+                !state.hasTriggeredApproachingAlert
+            ) {
+                ArrivalAlertManager.triggerApproachingAlert(
+                    this,
+                    state.copy(targetStopName = currentSession.boardStopName)
+                )
+                state = state.copy(hasTriggeredApproachingAlert = true)
+            }
+        }
+
+        if (update.reachedBoardStop) {
+            // 刚进入 ON_BOARD，重置下车站提醒触发标志
+            state = state.copy(hasTriggeredApproachingAlert = false, hasTriggeredArrivedAlert = false)
+        }
+
+        if (state.legPhase == LegPhase.ON_BOARD) {
+            val isDropArrived = update.reachedDropStop
+            if (isDropArrived && !state.hasTriggeredArrivedAlert) {
+                ArrivalAlertManager.triggerArrivedAlert(this, state.copy(stopsRemaining = 0, isBusArrivedAtStop = true))
+                state = state.copy(hasTriggeredArrivedAlert = true, hasTriggeredApproachingAlert = true)
+            } else if (!isDropArrived && state.stopsRemaining in 0..state.alertThresholdStops &&
+                !state.hasTriggeredApproachingAlert && !state.isSignalLost
+            ) {
+                ArrivalAlertManager.triggerApproachingAlert(this, state)
+                state = state.copy(hasTriggeredApproachingAlert = true)
+            }
+        }
+
+        currentSession = state
+        repository.updateTrackingSession(state)
+        LiveProgressNotificationHelper.updateNotification(this, state)
+
+        // 换乘流转评估（仅锁定车到下车站才会切程 / 完成）
+        TransferAutoSwitchManager.onLegProgressUpdated(this, state)
+    }
+
+    /**
+     * 手动“我已上车”：跳过等车阶段，锁定当前离上车站最近的车并切入 ON_BOARD。
+     */
+    private fun handleConfirmBoarded() {
+        if (currentSession.legPhase != LegPhase.WAITING_BOARD) return
+        val lockedId = currentSession.currentBusId
+        val updated = currentSession.copy(
+            legPhase = LegPhase.ON_BOARD,
+            lockedBusId = lockedId,
+            hasTriggeredApproachingAlert = false,
+            hasTriggeredArrivedAlert = false,
+            statusSummary = "已手动确认上车，开始追踪下车站 ${currentSession.targetStopName}",
+            updatedAtMillis = System.currentTimeMillis()
+        )
+        currentSession = updated
+        TrackrApp.instance.repository.updateTrackingSession(updated)
+        LiveProgressNotificationHelper.updateNotification(this, updated)
+    }
+
     private fun handleCycleThreshold() {
         val nextThreshold = when (currentSession.alertThresholdStops) {
             1 -> 2
@@ -312,6 +406,7 @@ class BusTrackingService : LifecycleService() {
         const val ACTION_START_TRACKING = "com.trackr.action.START_TRACKING"
         const val ACTION_STOP_TRACKING = "com.trackr.action.STOP_TRACKING"
         const val ACTION_CYCLE_THRESHOLD = "com.trackr.action.CYCLE_THRESHOLD"
+        const val ACTION_CONFIRM_BOARDED = "com.trackr.action.CONFIRM_BOARDED"
 
         private const val EXTRA_CITY_ID = "extra_city_id"
         private const val EXTRA_LINE_ID = "extra_line_id"
@@ -330,10 +425,16 @@ class BusTrackingService : LifecycleService() {
         private const val EXTRA_GROUP_NAME = "extra_group_name"
         private const val EXTRA_LEG_INDEX = "extra_leg_index"
         private const val EXTRA_TOTAL_LEGS = "extra_total_legs"
-        private const val EXTRA_START_TRACKING_ORDER = "extra_start_tracking_order"
+        private const val EXTRA_BOARD_ORDER = "extra_board_order"
+        private const val EXTRA_BOARD_STOP_NAME = "extra_board_stop_name"
 
         /**
-         * 启动多程换乘组中的特定程段追踪
+         * 启动多程换乘组中的特定程段追踪（WAITING_BOARD 阶段起步）
+         *
+         * @param boardStopName 上车站 A 名称
+         * @param boardStopOrder 上车站 A 站序（WAITING_BOARD 阶段目标）
+         * @param targetStopName 下车站 B 名称
+         * @param targetOrder 下车站 B 站序（ON_BOARD 阶段目标）
          */
         fun startTrackingGroupLeg(
             context: Context,
@@ -350,7 +451,8 @@ class BusTrackingService : LifecycleService() {
             targetStopName: String,
             targetStopId: String = "",
             targetOrder: Int,
-            startTrackingOrder: Int,
+            boardStopName: String,
+            boardStopOrder: Int,
             endStopName: String = "",
             alertThresholdStops: Int = 2
         ) {
@@ -369,12 +471,23 @@ class BusTrackingService : LifecycleService() {
                 putExtra(EXTRA_TARGET_STOP_NAME, targetStopName)
                 putExtra(EXTRA_TARGET_STOP_ID, targetStopId)
                 putExtra(EXTRA_TARGET_ORDER, targetOrder)
-                putExtra(EXTRA_START_TRACKING_ORDER, startTrackingOrder)
-                putExtra(EXTRA_TOTAL_STOPS, targetOrder.coerceAtLeast(startTrackingOrder))
+                putExtra(EXTRA_BOARD_ORDER, boardStopOrder)
+                putExtra(EXTRA_BOARD_STOP_NAME, boardStopName)
+                putExtra(EXTRA_TOTAL_STOPS, targetOrder.coerceAtLeast(boardStopOrder))
                 putExtra(EXTRA_END_STOP, endStopName)
                 putExtra(EXTRA_ALERT_THRESHOLD, alertThresholdStops)
             }
             ContextCompat.startForegroundService(context, intent)
+        }
+
+        /**
+         * 手动确认“我已上车”，跳过等车阶段
+         */
+        fun confirmBoarded(context: Context) {
+            val intent = Intent(context, BusTrackingService::class.java).apply {
+                action = ACTION_CONFIRM_BOARDED
+            }
+            context.startService(intent)
         }
 
         /**

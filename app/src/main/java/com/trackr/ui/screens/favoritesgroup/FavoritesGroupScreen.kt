@@ -48,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -95,6 +96,15 @@ fun FavoritesGroupScreen(
     val realtimeSummaries by viewModel.legRealtimeSummary.collectAsStateWithLifecycle()
     val candidateRealtimeMap by viewModel.candidateRealtimeMap.collectAsStateWithLifecycle()
     val selectedLineKeys by viewModel.selectedLineKeys.collectAsStateWithLifecycle()
+
+    // 追踪对齐失败等一次性提示
+    val trackingMessage by viewModel.trackingMessage.collectAsStateWithLifecycle()
+    LaunchedEffect(trackingMessage) {
+        trackingMessage?.let {
+            android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show()
+            viewModel.clearTrackingMessage()
+        }
+    }
 
     val directCount = remember(allGroups) { allGroups.count { it.legs.size == 1 } }
     val transferCount = remember(allGroups) { allGroups.count { it.legs.size > 1 } }
@@ -320,8 +330,10 @@ fun FavoritesGroupScreen(
                                 lineName = lineName.trim(),
                                 source = leg?.primaryLine?.source ?: DataSourceType.CHELAILE,
                                 direction = leg?.primaryLine?.direction ?: 0,
-                                fromStopOrder = leg?.primaryLine?.fromStopOrder ?: 1,
-                                toStopOrder = (leg?.primaryLine?.fromStopOrder ?: 1) + 4,
+                                // 站序留空（合成线路），交由 addCandidateLineToLeg -> findRealtimeLineMatch 对齐真实站序，
+                                // 不再写死 +4 假站序
+                                fromStopOrder = 0,
+                                toStopOrder = 0,
                                 startStopName = leg?.fromStopName.orEmpty(),
                                 endStopName = leg?.toStopName.orEmpty()
                             )
@@ -329,6 +341,7 @@ fun FavoritesGroupScreen(
                         },
                         onStartTracking = { viewModel.startGroupTracking(context, group) },
                         onStopTracking = { viewModel.stopGroupTracking(context) },
+                        onConfirmBoarded = { viewModel.confirmBoarded(context) },
                         onReverseClick = { viewModel.createReverseGroup(group) },
                         onSaveTemporary = { viewModel.saveOrConvertTemporaryGroup(group.id) },
                         onEdit = { editingGroup = group },

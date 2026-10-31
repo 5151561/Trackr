@@ -74,6 +74,7 @@ fun TransitGroupCard(
     onAddCandidateLine: (legIndex: Int, lineName: String) -> Unit = { _, _ -> },
     onStartTracking: () -> Unit,
     onStopTracking: () -> Unit,
+    onConfirmBoarded: () -> Unit = {},
     onReverseClick: () -> Unit = {},
     onSaveTemporary: () -> Unit,
     onEdit: () -> Unit,
@@ -83,6 +84,9 @@ fun TransitGroupCard(
 ) {
     val isTrackingThisGroup = activeSession != null && activeSession.groupId == group.id && !activeSession.isCompleted
     val currentLegIndex = activeSession?.activeLegIndex ?: 0
+    // 正在等车阶段（WAITING_BOARD）时允许用户手动“我已上车”
+    val isWaitingBoard = isTrackingThisGroup &&
+        activeSession?.trackingSessionState?.legPhase == com.trackr.domain.model.LegPhase.WAITING_BOARD
 
     val primaryColor = MaterialTheme.colorScheme.primary
     val trackingBorder = remember(primaryColor) {
@@ -232,6 +236,24 @@ fun TransitGroupCard(
                                     text = if (isTrackingThisGroup) "■ 结束追踪" else "▷ 开启追踪",
                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
                                     color = if (isTrackingThisGroup) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        if (isWaitingBoard) {
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Surface(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(20.dp))
+                                    .clickable { onConfirmBoarded() }
+                                    .testTag("btn_confirm_boarded_${group.id}"),
+                                shape = RoundedCornerShape(20.dp),
+                                color = MaterialTheme.colorScheme.tertiaryContainer
+                            ) {
+                                Text(
+                                    text = "我已上车",
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer
                                 )
                             }
                         }

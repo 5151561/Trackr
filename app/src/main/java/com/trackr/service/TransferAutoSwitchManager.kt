@@ -2,20 +2,26 @@ package com.trackr.service
 
 import android.content.Context
 import android.util.Log
-import com.trackr.TrackrApp
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.GroupTrackingSessionState
+import com.trackr.domain.model.LegPhase
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
+import com.trackr.util.CoordTransform
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * 智能自动换乘追踪引擎与自适应调度器
- * 负责跨段换乘自动判定（公交事件 + 手机空间定位双保险）、多段状态流转以及防刷自适应轮询退避
+ *
+ * 分组换乘按“两阶段”追踪每一程：
+ * - WAITING_BOARD（等车）：目标上车站 A，只考虑未过 A 的车，取离 A 最近的一辆。
+ * - ON_BOARD（已上车）：锁定具体车辆，目标下车站 B，只有锁定车到 B 才切下一程 / 完成。
+ *
+ * 到站判定基于“阶段 + 锁定车辆”，定位仅作为 ON_BOARD 阶段到达下车站的辅助条件。
  */
 object TransferAutoSwitchManager {
 
@@ -25,11 +31,13 @@ object TransferAutoSwitchManager {
     val activeGroupSession: StateFlow<GroupTrackingSessionState?> = _activeGroupSession.asStateFlow()
 
     private var activeGroup: TransitGroup? = null
+    /** 每程用户选中的候选线路（legIndex -> lineId） */
+    private var selectedLineIds: Map<Int, String> = emptyMap()
     private var lastUserLat: Double? = null
     private var lastUserLng: Double? = null
 
     /**
-     * 更新手机用户当前位置坐标（用于双保险空间测距）
+     * 更新手机用户当前位置坐标（WGS-84，用于 ON_BOARD 阶段到站双保险空间测距）
      */
     fun updateUserLocation(lat: Double, lng: Double) {
         lastUserLat = lat
@@ -38,15 +46,23 @@ object TransferAutoSwitchManager {
 
     /**
      * 启动整组多程换乘追踪
+     *
+     * @param selectedLineIds 每程用户在卡片上选中的线路（legIndex -> lineId），找不到回落 primaryLine
      */
-    fun startGroupTracking(context: Context, group: TransitGroup, startingLegIndex: Int = 0) {
+    fun startGroupTracking(
+        context: Context,
+        group: TransitGroup,
+        startingLegIndex: Int = 0,
+        selectedLineIds: Map<Int, String> = emptyMap()
+    ) {
         if (group.legs.isEmpty()) return
 
         val initialLegIndex = startingLegIndex.coerceIn(0, group.legs.lastIndex)
         val leg = group.legs[initialLegIndex]
-        val candidateLine = leg.primaryLine
+        val candidateLine = resolveLineForLeg(leg, initialLegIndex, selectedLineIds)
 
         activeGroup = group
+        this.selectedLineIds = selectedLineIds
 
         val groupState = GroupTrackingSessionState(
             groupId = group.id,
@@ -63,8 +79,18 @@ object TransferAutoSwitchManager {
         }
     }
 
+    /** 选择当前程要追踪的线路：优先用户选中项，回落首个候选线路 */
+    private fun resolveLineForLeg(
+        leg: TransitLeg,
+        legIndex: Int,
+        selected: Map<Int, String>
+    ): CandidateLine? {
+        val chosenId = selected[legIndex]
+        return leg.candidateLines.firstOrNull { it.lineId == chosenId } ?: leg.primaryLine
+    }
+
     /**
-     * 针对当前程段启动 BusTrackingService
+     * 针对当前程段启动 BusTrackingService（分组换乘：WAITING_BOARD 阶段起步）
      */
     private fun startTrackingLeg(
         context: Context,
@@ -85,10 +111,13 @@ object TransferAutoSwitchManager {
             lineDirection = line.direction,
             source = line.source,
             mygolbsCityCode = line.mygolbsCityCode.orEmpty(),
+            // 目标下车站 B
             targetStopName = leg.toStopName,
             targetStopId = leg.toStopId,
             targetOrder = line.toStopOrder,
-            startTrackingOrder = line.fromStopOrder,
+            // 上车站 A
+            boardStopName = leg.fromStopName,
+            boardStopOrder = line.fromStopOrder,
             endStopName = line.endStopName
         )
     }
@@ -111,9 +140,11 @@ object TransferAutoSwitchManager {
     }
 
     /**
-     * 到达判定双保险算法：
-     * 1. 公交到达/离站事件（stopsRemaining == 0 且到达/停靠/预计时间接近 0）
-     * 2. 手机空间定位（低功耗 Haversine 距离判定，距目标站 < 150m）
+     * ON_BOARD 阶段到达下车站判定（基于阶段 + 锁定车辆）：
+     * 1. 公交到达事件（stopsRemaining == 0 且已停靠/ETA<=45s）
+     * 2. 手机空间定位辅助（距下车站 < 150m）——仅 ON_BOARD 阶段有效
+     *
+     * WAITING_BOARD 阶段恒返回 false：等车阶段不能用定位触发切程。
      */
     fun isArrivalSatisfied(
         session: TrackingSessionState,
@@ -121,24 +152,32 @@ object TransferAutoSwitchManager {
         userLat: Double? = lastUserLat,
         userLng: Double? = lastUserLng
     ): Boolean {
-        // 1. 公交车辆自身事件判定
+        // WAITING_BOARD（或 SINGLE）阶段绝不在此触发下车站到达
+        if (session.legPhase == LegPhase.WAITING_BOARD) return false
+
+        // 1. 公交车辆自身事件判定（锁定车到下车站）
         val busCondition = session.stopsRemaining == 0 &&
                 (session.isBusArrivedAtStop || (session.etaSeconds in 0..45))
 
-        // 2. 空间测距双保险判定
-        val targetLat = leg?.toStopLat ?: 0.0
-        val targetLng = leg?.toStopLng ?: 0.0
-        val locationCondition = if (userLat != null && userLng != null && targetLat > 0.0 && targetLng > 0.0) {
-            val dist = RouteProjectionMath.calculateDistanceMeters(userLat, userLng, targetLat, targetLng)
-            dist != null && dist < 150
+        // 2. 空间测距辅助判定，仅在 ON_BOARD 阶段生效；leg 坐标为 GCJ-02，用户坐标为 WGS-84，需转换对齐
+        val locationCondition = if (session.legPhase == LegPhase.ON_BOARD) {
+            val targetLat = leg?.toStopLat ?: 0.0
+            val targetLng = leg?.toStopLng ?: 0.0
+            if (userLat != null && userLng != null && targetLat > 0.0 && targetLng > 0.0) {
+                val (userGcjLat, userGcjLng) = CoordTransform.wgs84ToGcj02(userLat, userLng)
+                val dist = RouteProjectionMath.calculateDistanceMeters(userGcjLat, userGcjLng, targetLat, targetLng)
+                dist != null && dist < 150
+            } else false
         } else false
 
         return busCondition || locationCondition
     }
 
     /**
-     * 当 BusTrackingService 轮询得到当前单程最新状态时调用，进行换乘流转评估
-     * @return 返回更新后的 GroupTrackingSessionState
+     * 当 BusTrackingService 轮询得到当前单程最新状态时调用，进行换乘流转评估。
+     *
+     * 仅当锁定车到达下车站（ON_BOARD 阶段的到站）才切下一程 / 完成；
+     * WAITING_BOARD 阶段、或非锁定车到站都不会触发切程。
      */
     fun onLegProgressUpdated(context: Context, session: TrackingSessionState): GroupTrackingSessionState? {
         val currentSession = _activeGroupSession.value ?: return null
@@ -146,7 +185,7 @@ object TransferAutoSwitchManager {
         val currentLegIndex = currentSession.activeLegIndex
         val currentLeg = group.legs.getOrNull(currentLegIndex)
 
-        // 双保险检查是否到站
+        // 基于阶段 + 锁定车辆判定下车站到达
         val isArrived = isArrivalSatisfied(session, currentLeg)
 
         val updatedGroupState: GroupTrackingSessionState
@@ -154,9 +193,8 @@ object TransferAutoSwitchManager {
         if (isArrived && !currentSession.isCompleted) {
             val nextLegIndex = currentLegIndex + 1
             if (nextLegIndex < group.legs.size) {
-                // 触发换乘提醒并自动进入下一程
                 val nextLeg = group.legs[nextLegIndex]
-                val nextLine = nextLeg.primaryLine
+                val nextLine = resolveLineForLeg(nextLeg, nextLegIndex, selectedLineIds)
                 val nextLineName = nextLine?.lineName ?: "下一程公交"
 
                 Log.d(TAG, "第 ${currentLegIndex + 1} 程到站，自动切换到第 ${nextLegIndex + 1} 程: $nextLineName")
@@ -177,7 +215,7 @@ object TransferAutoSwitchManager {
                     startTrackingLeg(context, group, nextLeg, nextLine, nextLegIndex)
                 }
             } else {
-                // 整组全部程段已完结
+                // 整组全部程段已完结：停止服务
                 Log.d(TAG, "全部换乘程段已完成到达终点！")
                 updatedGroupState = currentSession.copy(
                     isCompleted = true,
@@ -186,6 +224,7 @@ object TransferAutoSwitchManager {
                     )
                 )
                 _activeGroupSession.value = updatedGroupState
+                BusTrackingService.stopTracking(context)
             }
         } else {
             updatedGroupState = currentSession.copy(
@@ -203,6 +242,16 @@ object TransferAutoSwitchManager {
     }
 
     /**
+     * 手动确认“我已上车”：跳过等车阶段，直接进入 ON_BOARD。
+     * 转发给服务锁定当前最接近的车并切换到已上车阶段。
+     */
+    fun confirmBoarded(context: Context) {
+        val currentSession = _activeGroupSession.value ?: return
+        if (currentSession.isCompleted) return
+        BusTrackingService.confirmBoarded(context)
+    }
+
+    /**
      * 手动切换至下一程段
      */
     fun switchToNextLeg(context: Context) {
@@ -211,7 +260,7 @@ object TransferAutoSwitchManager {
         val nextIndex = currentSession.activeLegIndex + 1
         if (nextIndex < group.legs.size) {
             val nextLeg = group.legs[nextIndex]
-            val nextLine = nextLeg.primaryLine
+            val nextLine = resolveLineForLeg(nextLeg, nextIndex, selectedLineIds)
             _activeGroupSession.value = currentSession.copy(
                 activeLegIndex = nextIndex,
                 currentLeg = nextLeg
@@ -228,6 +277,7 @@ object TransferAutoSwitchManager {
     fun stopGroupTracking(context: Context) {
         _activeGroupSession.value = null
         activeGroup = null
+        selectedLineIds = emptyMap()
         BusTrackingService.stopTracking(context)
     }
 }
