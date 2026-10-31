@@ -2,9 +2,11 @@ package com.trackr.service
 
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
+import com.trackr.domain.model.LegPhase
 import com.trackr.domain.model.TrackingSessionState
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -152,5 +154,105 @@ class LiveProgressNotificationHelperTest {
         val notifArrived = LiveProgressNotificationHelper.buildNotification(context, stateArrived)
         val arrivedText = notifArrived.extras.getCharSequence("android.text")?.toString().orEmpty()
         assertTrue("到达状态正文应显示车辆已到达", arrivedText.contains("车辆已到达"))
+    }
+
+    // ---------------- 分组换乘两阶段 ----------------
+
+    private fun waitingState() = TrackingSessionState(
+        isActive = true,
+        lineName = "B612",
+        targetStopName = "深大北门",
+        targetOrder = 9,
+        boardStopName = "科技园",
+        boardStopOrder = 5,
+        startTrackingOrder = 2,
+        currentBusOrder = 3,
+        currentBusProgress = 1.0f,
+        stopsRemaining = 2,
+        etaSeconds = 240,
+        legPhase = LegPhase.WAITING_BOARD,
+        currentLegIndex = 0,
+        totalLegs = 2
+    )
+
+    private fun onBoardState() = waitingState().copy(
+        legPhase = LegPhase.ON_BOARD,
+        startTrackingOrder = 5,
+        currentBusOrder = 7,
+        currentBusProgress = 1.0f,
+        stopsRemaining = 2,
+        etaSeconds = 300
+    )
+
+    @Test
+    fun shortCriticalText_byPhase() {
+        assertEquals("B612 2站", LiveProgressNotificationHelper.shortCriticalTextFor(waitingState()))
+        assertEquals("等车2站", LiveProgressNotificationHelper.shortCriticalTextFor(waitingState().copy(lineName = "高峰专线12")))
+        assertEquals("2站下车", LiveProgressNotificationHelper.shortCriticalTextFor(onBoardState()))
+        val arrivedTransfer = onBoardState().copy(stopsRemaining = 0, isBusArrivedAtStop = true)
+        assertEquals("换乘", LiveProgressNotificationHelper.shortCriticalTextFor(arrivedTransfer))
+        val arrivedLast = arrivedTransfer.copy(currentLegIndex = 1)
+        assertEquals("已到站", LiveProgressNotificationHelper.shortCriticalTextFor(arrivedLast))
+        listOf(waitingState(), onBoardState(), arrivedTransfer, waitingState().copy(stopsRemaining = 12)).forEach {
+            assertTrue(LiveProgressNotificationHelper.shortCriticalTextFor(it).length <= 7)
+        }
+    }
+
+    @Test
+    fun buildTexts_waitingBoard() {
+        val texts = LiveProgressNotificationHelper.buildTexts(waitingState(), nextLineName = "M492")
+        assertEquals("B612 还有 2 站到 科技园", texts.title)
+        assertEquals("约 4 分钟", texts.content)
+        assertEquals("第 1/2 程 · 等车", texts.subText)
+    }
+
+    @Test
+    fun buildTexts_onBoard_withTransferAndRange() {
+        val texts = LiveProgressNotificationHelper.buildTexts(onBoardState(), nextLineName = "M492")
+        assertEquals("还有 2 站在 深大北门 下车", texts.title)
+        assertEquals("约 5 分钟 · 下车后换乘 M492 · 科技园 → 深大北门", texts.content)
+        assertEquals("第 1/2 程 · 乘车", texts.subText)
+
+        // 最后一程不写换乘
+        val last = LiveProgressNotificationHelper.buildTexts(onBoardState().copy(currentLegIndex = 1), nextLineName = null)
+        assertFalse(last.content.contains("换乘"))
+        assertEquals("第 2/2 程 · 乘车", last.subText)
+    }
+
+    @Test
+    fun notificationActions_byPhase() {
+        val waiting = LiveProgressNotificationHelper.notificationActions(waitingState())
+        assertEquals(listOf("我已上车", "提前2站提醒", "结束"), waiting.map { it.label })
+        assertEquals(TrackingActionReceiver.ACTION_CONFIRM_BOARDED, waiting.first().intentAction)
+
+        val onBoard = LiveProgressNotificationHelper.notificationActions(onBoardState())
+        assertEquals(listOf("跳到下一程", "结束"), onBoard.map { it.label })
+        assertEquals(TrackingActionReceiver.ACTION_NEXT_LEG, onBoard.first().intentAction)
+
+        val onBoardLast = LiveProgressNotificationHelper.notificationActions(onBoardState().copy(currentLegIndex = 1))
+        assertEquals(listOf("结束"), onBoardLast.map { it.label })
+
+        val single = LiveProgressNotificationHelper.notificationActions(TrackingSessionState(isActive = true))
+        assertEquals(listOf("提前2站提醒(切换)", "结束追踪"), single.map { it.label })
+    }
+
+    @Test
+    fun progressRange_followsPhase() {
+        // 等车：选中车辆时所在站(2) → 上车站(5)，共 3 个站间；车停在第 3 站、剩 2 站 → 1/3
+        assertEquals(2 to 5, LiveProgressNotificationHelper.progressRangeOf(waitingState()))
+        assertEquals(100, LiveProgressNotificationHelper.calculateCurrentProgress(waitingState()))
+        // 乘车：上车站(5) → 下车站(9)，共 4 个站间；车停在第 7 站、剩 2 站 → 2/4
+        assertEquals(5 to 9, LiveProgressNotificationHelper.progressRangeOf(onBoardState()))
+        assertEquals(200, LiveProgressNotificationHelper.calculateCurrentProgress(onBoardState()))
+    }
+
+    @Test
+    fun buildNotification_onBoard_keepsProgressStyleAndPhaseActions() {
+        val notification = LiveProgressNotificationHelper.buildNotification(context, onBoardState(), nextLineName = "M492")
+        assertEquals("还有 2 站在 深大北门 下车", notification.extras.getCharSequence("android.title")?.toString())
+        assertEquals("第 1/2 程 · 乘车", notification.extras.getCharSequence("android.subText")?.toString())
+        assertEquals(listOf("跳到下一程", "结束"), notification.actions.map { it.title.toString() })
+        assertEquals(400, notification.extras.getInt("android.progressMax"))
+        assertEquals(200, notification.extras.getInt("android.progress"))
     }
 }

@@ -17,11 +17,19 @@ class TrackingActionReceiver : BroadcastReceiver() {
             ACTION_CYCLE_THRESHOLD -> {
                 BusTrackingService.cycleThreshold(context)
             }
+            ACTION_CONFIRM_BOARDED -> {
+                TransferAutoSwitchManager.confirmBoarded(context)
+            }
+            ACTION_NEXT_LEG -> {
+                TransferAutoSwitchManager.switchToNextLeg(context)
+            }
         }
     }
 
     companion object {
         const val ACTION_STOP_TRACKING = "com.trackr.action.STOP_TRACKING"
         const val ACTION_CYCLE_THRESHOLD = "com.trackr.action.CYCLE_THRESHOLD"
+        const val ACTION_CONFIRM_BOARDED = "com.trackr.action.CONFIRM_BOARDED"
+        const val ACTION_NEXT_LEG = "com.trackr.action.NEXT_LEG"
     }
 }

@@ -52,6 +52,15 @@ class GroupLegTrackerTest {
     }
 
     @Test
+    fun waitingBoard_recordsWaitStartOrderForNotificationProgress() {
+        // 选中车辆时记录它所在的站作为等车区间起点；同一辆车后续轮询保持不变
+        val first = GroupLegTracker.processPoll(waitingSession(), listOf(bus("coming", order = 2, progress = 0.4f)))
+        assertEquals(1, first.state.startTrackingOrder)
+        val second = GroupLegTracker.processPoll(first.state, listOf(bus("coming", order = 3, progress = 0.2f)))
+        assertEquals(1, second.state.startTrackingOrder)
+    }
+
+    @Test
     fun waitingBoard_noEligibleBus_whenAllPassedBoardStop() {
         val session = waitingSession()
         val buses = listOf(bus("passed", order = 6))

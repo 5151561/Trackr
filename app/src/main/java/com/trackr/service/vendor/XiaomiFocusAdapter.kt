@@ -8,6 +8,7 @@ import android.os.Bundle
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
 import com.trackr.domain.math.RouteProjectionMath
+import com.trackr.domain.model.LegPhase
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.service.LiveProgressNotificationHelper
 import org.json.JSONObject
@@ -81,8 +82,12 @@ object XiaomiFocusAdapter {
     /**
      * 将符合小米 HyperOS 焦点通知规范的 JSON 注入到 NotificationCompat.Builder 的 extras 中
      */
-    fun attachFocusParams(builder: NotificationCompat.Builder, state: TrackingSessionState) {
-        val payload = buildJsonPayload(state)
+    fun attachFocusParams(
+        builder: NotificationCompat.Builder,
+        state: TrackingSessionState,
+        nextLineName: String? = null
+    ) {
+        val payload = buildJsonPayload(state, nextLineName)
         if (payload.isNotEmpty()) {
             builder.extras.putString(EXTRA_KEY, payload)
         }
@@ -91,40 +96,52 @@ object XiaomiFocusAdapter {
     /**
      * 构建紧凑的 param_v2 JSON 结构，并严格限制在 3072 字节以内
      */
-    fun buildJsonPayload(state: TrackingSessionState): String {
+    fun buildJsonPayload(state: TrackingSessionState, nextLineName: String? = null): String {
         val isArrived = state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45)
 
-        val capsuleText = when {
-            isArrived -> "已到站"
-            state.stopsRemaining == 0 -> "即将进站"
-            state.stopsRemaining > 0 -> "剩${state.stopsRemaining}站"
-            else -> "追踪中"
-        }
+        val capsuleText: String
+        val title: String
+        val content: String
+        val subTitle: String
+        if (state.legPhase == LegPhase.SINGLE) {
+            capsuleText = when {
+                isArrived -> "已到站"
+                state.stopsRemaining == 0 -> "即将进站"
+                state.stopsRemaining > 0 -> "剩${state.stopsRemaining}站"
+                else -> "追踪中"
+            }
 
-        val title = if (state.endStopName.isNotEmpty()) {
-            "${state.lineName} 开往 ${state.endStopName}"
+            title = if (state.endStopName.isNotEmpty()) {
+                "${state.lineName} 开往 ${state.endStopName}"
+            } else {
+                "${state.lineName} 实时在途追踪"
+            }
+
+            val etaFormatted = RouteProjectionMath.formatEtaText(state.etaSeconds, state.isBusArrivedAtStop)
+            content = when {
+                isArrived -> "目标站 ${state.targetStopName}：车辆已到达！"
+                state.stopsRemaining == 0 -> "目标站 ${state.targetStopName}：即将进站（$etaFormatted）"
+                state.stopsRemaining > 0 -> "目标站 ${state.targetStopName}：剩 ${state.stopsRemaining} 站（$etaFormatted）"
+                else -> "目标站 ${state.targetStopName}：${state.statusSummary}"
+            }
+            subTitle = "候车追踪 · 第${state.targetOrder}站"
         } else {
-            "${state.lineName} 实时在途追踪"
+            // 分组换乘两阶段：与系统通知共用同一套文案
+            val texts = LiveProgressNotificationHelper.buildTexts(state, nextLineName)
+            capsuleText = texts.shortCriticalText
+            title = texts.title
+            content = texts.content
+            subTitle = texts.subText
         }
 
-        val etaFormatted = RouteProjectionMath.formatEtaText(state.etaSeconds, state.isBusArrivedAtStop)
-        val content = when {
-            isArrived -> "目标站 ${state.targetStopName}：车辆已到达！"
-            state.stopsRemaining == 0 -> "目标站 ${state.targetStopName}：即将进站（$etaFormatted）"
-            state.stopsRemaining > 0 -> "目标站 ${state.targetStopName}：剩 ${state.stopsRemaining} 站（$etaFormatted）"
-            else -> "目标站 ${state.targetStopName}：${state.statusSummary}"
-        }
-
-        val (span, maxProgress) = LiveProgressNotificationHelper.calculateSpanAndMaxProgress(
-            state.startTrackingOrder,
-            state.targetOrder
-        )
+        val (rangeStart, rangeEnd) = LiveProgressNotificationHelper.progressRangeOf(state)
+        val (_, maxProgress) = LiveProgressNotificationHelper.calculateSpanAndMaxProgress(rangeStart, rangeEnd)
         val currentProgress = LiveProgressNotificationHelper.calculateCurrentProgress(state, isArrived)
 
         val baseInfo = JSONObject().apply {
             put("title", title)
             put("content", content)
-            put("subTitle", "候车追踪 · 第${state.targetOrder}站")
+            put("subTitle", subTitle)
         }
 
         val capsule = JSONObject().apply {

@@ -353,6 +353,8 @@ class BusTrackingService : LifecycleService() {
         val updated = currentSession.copy(
             legPhase = LegPhase.ON_BOARD,
             lockedBusId = lockedId,
+            // 乘车区间从上车站算起
+            startTrackingOrder = if (currentSession.boardStopOrder > 0) currentSession.boardStopOrder else currentSession.startTrackingOrder,
             hasTriggeredApproachingAlert = false,
             hasTriggeredArrivedAlert = false,
             statusSummary = "已手动确认上车，开始追踪下车站 ${currentSession.targetStopName}",

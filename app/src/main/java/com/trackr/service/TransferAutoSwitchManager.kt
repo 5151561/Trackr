@@ -252,6 +252,17 @@ object TransferAutoSwitchManager {
     }
 
     /**
+     * 第 [legIndex] 程之后那一程要坐的线路名（只读，供通知文案"下车后换乘 X"使用）；
+     * 没有下一程或不在分组追踪中时返回 null。
+     */
+    fun nextLegLineName(legIndex: Int): String? {
+        val group = activeGroup ?: return null
+        val nextIndex = legIndex + 1
+        val nextLeg = group.legs.getOrNull(nextIndex) ?: return null
+        return resolveLineForLeg(nextLeg, nextIndex, selectedLineIds)?.lineName
+    }
+
+    /**
      * 手动切换至下一程段
      */
     fun switchToNextLeg(context: Context) {

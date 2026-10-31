@@ -96,8 +96,15 @@ object GroupLegTracker {
         } else {
             "${session.lineName} 距上车站 ${session.boardStopName} 还有 $stopsRemaining 站"
         }
+        // 等车区间起点：选中这辆车时它所在的站（只供通知进度条使用，换车时重新记录）
+        val waitStartOrder = if (session.currentBusId != best.busId) {
+            (best.order - 1).coerceIn(1, (boardOrder - 1).coerceAtLeast(1))
+        } else {
+            session.startTrackingOrder
+        }
         return LegUpdate(
             session.copy(
+                startTrackingOrder = waitStartOrder,
                 currentBusId = best.busId,
                 currentBusOrder = best.order,
                 currentBusProgress = best.segmentProgress,

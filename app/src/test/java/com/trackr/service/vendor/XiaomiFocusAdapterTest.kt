@@ -3,6 +3,7 @@ package com.trackr.service.vendor
 import android.app.Application
 import androidx.core.app.NotificationCompat
 import androidx.test.core.app.ApplicationProvider
+import com.trackr.domain.model.LegPhase
 import com.trackr.domain.model.TrackingSessionState
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -161,5 +162,39 @@ class XiaomiFocusAdapterTest {
         val root = JSONObject(extraJson!!)
         assertTrue(root.has("param_v2"))
         assertEquals("剩2站", root.getJSONObject("param_v2").getJSONObject("capsule").getString("text"))
+    }
+
+    @Test
+    fun testBuildJsonPayload_groupPhases_useStageTexts() {
+        val waiting = TrackingSessionState(
+            isActive = true,
+            lineName = "B612",
+            targetStopName = "深大北门",
+            targetOrder = 9,
+            boardStopName = "科技园",
+            boardStopOrder = 5,
+            startTrackingOrder = 2,
+            currentBusOrder = 3,
+            currentBusProgress = 1.0f,
+            stopsRemaining = 2,
+            etaSeconds = 240,
+            legPhase = LegPhase.WAITING_BOARD,
+            currentLegIndex = 0,
+            totalLegs = 2
+        )
+        val waitingV2 = JSONObject(XiaomiFocusAdapter.buildJsonPayload(waiting)).getJSONObject("param_v2")
+        assertEquals("B612 2站", waitingV2.getJSONObject("capsule").getString("text"))
+        assertEquals("B612 还有 2 站到 科技园", waitingV2.getJSONObject("baseInfo").getString("title"))
+        assertEquals("第 1/2 程 · 等车", waitingV2.getJSONObject("baseInfo").getString("subTitle"))
+        // 等车区间 2 → 5
+        assertEquals(300, waitingV2.getJSONObject("progress").getInt("max"))
+
+        val onBoard = waiting.copy(legPhase = LegPhase.ON_BOARD, startTrackingOrder = 5, currentBusOrder = 7, etaSeconds = 300)
+        val onBoardV2 = JSONObject(XiaomiFocusAdapter.buildJsonPayload(onBoard, nextLineName = "M492")).getJSONObject("param_v2")
+        assertEquals("2站下车", onBoardV2.getJSONObject("capsule").getString("text"))
+        assertEquals("还有 2 站在 深大北门 下车", onBoardV2.getJSONObject("baseInfo").getString("title"))
+        assertTrue(onBoardV2.getJSONObject("baseInfo").getString("content").contains("下车后换乘 M492"))
+        // 乘车区间 5 → 9
+        assertEquals(400, onBoardV2.getJSONObject("progress").getInt("max"))
     }
 }
