@@ -8,6 +8,7 @@ import com.trackr.data.provider.model.LineDetailRequest
 import com.trackr.data.provider.model.StopDetailRequest
 import com.trackr.data.provider.mygolbs.MygolbsTransitProvider
 import com.trackr.data.remote.chelaile.ChelaileApiClient
+import com.trackr.data.remote.common.SingleFlightCache
 import com.trackr.data.remote.mygolbs.MygolbsApiClient
 import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.BusLineDetail
@@ -24,7 +25,10 @@ import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.domain.model.TransitSearchResult
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -43,7 +47,11 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class TransitRepository(
     private val context: Context,
-    val coordinator: TransitProviderCoordinator
+    val coordinator: TransitProviderCoordinator,
+    /** 单调时钟（毫秒），用于线路详情短缓存；测试可注入 */
+    private val nowMillis: () -> Long = { System.nanoTime() / 1_000_000L },
+    /** 线路详情合并请求的执行作用域；测试可注入 */
+    fetchScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : ITransitRepository {
 
     /**
@@ -108,6 +116,29 @@ class TransitRepository(
 
     // 内存中的静态站表缓存（lineId -> List<BusStop>）
     private val stopsCache = ConcurrentHashMap<String, List<BusStop>>()
+
+    /**
+     * 线路详情 key：同一数据源 / 城市 / 线路 / 候车站的请求视为同一份数据
+     */
+    private data class LineDetailKey(
+        val source: DataSourceType,
+        val cityId: String,
+        val mygolbsCityCode: String,
+        val lineId: String,
+        val targetOrder: Int?,
+        val stationId: String?
+    )
+
+    /**
+     * 线路详情 in-flight 去重 + 短 TTL 缓存：
+     * 首页收藏、详情页、跟车服务、小组件等同时请求同一线路时只发一次上游请求。
+     */
+    private val lineDetailFlights = SingleFlightCache<LineDetailKey, BusLineDetail>(
+        ttlMillis = LINE_DETAIL_CACHE_TTL_MS,
+        maxEntries = LINE_DETAIL_CACHE_MAX_ENTRIES,
+        scope = fetchScope,
+        nowMillis = nowMillis
+    )
     private var cachedCities: List<TransitCity> = emptyList()
 
     private fun loadInitialCity(): TransitCity {
@@ -325,7 +356,7 @@ class TransitRepository(
         stationLng: Double?,
         userLat: Double?,
         userLng: Double?
-    ): Result<List<NearbyStop>> = runCatching {
+    ): Result<List<NearbyStop>> = resultCatchingNonCancellation {
         val resolvedUserLat = userLat ?: _userLocation.value?.first
         val resolvedUserLng = userLng ?: _userLocation.value?.second
         val request = StopDetailRequest(
@@ -373,7 +404,7 @@ class TransitRepository(
         source: DataSourceType,
         lineNameHint: String,
         directionHint: Int
-    ): Result<BusLineDetail> = runCatching {
+    ): Result<BusLineDetail> {
         val request = LineDetailRequest(
             lineId = lineId,
             targetOrder = targetOrder,
@@ -384,6 +415,21 @@ class TransitRepository(
             lineNameHint = lineNameHint,
             directionHint = directionHint
         )
+        val key = LineDetailKey(
+            source = source,
+            cityId = city.cityId,
+            mygolbsCityCode = city.mygolbsCityCode.orEmpty(),
+            lineId = lineId,
+            targetOrder = targetOrder,
+            stationId = stationId
+        )
+        return resultCatchingNonCancellation {
+            lineDetailFlights.get(key) { fetchLineDetail(city, request) }
+        }
+    }
+
+    private suspend fun fetchLineDetail(city: TransitCity, request: LineDetailRequest): BusLineDetail {
+        val lineId = request.lineId
         val detail = coordinator.getLineDetail(city, request, _aggregatedPriority.value)
 
         // 静态站表内存缓存维护
@@ -394,7 +440,7 @@ class TransitRepository(
             stopsCache[lineId] ?: detail.stops
         }
 
-        if (effectiveStops !== detail.stops) {
+        return if (effectiveStops !== detail.stops) {
             detail.copy(stops = effectiveStops)
         } else {
             detail
@@ -529,8 +575,25 @@ class TransitRepository(
         _activeTrackingSession.value = state
     }
 
+    /**
+     * 与 runCatching 相同，但协程取消（如轮询暂停）向上抛出，不包装成失败结果
+     */
+    private inline fun <T> resultCatchingNonCancellation(block: () -> T): Result<T> {
+        return try {
+            Result.success(block())
+        } catch (ce: CancellationException) {
+            throw ce
+        } catch (e: Throwable) {
+            Result.failure(e)
+        }
+    }
+
     companion object {
         const val MAX_SEARCH_HISTORY = 20
+
+        /** 线路详情短缓存时长：小于详情页 10 秒轮询周期，保证每轮轮询仍拿到新数据 */
+        const val LINE_DETAIL_CACHE_TTL_MS = 6_000L
+        const val LINE_DETAIL_CACHE_MAX_ENTRIES = 64
     }
 }
 
