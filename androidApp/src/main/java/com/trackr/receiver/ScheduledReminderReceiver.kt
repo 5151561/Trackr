@@ -12,24 +12,33 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.trackr.MainActivity
-import com.trackr.TrackrApp
+import com.trackr.data.repository.IScheduledReminderRepository
+import com.trackr.data.repository.ITransitRepository
+import com.trackr.di.AppScopeQualifier
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.LineOperatingState
 import com.trackr.domain.model.ScheduledReminder
 import com.trackr.domain.model.TransitCity
 import com.trackr.service.BusTrackingService
-import com.trackr.util.ReminderScheduler
+import com.trackr.util.ReminderAlarmScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
 /**
  * 定时通勤闹钟触发接收器
  * 到点后台执行单次线路实时状态拉取，并在通知栏发送快报与跟车动作
  */
-class ScheduledReminderReceiver : BroadcastReceiver() {
+class ScheduledReminderReceiver : BroadcastReceiver(), KoinComponent {
+
+    private val repository: ITransitRepository by inject()
+    private val reminderRepository: IScheduledReminderRepository by inject()
+    private val reminderScheduler: ReminderAlarmScheduler by inject()
+    private val appScope: CoroutineScope by inject(AppScopeQualifier)
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
@@ -40,17 +49,16 @@ class ScheduledReminderReceiver : BroadcastReceiver() {
         val reminderId = intent.getStringExtra(EXTRA_REMINDER_ID).orEmpty()
         if (reminderId.isEmpty()) return
 
-        val app = context.applicationContext as? TrackrApp ?: return
-
         if (action == ACTION_START_TRACKING_NOW) {
-            handleStartTrackingNow(context, reminderId, app)
+            handleStartTrackingNow(context, reminderId)
             return
         }
 
         val pendingResult = goAsync()
-        CoroutineScope(Dispatchers.IO).launch {
+        // 应用级作用域（原来每次新建 CoroutineScope），仍在 IO 线程执行
+        appScope.launch(Dispatchers.IO) {
             try {
-                handleReminderTrigger(context, reminderId, app)
+                handleReminderTrigger(context, reminderId)
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing scheduled reminder $reminderId", e)
             } finally {
@@ -59,24 +67,24 @@ class ScheduledReminderReceiver : BroadcastReceiver() {
         }
     }
 
-    private suspend fun handleReminderTrigger(context: Context, reminderId: String, app: TrackrApp) {
-        val reminder = app.reminderRepository.getReminderById(reminderId) ?: return
+    private suspend fun handleReminderTrigger(context: Context, reminderId: String) {
+        val reminder = reminderRepository.getReminderById(reminderId) ?: return
         if (!reminder.enabled) return
 
         // 1. 处理下一次调度
         if (reminder.isOneTime) {
             // 一次性提醒触发后置为未启用
-            app.reminderRepository.toggleReminder(reminder.id, false)
+            reminderRepository.toggleReminder(reminder.id, false)
         } else {
             // 周期性提醒重新安排下一个周期
-            ReminderScheduler.scheduleReminder(context, reminder)
+            reminderScheduler.scheduleReminder(reminder)
         }
 
         // 2. 如果配置了自动开启跟车，仅在精确闹钟（享有后台启动前台服务豁免）触发时直接拉起前台服务；
         //    非精确闹钟或启动被系统拒绝时降级为带「开启实时追踪」按钮的普通提醒通知（通知按钮点击享有豁免）
         var autoStartFallback = false
         if (reminder.autoStartLiveTracking) {
-            if (shouldAutoStartTracking(reminder, ReminderScheduler.canScheduleExact(context)) &&
+            if (shouldAutoStartTracking(reminder, reminderScheduler.canScheduleExact()) &&
                 tryStartTracking(context, reminder)
             ) {
                 return
@@ -92,7 +100,7 @@ class ScheduledReminderReceiver : BroadcastReceiver() {
         )
 
         val detailResult = withTimeoutOrNull(8_000L) {
-            app.repository.getLineDetail(
+            repository.getLineDetail(
                 city = city,
                 lineId = reminder.lineId,
                 targetOrder = reminder.targetOrder,
@@ -219,8 +227,8 @@ class ScheduledReminderReceiver : BroadcastReceiver() {
         notificationManager.notify(NOTIFICATION_BASE_ID + reminder.id.hashCode() % 10000, notification)
     }
 
-    private fun handleStartTrackingNow(context: Context, reminderId: String, app: TrackrApp) {
-        val reminder = app.reminderRepository.getReminderById(reminderId) ?: return
+    private fun handleStartTrackingNow(context: Context, reminderId: String) {
+        val reminder = reminderRepository.getReminderById(reminderId) ?: return
         // 通知按钮点击享有后台启动前台服务豁免，这里仍兜底捕获异常避免崩溃
         if (!tryStartTracking(context, reminder)) return
 

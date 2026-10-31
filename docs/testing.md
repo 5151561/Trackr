@@ -35,7 +35,9 @@
 
 ## 3. 测试目录与套件清单
 
-`./gradlew test` 共跑 53 个测试类：`:androidApp` 52 个，`:core:designsystem` 1 个。
+`./gradlew test` 共跑 54 个测试类：`:androidApp` 53 个，`:core:designsystem` 1 个。
+
+Koin 由 `TrackrApp.onCreate` 启动，Robolectric 用例里每个用例都会重新启动一次。`TransferAutoSwitchManager`、`ArrivalAlertManager`、`LiveProgressNotificationHelper` 这三个旧 object 转发到 Koin 里的实例，只能在 Robolectric（带 `TrackrApp`）用例里调用；纯 JVM 用例里调用会因为 Koin 没启动而抛 `IllegalStateException`。`ReminderScheduler`、`AmapKeyStore` 转发到伴生对象，不受影响。
 
 `:androidApp` 的测试位于 `androidApp/src/test/java/com/trackr/`，下表按子目录列出全部测试类（辅助类 `FakeTransitRepository`、`FakeScheduledReminderRepository`、`MainDispatcherRule` 不含测试）。`:core:designsystem` 的 `RouteRailDrawUtilsTest` 位于 `core/designsystem/src/test/java/com/trackr/core/designsystem/rail/`，覆盖走向条绘制工具（Robolectric Compose UI）。
 
@@ -93,6 +95,7 @@
 |  | `ReminderSchedulerTest` | 提醒下次触发时间计算、错过的一次性提醒判定 | 本地 JVM |
 |  | `SignatureUtilsTest` | 包名与签名 SHA-1（取签名历史中的当前证书） | Robolectric (JVM) |
 |  | `TransitCodeHelperTest` | 支付宝/云闪付乘车码跳转 Intent | Robolectric (JVM) |
+| `widget` | `FavoritesShortcutWidgetSyncTest` | 应用级收藏同步：启动时不刷新，收藏真变一次只刷新一次快捷方式与小组件，重复 `start()` 不开第二个收集 | Robolectric (JVM) |
 
 ---
 

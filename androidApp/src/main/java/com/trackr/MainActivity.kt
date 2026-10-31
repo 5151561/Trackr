@@ -88,10 +88,6 @@ import com.trackr.ui.screens.stopdetail.StopDetailScreen
 import com.trackr.ui.screens.stopdetail.StopDetailViewModel
 import com.trackr.ui.theme.TrackrTheme
 import com.trackr.util.TransitCodeHelper
-import com.trackr.widget.BusStopWidgetProvider
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.withContext
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf
 
@@ -222,18 +218,7 @@ fun TrackrNavApp(
         homeViewModel.setPollingActive(shouldPollHome)
     }
 
-    // 收藏内容真正变化时才同步桌面快捷方式 (App Shortcuts) 与桌面小组件 (AppWidget)，切离主线程调度。
-    // StateFlow 只在内容不同（equals）时才发新值；跳过订阅时的当前值，冷启动 / 旋转屏幕不再重复刷新。
-    LaunchedEffect(Unit) {
-        TrackrApp.instance.repository.favorites
-            .drop(1)
-            .collect { favorites ->
-                withContext(Dispatchers.IO) {
-                    BusStopWidgetProvider.updateDynamicShortcuts(context, favorites)
-                    BusStopWidgetProvider.triggerRefresh(context)
-                }
-            }
-    }
+    // 收藏变化后同步桌面快捷方式与小组件：第 4 步起在应用级作用域里做（见 FavoritesShortcutWidgetSync）
 
     // 申请定位与通知权限
     val permissionLauncher = rememberLauncherForActivityResult(

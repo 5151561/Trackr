@@ -42,10 +42,13 @@ class KoinGraphVerifyTest {
         Context::class,
         Application::class,
         OkHttpClient.Builder::class,
-        // verify 会检查所有公开构造函数：TransitProviderCoordinator 主构造函数收 Map，次构造函数收两个 ITransitProvider。
-        // 第 3 步它仍由 TrackrApp 构建，Koin 只拿现成实例
+        // verify 会检查所有公开构造函数：TransitProviderCoordinator 主构造函数收 Map，次构造函数收两个 ITransitProvider；
+        // Koin 里用次构造函数，传的是具体的 ChelaileTransitProvider / MygolbsTransitProvider
         Map::class,
-        ITransitProvider::class
+        ITransitProvider::class,
+        // LiveProgressNotifier 收两个 lambda（读设置开关、取下一程线路名），在模块里现写
+        Function0::class,
+        Function1::class
     )
 
     /** 静态校验某个模块：别的模块的定义也算可用绑定 */

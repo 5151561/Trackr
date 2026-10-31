@@ -16,6 +16,7 @@ import com.trackr.util.CoordTransform
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.koin.mp.KoinPlatform
 
 /**
  * 智能自动换乘追踪引擎与自适应调度器
@@ -25,10 +26,15 @@ import kotlinx.coroutines.flow.asStateFlow
  * - ON_BOARD（已上车）：锁定具体车辆，目标下车站 B，只有锁定车到 B 才切下一程 / 完成。
  *
  * 到站判定基于“阶段 + 锁定车辆”，定位仅作为 ON_BOARD 阶段到达下车站的辅助条件。
+ *
+ * 第 4 步从 object 改成类，由 Koin 提供单例（换乘组状态只有这一份）；
+ * 旧的 [TransferAutoSwitchManager] 暂时转发到这里（第 12 步删）。
+ *
+ * @param arrivalAlerts 到换乘站时发换乘提醒
  */
-object TransferAutoSwitchManager {
-
-    private const val TAG = "TransferAutoSwitch"
+class TransferAutoSwitcher(
+    private val arrivalAlerts: ArrivalAlertNotifier
+) {
 
     private val _activeGroupSession = MutableStateFlow<GroupTrackingSessionState?>(null)
     val activeGroupSession: StateFlow<GroupTrackingSessionState?> = _activeGroupSession.asStateFlow()
@@ -46,29 +52,12 @@ object TransferAutoSwitchManager {
     /** 每程用户选中的候选线路（legIndex -> lineId） */
     private var selectedLineIds: Map<Int, String> = emptyMap()
 
-    /** 下车站定位辅助判定：定位最长有效期 */
-    const val USER_FIX_MAX_AGE_NANOS = 60_000_000_000L
-
-    /** 下车站定位辅助判定：定位精度上限（米） */
-    const val USER_FIX_MAX_ACCURACY_METERS = 50f
-
-    /** 下车站定位辅助判定：距下车站小于该距离（米）视为到达 */
-    private const val DROP_STOP_RADIUS_METERS = 150
-
-    /**
-     * 手机定位快照（WGS-84）。
-     * @param accuracyMeters 水平精度（米），未知为 null（未知时不参与判定）
-     * @param elapsedRealtimeNanos 定位时刻（[SystemClock.elapsedRealtimeNanos] 时基，对应 Location.elapsedRealtimeNanos）
-     */
-    data class UserFix(
-        val lat: Double,
-        val lng: Double,
-        val accuracyMeters: Float?,
-        val elapsedRealtimeNanos: Long
-    )
-
     @Volatile
     private var lastUserFix: UserFix? = null
+
+    /** 最近一次手机定位快照（给转发对象的默认参数用） */
+    internal val currentUserFix: UserFix?
+        get() = lastUserFix
 
     /** 当前开机时长时钟，可在测试中替换 */
     internal var elapsedRealtimeNanosProvider: () -> Long = { SystemClock.elapsedRealtimeNanos() }
@@ -194,15 +183,6 @@ object TransferAutoSwitchManager {
         }
     }
 
-    /** 失败退避的最长间隔 */
-    const val MAX_FAILURE_BACKOFF_MS = 120_000L
-
-    /** 线路非运营（等待发车 / 停运 / 末班已过 / 无实时）时的轮询间隔 */
-    const val NOT_RUNNING_POLL_INTERVAL_MS = 300_000L
-
-    /** 锁定车辆信号丢失期间的最短轮询间隔 */
-    const val SIGNAL_LOST_MIN_INTERVAL_MS = 30_000L
-
     /**
      * 自适应防刷轮询退避算法：
      * - 连续失败 n 次：在正常间隔基础上 ×2^n 指数退避，最多 120 秒；成功后（n=0）恢复
@@ -298,7 +278,7 @@ object TransferAutoSwitchManager {
 
                 Log.d(TAG, "第 ${currentLegIndex + 1} 程到站，自动切换到第 ${nextLegIndex + 1} 程: $nextLineName")
                 // 非最后一程只发换乘提醒（内部会先取消到站/临近通知）
-                ArrivalAlertManager.triggerTransferAlert(context, currentLeg?.toStopName.orEmpty(), nextLineName)
+                arrivalAlerts.triggerTransferAlert(context, currentLeg?.toStopName.orEmpty(), nextLineName)
                 clearUserFix()
 
                 updatedGroupState = currentSession.copy(
@@ -403,4 +383,115 @@ object TransferAutoSwitchManager {
         clearGroupState()
         BusTrackingService.stopTracking(context)
     }
+
+    companion object {
+        private const val TAG = "TransferAutoSwitch"
+
+        /** 下车站定位辅助判定：定位最长有效期 */
+        const val USER_FIX_MAX_AGE_NANOS = 60_000_000_000L
+
+        /** 下车站定位辅助判定：定位精度上限（米） */
+        const val USER_FIX_MAX_ACCURACY_METERS = 50f
+
+        /** 下车站定位辅助判定：距下车站小于该距离（米）视为到达 */
+        private const val DROP_STOP_RADIUS_METERS = 150
+
+        /** 失败退避的最长间隔 */
+        const val MAX_FAILURE_BACKOFF_MS = 120_000L
+
+        /** 线路非运营（等待发车 / 停运 / 末班已过 / 无实时）时的轮询间隔 */
+        const val NOT_RUNNING_POLL_INTERVAL_MS = 300_000L
+
+        /** 锁定车辆信号丢失期间的最短轮询间隔 */
+        const val SIGNAL_LOST_MIN_INTERVAL_MS = 30_000L
+    }
+}
+
+/** 手机定位快照，第 7 步挪进 `:core:model`；这里保留旧名 `TransferAutoSwitchManager.UserFix` 的写法 */
+typealias UserFix = TransferAutoSwitchManager.UserFix
+
+/**
+ * 旧入口：第 4 步起实现在 [TransferAutoSwitcher]（Koin 单例），这里只转发，第 12 步删。
+ * 服务、通知动作接收器已改为注入 [TransferAutoSwitcher]；ViewModel 等其余调用方暂时还走这里。
+ */
+object TransferAutoSwitchManager {
+
+    private val impl: TransferAutoSwitcher get() = KoinPlatform.getKoin().get()
+
+    const val USER_FIX_MAX_AGE_NANOS = TransferAutoSwitcher.USER_FIX_MAX_AGE_NANOS
+    const val USER_FIX_MAX_ACCURACY_METERS = TransferAutoSwitcher.USER_FIX_MAX_ACCURACY_METERS
+    const val MAX_FAILURE_BACKOFF_MS = TransferAutoSwitcher.MAX_FAILURE_BACKOFF_MS
+    const val NOT_RUNNING_POLL_INTERVAL_MS = TransferAutoSwitcher.NOT_RUNNING_POLL_INTERVAL_MS
+    const val SIGNAL_LOST_MIN_INTERVAL_MS = TransferAutoSwitcher.SIGNAL_LOST_MIN_INTERVAL_MS
+
+    /**
+     * 手机定位快照（WGS-84）。
+     * @param accuracyMeters 水平精度（米），未知为 null（未知时不参与判定）
+     * @param elapsedRealtimeNanos 定位时刻（[SystemClock.elapsedRealtimeNanos] 时基，对应 Location.elapsedRealtimeNanos）
+     */
+    data class UserFix(
+        val lat: Double,
+        val lng: Double,
+        val accuracyMeters: Float?,
+        val elapsedRealtimeNanos: Long
+    )
+
+    val activeGroupSession: StateFlow<GroupTrackingSessionState?> get() = impl.activeGroupSession
+
+    val activeGroupState: StateFlow<TransitGroup?> get() = impl.activeGroupState
+
+    internal var elapsedRealtimeNanosProvider: () -> Long
+        get() = impl.elapsedRealtimeNanosProvider
+        set(value) {
+            impl.elapsedRealtimeNanosProvider = value
+        }
+
+    internal var legSwitcher: ((TrackingStartParams) -> Boolean)?
+        get() = impl.legSwitcher
+        set(value) {
+            impl.legSwitcher = value
+        }
+
+    fun updateUserFix(lat: Double, lng: Double, accuracyMeters: Float?, elapsedRealtimeNanos: Long) =
+        impl.updateUserFix(lat, lng, accuracyMeters, elapsedRealtimeNanos)
+
+    fun updateUserLocation(lat: Double, lng: Double) = impl.updateUserLocation(lat, lng)
+
+    fun clearUserFix() = impl.clearUserFix()
+
+    fun isUserFixUsable(fix: UserFix?, nowElapsedNanos: Long = impl.elapsedRealtimeNanosProvider()): Boolean =
+        impl.isUserFixUsable(fix, nowElapsedNanos)
+
+    fun startGroupTracking(
+        context: Context,
+        group: TransitGroup,
+        startingLegIndex: Int = 0,
+        selectedLineIds: Map<Int, String> = emptyMap()
+    ) = impl.startGroupTracking(context, group, startingLegIndex, selectedLineIds)
+
+    fun calculateAdaptivePollingInterval(
+        session: TrackingSessionState,
+        consecutiveFailures: Int = 0,
+        operatingState: LineOperatingState = LineOperatingState.RUNNING
+    ): Long = impl.calculateAdaptivePollingInterval(session, consecutiveFailures, operatingState)
+
+    fun isArrivalSatisfied(
+        session: TrackingSessionState,
+        leg: TransitLeg?,
+        userFix: UserFix? = impl.currentUserFix,
+        nowElapsedNanos: Long = impl.elapsedRealtimeNanosProvider()
+    ): Boolean = impl.isArrivalSatisfied(session, leg, userFix, nowElapsedNanos)
+
+    fun onLegProgressUpdated(context: Context, session: TrackingSessionState): GroupTrackingSessionState? =
+        impl.onLegProgressUpdated(context, session)
+
+    fun confirmBoarded(context: Context) = impl.confirmBoarded(context)
+
+    fun nextLegLineName(legIndex: Int): String? = impl.nextLegLineName(legIndex)
+
+    fun switchToNextLeg(context: Context) = impl.switchToNextLeg(context)
+
+    fun clearGroupState() = impl.clearGroupState()
+
+    fun stopGroupTracking(context: Context) = impl.stopGroupTracking(context)
 }

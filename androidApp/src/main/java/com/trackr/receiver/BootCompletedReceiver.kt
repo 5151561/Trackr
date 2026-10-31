@@ -4,17 +4,24 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import com.trackr.TrackrApp
-import com.trackr.util.ReminderScheduler
+import com.trackr.data.repository.IScheduledReminderRepository
+import com.trackr.di.AppScopeQualifier
+import com.trackr.util.ReminderAlarmScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
 /**
  * 系统闹钟恢复广播接收器
  * 负责在开机、应用更新、系统时间/时区变化、精确闹钟权限状态变化后重新调度定时提醒
  */
-class BootCompletedReceiver : BroadcastReceiver() {
+class BootCompletedReceiver : BroadcastReceiver(), KoinComponent {
+
+    private val reminderRepository: IScheduledReminderRepository by inject()
+    private val reminderScheduler: ReminderAlarmScheduler by inject()
+    private val appScope: CoroutineScope by inject(AppScopeQualifier)
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action
@@ -23,28 +30,28 @@ class BootCompletedReceiver : BroadcastReceiver() {
         }
 
         Log.i(TAG, "Received $action, rescheduling reminders...")
-        val app = context.applicationContext as? TrackrApp ?: return
-        val reminders = app.reminderRepository.reminders.value
+        val reminders = reminderRepository.reminders.value
 
         // 开机/更新后：关机期间已错过的一次性提醒不再推到第二天，而是置为未启用
         val expiredIds = if (action == Intent.ACTION_BOOT_COMPLETED || action == Intent.ACTION_MY_PACKAGE_REPLACED) {
-            ReminderScheduler.findExpiredOneTimeReminderIds(
+            ReminderAlarmScheduler.findExpiredOneTimeReminderIds(
                 reminders = reminders,
                 nowMillis = System.currentTimeMillis()
-            ) { id -> ReminderScheduler.getLastScheduledTriggerMillis(context, id) }
+            ) { id -> reminderScheduler.getLastScheduledTriggerMillis(id) }
         } else {
             emptySet()
         }
 
-        ReminderScheduler.rescheduleAll(context, reminders.filterNot { it.id in expiredIds })
+        reminderScheduler.rescheduleAll(reminders.filterNot { it.id in expiredIds })
 
         if (expiredIds.isNotEmpty()) {
             Log.i(TAG, "Disabling ${expiredIds.size} expired one-time reminder(s)")
             val pendingResult = goAsync()
-            CoroutineScope(Dispatchers.IO).launch {
+            // 应用级作用域（原来每次新建 CoroutineScope），仍在 IO 线程执行
+            appScope.launch(Dispatchers.IO) {
                 try {
                     expiredIds.forEach { id ->
-                        app.reminderRepository.toggleReminder(id, false)
+                        reminderRepository.toggleReminder(id, false)
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "Failed to disable expired reminders", e)

@@ -10,7 +10,6 @@ import androidx.core.app.ServiceCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
-import com.trackr.TrackrApp
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusStop
@@ -20,12 +19,14 @@ import com.trackr.domain.model.LineOperatingState
 import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
+import com.trackr.data.repository.ITransitRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.koin.android.ext.android.inject
 
 /**
  * 启动一次追踪会话所需的参数（单线路或分组换乘的某一程）。
@@ -65,6 +66,11 @@ data class TrackingStartParams(
  */
 class BusTrackingService : LifecycleService() {
 
+    private val repository: ITransitRepository by inject()
+    private val liveProgressNotifier: LiveProgressNotifier by inject()
+    private val arrivalAlerts: ArrivalAlertNotifier by inject()
+    private val transferSwitcher: TransferAutoSwitcher by inject()
+
     private var pollingJob: Job? = null
     private var currentSession: TrackingSessionState = TrackingSessionState()
     private var lineDirection: Int = 0
@@ -87,7 +93,7 @@ class BusTrackingService : LifecycleService() {
     private val locationSource: ServiceLocationSource by lazy {
         ServiceLocationSource(this).also { source ->
             source.onFix = { fix ->
-                TransferAutoSwitchManager.updateUserFix(
+                transferSwitcher.updateUserFix(
                     lat = fix.latitude,
                     lng = fix.longitude,
                     accuracyMeters = if (fix.hasAccuracy()) fix.accuracy else null,
@@ -128,7 +134,7 @@ class BusTrackingService : LifecycleService() {
         val params = parseStartIntent(intent)
 
         // 先进入前台（startForegroundService 要求尽快调用 startForeground）
-        val notification = LiveProgressNotificationHelper.buildNotification(this, buildInitialSession(params))
+        val notification = liveProgressNotifier.buildNotification(this, buildInitialSession(params))
         // 分组换乘且有精确定位权限时，前台服务带上 location 类型，锁屏后也能定位做跟车检测
         val wantLocation = !params.groupId.isNullOrEmpty() && locationSource.hasPrecisePermission()
         locationTrackingAllowed = enterForeground(notification, wantLocation)
@@ -150,7 +156,7 @@ class BusTrackingService : LifecycleService() {
             try {
                 ServiceCompat.startForeground(
                     this,
-                    LiveProgressNotificationHelper.NOTIFICATION_ID_LIVE_PROGRESS,
+                    LiveProgressNotifier.NOTIFICATION_ID_LIVE_PROGRESS,
                     notification,
                     baseType or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
                 )
@@ -163,7 +169,7 @@ class BusTrackingService : LifecycleService() {
         }
         ServiceCompat.startForeground(
             this,
-            LiveProgressNotificationHelper.NOTIFICATION_ID_LIVE_PROGRESS,
+            LiveProgressNotifier.NOTIFICATION_ID_LIVE_PROGRESS,
             notification,
             baseType
         )
@@ -189,12 +195,12 @@ class BusTrackingService : LifecycleService() {
         currentSession = buildInitialSession(params)
 
         // 1. 同步初始状态至 Repository
-        TrackrApp.instance.repository.updateTrackingSession(currentSession)
+        repository.updateTrackingSession(currentSession)
         // 2. 刷新常驻通知
-        LiveProgressNotificationHelper.updateNotification(this, currentSession)
+        liveProgressNotifier.updateNotification(this, currentSession)
         updateLocationCadence(currentSession)
         // 3. 服务存活期间由服务内部完成切程
-        TransferAutoSwitchManager.legSwitcher = inServiceLegSwitcher
+        transferSwitcher.legSwitcher = inServiceLegSwitcher
         // 4. 启动定时轮询协程
         startPolling(sessionGeneration)
     }
@@ -242,7 +248,7 @@ class BusTrackingService : LifecycleService() {
             // 首次立即刷新
             pollLineDetail(generation)
             while (isActive && isCurrent(generation)) {
-                val intervalMs = TransferAutoSwitchManager.calculateAdaptivePollingInterval(
+                val intervalMs = transferSwitcher.calculateAdaptivePollingInterval(
                     currentSession,
                     consecutiveFailures = consecutiveFailures,
                     operatingState = lastOperatingState
@@ -260,7 +266,6 @@ class BusTrackingService : LifecycleService() {
     private suspend fun pollLineDetail(generation: Int) {
         if (!isCurrent(generation)) return
 
-        val repository = TrackrApp.instance.repository
         val session = currentSession
         val selectedCity = repository.selectedCity.value
         val targetCity = if (selectedCity.cityId == session.cityId) {
@@ -326,8 +331,8 @@ class BusTrackingService : LifecycleService() {
         val alertState = update.alertState
         if (alertState != null) {
             when (update.alert) {
-                SingleLegTracker.AlertKind.ARRIVED -> ArrivalAlertManager.triggerArrivedAlert(this, alertState)
-                SingleLegTracker.AlertKind.APPROACHING -> ArrivalAlertManager.triggerApproachingAlert(this, alertState)
+                SingleLegTracker.AlertKind.ARRIVED -> arrivalAlerts.triggerArrivedAlert(this, alertState)
+                SingleLegTracker.AlertKind.APPROACHING -> arrivalAlerts.triggerApproachingAlert(this, alertState)
                 null -> Unit
             }
         }
@@ -336,7 +341,7 @@ class BusTrackingService : LifecycleService() {
         publishState(state)
 
         if (!state.groupId.isNullOrEmpty()) {
-            TransferAutoSwitchManager.onLegProgressUpdated(this, state)
+            transferSwitcher.onLegProgressUpdated(this, state)
         }
     }
 
@@ -355,10 +360,10 @@ class BusTrackingService : LifecycleService() {
             when (decision.alert) {
                 GroupLegTracker.AlertKind.BOARD_ARRIVED,
                 GroupLegTracker.AlertKind.DROP_ARRIVED ->
-                    ArrivalAlertManager.triggerArrivedAlert(this, alertState)
+                    arrivalAlerts.triggerArrivedAlert(this, alertState)
                 GroupLegTracker.AlertKind.BOARD_APPROACHING,
                 GroupLegTracker.AlertKind.DROP_APPROACHING ->
-                    ArrivalAlertManager.triggerApproachingAlert(this, alertState)
+                    arrivalAlerts.triggerApproachingAlert(this, alertState)
                 null -> Unit
             }
         }
@@ -367,7 +372,7 @@ class BusTrackingService : LifecycleService() {
         publishState(state)
 
         // 换乘流转评估（仅锁定车到下车站才会切程 / 完成）；切程时在服务内部直接开始新会话
-        TransferAutoSwitchManager.onLegProgressUpdated(this, state)
+        transferSwitcher.onLegProgressUpdated(this, state)
     }
 
     /**
@@ -391,8 +396,8 @@ class BusTrackingService : LifecycleService() {
     private fun publishState(state: TrackingSessionState) {
         if (!currentSession.isActive || !state.isActive) return
         currentSession = state
-        TrackrApp.instance.repository.updateTrackingSession(state)
-        LiveProgressNotificationHelper.updateNotification(this, state)
+        repository.updateTrackingSession(state)
+        liveProgressNotifier.updateNotification(this, state)
         updateLocationCadence(state)
     }
 
@@ -436,19 +441,19 @@ class BusTrackingService : LifecycleService() {
 
         val stoppedState = TrackingSessionState(isActive = false)
         currentSession = stoppedState
-        TrackrApp.instance.repository.updateTrackingSession(stoppedState)
+        repository.updateTrackingSession(stoppedState)
         locationSource.stop()
-        TransferAutoSwitchManager.clearUserFix()
+        transferSwitcher.clearUserFix()
         unregisterLegSwitcher()
 
-        LiveProgressNotificationHelper.cancelNotification(this)
+        liveProgressNotifier.cancelNotification(this)
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
 
     private fun unregisterLegSwitcher() {
-        if (TransferAutoSwitchManager.legSwitcher === inServiceLegSwitcher) {
-            TransferAutoSwitchManager.legSwitcher = null
+        if (transferSwitcher.legSwitcher === inServiceLegSwitcher) {
+            transferSwitcher.legSwitcher = null
         }
     }
 
@@ -462,9 +467,9 @@ class BusTrackingService : LifecycleService() {
         if (currentSession.isActive) {
             val stopped = TrackingSessionState(isActive = false)
             currentSession = stopped
-            runCatching { TrackrApp.instance.repository.updateTrackingSession(stopped) }
+            runCatching { repository.updateTrackingSession(stopped) }
         }
-        LiveProgressNotificationHelper.cancelNotification(this)
+        liveProgressNotifier.cancelNotification(this)
         super.onDestroy()
     }
 

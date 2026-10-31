@@ -19,24 +19,18 @@ import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.service.vendor.LiveUpdatePromotion
 import com.trackr.service.vendor.XiaomiFocusAdapter
+import org.koin.mp.KoinPlatform
 
 /**
  * 负责管理高优先级到站/进站预警通知渠道及震动声音提醒
+ *
+ * 第 4 步从 object 改成类，由 Koin 提供单例；旧的 [ArrivalAlertManager] 暂时转发到这里（第 12 步删）。
+ *
+ * @param liveProgressNotifier 读「实时通知」开关，与常驻通知共用同一个兜底值
  */
-object ArrivalAlertManager {
-
-    private const val TAG = "ArrivalAlertManager"
-
-    const val CHANNEL_ID_ALERT = "bus_arrival_alert"
-    private const val CHANNEL_NAME_ALERT = "公交到站与进站强提醒"
-
-    const val NOTIFICATION_ID_APPROACHING = 10002
-    const val NOTIFICATION_ID_ARRIVED = 10003
-    const val NOTIFICATION_ID_TRANSFER = 10004
-
-    private val APPROACHING_VIBRATION_PATTERN = longArrayOf(0, 280, 120, 280, 120, 400)
-    private val TRANSFER_VIBRATION_PATTERN = longArrayOf(0, 300, 100, 300, 100, 300)
-    private const val ARRIVED_VIBRATION_DURATION_MS = 800L
+class ArrivalAlertNotifier(
+    private val liveProgressNotifier: LiveProgressNotifier
+) {
 
     /**
      * 确保高优先级预警渠道创建完毕
@@ -215,15 +209,15 @@ object ArrivalAlertManager {
 
     /**
      * 是否开启常驻实时通知，以可注入 provider 的形式提供，
-     * 避免直接耦合 TrackrApp 全局单例，同时保证单例未初始化时安全降级
+     * 避免直接耦合全局单例，同时保证读取失败时安全降级
      */
     internal var liveNotificationEnabledProvider: () -> Boolean = {
-        LiveProgressNotificationHelper.readLiveNotificationEnabled()
+        liveProgressNotifier.readLiveNotificationEnabled()
     }
 
     internal fun resetLiveNotificationEnabledProvider() {
         liveNotificationEnabledProvider = {
-            LiveProgressNotificationHelper.readLiveNotificationEnabled()
+            liveProgressNotifier.readLiveNotificationEnabled()
         }
     }
 
@@ -296,4 +290,60 @@ object ArrivalAlertManager {
             context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         }
     }
+
+    companion object {
+        private const val TAG = "ArrivalAlertManager"
+
+        const val CHANNEL_ID_ALERT = "bus_arrival_alert"
+        private const val CHANNEL_NAME_ALERT = "公交到站与进站强提醒"
+
+        const val NOTIFICATION_ID_APPROACHING = 10002
+        const val NOTIFICATION_ID_ARRIVED = 10003
+        const val NOTIFICATION_ID_TRANSFER = 10004
+
+        private val APPROACHING_VIBRATION_PATTERN = longArrayOf(0, 280, 120, 280, 120, 400)
+        private val TRANSFER_VIBRATION_PATTERN = longArrayOf(0, 300, 100, 300, 100, 300)
+        private const val ARRIVED_VIBRATION_DURATION_MS = 800L
+    }
+}
+
+/**
+ * 旧入口：第 4 步起实现在 [ArrivalAlertNotifier]（Koin 单例），这里只转发，第 12 步删。
+ * 服务已改为注入 [ArrivalAlertNotifier]；其余调用方暂时还走这里。
+ */
+object ArrivalAlertManager {
+
+    private val impl: ArrivalAlertNotifier get() = KoinPlatform.getKoin().get()
+
+    const val CHANNEL_ID_ALERT = ArrivalAlertNotifier.CHANNEL_ID_ALERT
+    const val NOTIFICATION_ID_APPROACHING = ArrivalAlertNotifier.NOTIFICATION_ID_APPROACHING
+    const val NOTIFICATION_ID_ARRIVED = ArrivalAlertNotifier.NOTIFICATION_ID_ARRIVED
+    const val NOTIFICATION_ID_TRANSFER = ArrivalAlertNotifier.NOTIFICATION_ID_TRANSFER
+
+    fun ensureNotificationChannel(context: Context) = impl.ensureNotificationChannel(context)
+
+    fun triggerApproachingAlert(context: Context, state: TrackingSessionState) =
+        impl.triggerApproachingAlert(context, state)
+
+    fun triggerArrivedAlert(context: Context, state: TrackingSessionState) =
+        impl.triggerArrivedAlert(context, state)
+
+    fun triggerTransferAlert(context: Context, transferStationName: String, nextLineName: String) =
+        impl.triggerTransferAlert(context, transferStationName, nextLineName)
+
+    internal var liveUpdateActiveChecker: (Context) -> Boolean
+        get() = impl.liveUpdateActiveChecker
+        set(value) {
+            impl.liveUpdateActiveChecker = value
+        }
+
+    internal fun resetLiveUpdateActiveChecker() = impl.resetLiveUpdateActiveChecker()
+
+    internal var liveNotificationEnabledProvider: () -> Boolean
+        get() = impl.liveNotificationEnabledProvider
+        set(value) {
+            impl.liveNotificationEnabledProvider = value
+        }
+
+    internal fun resetLiveNotificationEnabledProvider() = impl.resetLiveNotificationEnabledProvider()
 }

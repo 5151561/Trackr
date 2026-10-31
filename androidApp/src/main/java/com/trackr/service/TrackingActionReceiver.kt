@@ -3,26 +3,30 @@ package com.trackr.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
 /**
  * 接收来自常驻通知栏 Live Updates 交互按钮的广播，代理调用 BusTrackingService
  */
-class TrackingActionReceiver : BroadcastReceiver() {
+class TrackingActionReceiver : BroadcastReceiver(), KoinComponent {
+
+    private val transferSwitcher: TransferAutoSwitcher by inject()
 
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ACTION_STOP_TRACKING -> {
                 // 同时清掉换乘组状态，避免停止后收藏页仍显示“追踪中”的换乘组
-                TransferAutoSwitchManager.stopGroupTracking(context)
+                transferSwitcher.stopGroupTracking(context)
             }
             ACTION_CYCLE_THRESHOLD -> {
                 BusTrackingService.cycleThreshold(context)
             }
             ACTION_CONFIRM_BOARDED -> {
-                TransferAutoSwitchManager.confirmBoarded(context)
+                transferSwitcher.confirmBoarded(context)
             }
             ACTION_NEXT_LEG -> {
-                TransferAutoSwitchManager.switchToNextLeg(context)
+                transferSwitcher.switchToNextLeg(context)
             }
         }
     }

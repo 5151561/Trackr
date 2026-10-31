@@ -1,55 +1,23 @@
 package com.trackr
 
 import android.app.Application
-import com.trackr.data.provider.TransitProviderCoordinator
-import com.trackr.data.provider.chelaile.ChelaileTransitProvider
-import com.trackr.data.provider.mygolbs.MygolbsTransitProvider
 import com.trackr.data.remote.amap.AmapKeyStore
 import com.trackr.data.remote.amap.AmapSdkManager
-import com.trackr.data.remote.chelaile.ChelaileApiClient
-import com.trackr.data.remote.mygolbs.MygolbsApiClient
+import com.trackr.data.repository.IRouteGroupRepository
+import com.trackr.data.repository.IScheduledReminderRepository
 import com.trackr.data.repository.ITransitRepository
-import com.trackr.data.repository.TransitRepository
 import com.trackr.di.appModules
-import okhttp3.OkHttpClient
+import com.trackr.widget.FavoritesShortcutWidgetSync
+import org.koin.android.ext.android.get
 import org.koin.android.ext.koin.androidContext
 import org.koin.core.context.GlobalContext
 import org.koin.core.context.startKoin
 import org.koin.core.context.stopKoin
-import java.util.concurrent.TimeUnit
 
 class TrackrApp : Application() {
 
-    lateinit var okHttpClient: OkHttpClient
-        private set
-
-    lateinit var chelaileClient: ChelaileApiClient
-        private set
-
-    lateinit var mygolbsClient: MygolbsApiClient
-        private set
-
-    lateinit var chelaileProvider: ChelaileTransitProvider
-        private set
-
-    lateinit var mygolbsProvider: MygolbsTransitProvider
-        private set
-
-    lateinit var coordinator: TransitProviderCoordinator
-        private set
-
-    lateinit var repository: ITransitRepository
-        private set
-
-    lateinit var reminderRepository: com.trackr.data.repository.IScheduledReminderRepository
-        private set
-
-    lateinit var routeGroupRepository: com.trackr.data.repository.IRouteGroupRepository
-        private set
-
     override fun onCreate() {
         super.onCreate()
-        instance = this
 
         // 高德 SDK 必须在任何地图/搜索/定位实例创建之前完成隐私合规与 Key 注入，
         // 否则首次进入路线规划页会因未鉴权而只显示空白底图。
@@ -57,40 +25,15 @@ class TrackrApp : Application() {
             AmapSdkManager.initialize(applicationContext, AmapKeyStore.readAndroidKey(applicationContext))
         }
 
-        okHttpClient = OkHttpClient.Builder()
-            .connectTimeout(12, TimeUnit.SECONDS)
-            .readTimeout(15, TimeUnit.SECONDS)
-            .writeTimeout(12, TimeUnit.SECONDS)
-            // 整个调用（含重定向与重试）的总时限，防止弱网下单次请求无限挂起
-            .callTimeout(20, TimeUnit.SECONDS)
-            .build()
-
-        chelaileClient = ChelaileApiClient(okHttpClient)
-        mygolbsClient = MygolbsApiClient(okHttpClient)
-
-        chelaileProvider = ChelaileTransitProvider(chelaileClient)
-        mygolbsProvider = MygolbsTransitProvider(mygolbsClient)
-
-        coordinator = TransitProviderCoordinator(
-            chelaileProvider = chelaileProvider,
-            mygolbsProvider = mygolbsProvider
-        )
-
-        repository = TransitRepository(
-            context = applicationContext,
-            coordinator = coordinator
-        )
-
-        reminderRepository = com.trackr.data.repository.ScheduledReminderRepository(
-            context = applicationContext
-        )
-
-        routeGroupRepository = com.trackr.data.repository.RouteGroupRepository(
-            context = applicationContext
-        )
-
-        // 上面的实例构建完再启动 Koin：Koin 只登记定义（都是懒加载），不做额外的读盘
+        // 网络客户端、数据源和三个仓库由 Koin 构建。startKoin 只登记定义；
+        // 三个仓库按原来的顺序在这里取一次，构建（含读盘）的时机和顺序都和改造前一样
         startKoinOnce()
+        get<ITransitRepository>()
+        get<IScheduledReminderRepository>()
+        get<IRouteGroupRepository>()
+
+        // 收藏真变了才同步桌面快捷方式和小组件（原来在 MainActivity 里，App 不打开就不同步）
+        get<FavoritesShortcutWidgetSync>().start()
     }
 
     private fun startKoinOnce() {
@@ -100,11 +43,5 @@ class TrackrApp : Application() {
             androidContext(this@TrackrApp)
             modules(appModules)
         }
-    }
-
-    companion object {
-        @Volatile
-        lateinit var instance: TrackrApp
-            private set
     }
 }

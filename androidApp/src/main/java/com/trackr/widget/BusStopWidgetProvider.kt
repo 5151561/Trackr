@@ -12,9 +12,10 @@ import android.widget.RemoteViews
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
-import com.trackr.TrackrApp
 import com.trackr.MainActivity
 import com.trackr.R
+import com.trackr.data.repository.ITransitRepository
+import com.trackr.di.AppScopeQualifier
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.FavoriteStationLine
@@ -22,14 +23,20 @@ import com.trackr.domain.model.TransitCity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-class BusStopWidgetProvider : AppWidgetProvider() {
+class BusStopWidgetProvider : AppWidgetProvider(), KoinComponent {
+
+    private val transitRepository: ITransitRepository by inject()
+
+    /** 应用级作用域：BroadcastReceiver 实例每次广播都会重建，不能把作用域放在实例字段里 */
+    private val appScope: CoroutineScope by inject(AppScopeQualifier)
 
     override fun onUpdate(
         context: Context,
@@ -61,8 +68,7 @@ class BusStopWidgetProvider : AppWidgetProvider() {
     ) {
         if (appWidgetIds == null || appWidgetIds.isEmpty()) return
         try {
-            val app = context.applicationContext as? TrackrApp ?: TrackrApp.instance
-            val repository = try { app.repository } catch (e: Exception) { null }
+            val repository = try { transitRepository } catch (e: Exception) { null }
             val favorites = repository?.favorites?.value.orEmpty()
             val favorite = favorites.firstOrNull()
 
@@ -74,7 +80,7 @@ class BusStopWidgetProvider : AppWidgetProvider() {
             // 2. 如果存在收藏，后台拉取一次实时到站并更新所有实例
             if (favorite == null || repository == null) return
             val pendingResult = goAsync()
-            widgetScope.launch {
+            appScope.launch(Dispatchers.IO) {
                 try {
                     val (etaText, progressPercent) = try {
                         val city = TransitCity(
@@ -215,9 +221,6 @@ class BusStopWidgetProvider : AppWidgetProvider() {
 
         /** 实时请求超时：goAsync 的广播需在 10 秒内 finish，留出更新视图的余量 */
         private const val FETCH_TIMEOUT_MS = 7_000L
-
-        /** 进程级作用域：BroadcastReceiver 实例每次广播都会重建，不能把作用域放在实例字段里 */
-        private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         /**
          * 触发所有桌面小组件刷新

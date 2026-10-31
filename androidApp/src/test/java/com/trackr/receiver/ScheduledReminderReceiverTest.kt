@@ -1,5 +1,7 @@
 package com.trackr.receiver
 
+import com.trackr.data.repository.IScheduledReminderRepository
+import org.koin.core.context.GlobalContext
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
@@ -22,6 +24,10 @@ import org.robolectric.shadows.ShadowAlarmManager
 class ScheduledReminderReceiverTest {
 
     private lateinit var app: TrackrApp
+
+    /** App 启动时 Koin 构建的真实仓库（原来是 app.reminderRepository） */
+    private val reminderRepository: IScheduledReminderRepository
+        get() = GlobalContext.get().get()
     private lateinit var receiver: ScheduledReminderReceiver
 
     @Before
@@ -54,7 +60,7 @@ class ScheduledReminderReceiverTest {
             targetStopName = "大冲",
             targetOrder = 5
         )
-        app.reminderRepository.saveReminder(reminder)
+        reminderRepository.saveReminder(reminder)
 
         val intent = Intent(app, ScheduledReminderReceiver::class.java).apply {
             action = ScheduledReminderReceiver.ACTION_TRIGGER_REMINDER
@@ -87,7 +93,7 @@ class ScheduledReminderReceiverTest {
             targetStopName = "大冲",
             targetOrder = 5
         )
-        app.reminderRepository.saveReminder(reminder)
+        reminderRepository.saveReminder(reminder)
 
         val intent = Intent(app, ScheduledReminderReceiver::class.java).apply {
             action = ScheduledReminderReceiver.ACTION_START_TRACKING_NOW
