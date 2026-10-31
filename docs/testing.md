@@ -35,15 +35,55 @@
 
 ## 3. 测试目录与套件清单
 
-| 测试类 | 覆盖范围 | 运行方式 |
-| :--- | :--- | :--- |
-| `TransitUnitTest` | 核心算法（`RouteProjectionMath` 坐标插值与站名纠错、`ChelaileCrypto` 加解密与签名） | 本地 JVM |
-| `NavigationKeyTest` | Navigation 3 `ScreenKey` 序列化与反序列化 | 本地 JVM |
-| `NavigationFlowTest` | 导航栈后退拦截、深度链接跳转与栈顶去重 | 本地 JVM |
-| `HomeViewModelTest` | 首页城市切换、城市汉字与拼音前缀过滤、搜索防抖、收藏状态监听 | Robolectric (JVM) |
-| `LineDetailViewModelTest` | 线路详情加载、站点选择、单车行程跟踪、走向条横纵向切换、收藏切换 | 本地 JVM |
-| `StopDetailViewModelTest` | 站点详情物理站台切换、途经线路实时 ETA、收藏增删 | 本地 JVM |
-| `ExpressiveRouteRailUiTest` | 经典横向走向条与纵向走向条 Compose UI 渲染、逐字竖排与点击事件响应 | Robolectric Compose UI |
+测试位于 `app/src/test/java/com/trackr/`，下表按子目录列出全部测试类（辅助类 `FakeTransitRepository`、`FakeScheduledReminderRepository`、`MainDispatcherRule` 不含测试）。
+
+| 目录 | 测试类 | 覆盖范围 | 运行方式 |
+| :--- | :--- | :--- | :--- |
+| 根目录 | `TransitUnitTest` | 核心算法（`RouteProjectionMath` 坐标插值与站名纠错、`ChelaileCrypto` 签名/双密钥解密回退/信封括号截取、线路与城市模型） | 本地 JVM |
+|  | `NavigationKeyTest` | Navigation 3 `ScreenKey` 序列化与反序列化 | 本地 JVM |
+| `data/provider` | `TransitProviderCoordinatorTest` | 引擎模式下搜索/站点详情的数据源路由与回退 | 本地 JVM |
+|  | `TransitProviderTest` | 车来了 Provider 多物理站台并发补全、附近站过滤与站点状态映射 | Robolectric (JVM) |
+| `data/remote/amap` | `AmapSdkManagerTest` | 高德 Key 优先级、隐私合规与 Key 注入 | Robolectric (JVM) |
+|  | `AmapSdkTransitServiceTest` | 高德 SDK 公交路径转换为方案、无 Key 时的提示 | Robolectric (JVM) |
+|  | `AmapTransitApiClientTest` | 高德 Web API 换乘方案解析 | Robolectric (JVM) |
+| `data/remote/common` | `BaseTransitApiClientTest` | 地铁站名识别、距离计算、车牌清洗与 HTTP/JSON 执行封装 | Robolectric (JVM) |
+| `data/remote/update` | `GithubUpdateCheckerTest` | 更新检查多源回退、强制更新判定、下载地址 https 与域名白名单校验 | Robolectric (JVM) |
+| `data/repository` | `CountyLevelCityMatchTest` | 县级市/县城匹配与省份校验 | 本地 JVM |
+|  | `RouteGroupRepositoryTest` | 路线分组与收藏分组增删改排序、并发写入不丢更新、JSON 损坏备份 | Robolectric (JVM) |
+|  | `ScheduledReminderRepositoryTest` | 定时提醒增删改与持久化、并发写入不丢更新、JSON 损坏备份、计划触发时间记录 | Robolectric (JVM) |
+| `receiver` | `ScheduledReminderReceiverTest` | 定时提醒触发、自动跟车需精确闹钟、前台服务启动失败降级 | Robolectric (JVM) |
+|  | `BootCompletedReceiverTest` | 开机禁用已错过的一次性提醒、时间变化重新调度、无关广播忽略 | Robolectric (JVM) |
+| `service` | `ArrivalAlertManagerTest` | 到站/临近提醒与实时通知并存时的去重 | Robolectric (JVM) |
+|  | `GroupLegTrackerTest` | 换乘分组单段跟车状态机（候车锁车、乘车到站、信号丢失） | 本地 JVM |
+|  | `LiveProgressNotificationHelperTest` | 实时进度通知进度计算与文案 | Robolectric (JVM) |
+|  | `TransferAutoSwitchManagerTest` | 自适应轮询退避与下车到站判定 | Robolectric (JVM) |
+| `service/vendor` | `LiveUpdatePromotionTest` | Android 16 Live Update 推广通知构建与厂商识别 | Robolectric (JVM) |
+|  | `XiaomiFocusAdapterTest` | 小米焦点通知 JSON 负载构建 | Robolectric (JVM) |
+| `ui` | `ScreenshotGeneratorTest` | 主要页面明暗主题截图生成 | Robolectric Compose UI |
+| `ui/components` | `BusArrivalBadgeTest` | 到站状态徽标计算 | 本地 JVM |
+|  | `ExpressiveRouteRailUiTest` | 经典横向与纵向走向条渲染、逐字竖排与点击事件响应 | Robolectric Compose UI |
+| `ui/components/citypicker` | `CityPickerItemRowTest` | 城市选择列表项渲染与点击 | Robolectric Compose UI |
+| `ui/components/rail` | `RouteRailDrawUtilsTest` | 走向条绘制工具常量与绘制不崩溃 | Robolectric Compose UI |
+| `ui/components/timetable` | `TimetableBottomSheetTest` | 时刻表底部弹窗渲染 | Robolectric Compose UI |
+| `ui/navigation` | `NavigationFlowTest` | 导航栈后退拦截、深度链接跳转与栈顶去重 | 本地 JVM |
+| `ui/screens/favoritesgroup` | `FavoritesGroupNavigationEventTest` | 分组编辑弹窗未保存时的返回确认 | Robolectric Compose UI |
+|  | `FavoritesGroupScreenTest` | 收藏分组卡片渲染、候选线路切换与分组管理 | Robolectric Compose UI |
+|  | `FavoritesGroupViewModelTest` | 分组筛选、候选线路、多线路 ETA 聚合、临时分组与自定义高德 Key | Robolectric (JVM) |
+|  | `TransitGroupCardTextTest` | 分组卡片乘车站数、摘要与上车时间文案 | 本地 JVM |
+|  | `TransitGroupCardTrackingTest` | 分组卡片跟车中各阶段展示 | Robolectric Compose UI |
+| `ui/screens/home` | `HomeViewModelTest` | 首页城市切换、城市汉字与拼音前缀过滤、搜索防抖、收藏状态监听 | Robolectric (JVM) |
+| `ui/screens/linedetail` | `BusFollowContentTest` | 跟车内容渲染与空车辆处理 | Robolectric Compose UI |
+|  | `LineDetailViewModelTest` | 线路详情加载、站点选择、单车行程跟踪、走向条横纵向切换、收藏切换 | 本地 JVM |
+|  | `StationArrivalContentTest` | 末班/首班/全部过站等状态文案 | Robolectric Compose UI |
+| `ui/screens/more` | `AboutViewModelTest` | 关于页更新检查状态流转 | Robolectric (JVM) |
+|  | `MoreViewModelTest` | 设置项读写与定时提醒开关/删除 | Robolectric (JVM) |
+| `ui/screens/routeplan` | `RoutePlanScreenTest` | 路线规划搜索台、起终点互换、方案卡片与特征标签 | Robolectric Compose UI |
+| `ui/screens/stopdetail` | `StopDetailViewModelTest` | 站点详情物理站台切换、途经线路实时 ETA、收藏增删 | 本地 JVM |
+| `ui/util` | `PollingCoordinatorTest` | 定时/倒计时轮询策略与生命周期控制 | 本地 JVM |
+| `util` | `CoordTransformTest` | WGS-84 / GCJ-02 坐标转换 | 本地 JVM |
+|  | `ReminderSchedulerTest` | 提醒下次触发时间计算、错过的一次性提醒判定 | 本地 JVM |
+|  | `SignatureUtilsTest` | 包名与签名 SHA-1（取签名历史中的当前证书） | Robolectric (JVM) |
+|  | `TransitCodeHelperTest` | 支付宝/云闪付乘车码跳转 Intent | Robolectric (JVM) |
 
 ---
 
