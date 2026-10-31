@@ -1,7 +1,14 @@
 package com.trackr.ui.screens.favoritesgroup
 
+import android.Manifest
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
+import android.os.SystemClock
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.trackr.TrackrApp
@@ -9,6 +16,7 @@ import com.trackr.data.provider.TransitProviderCoordinator
 import com.trackr.data.provider.model.LineDetailRequest
 import com.trackr.data.provider.model.StopDetailRequest
 import com.trackr.data.remote.amap.AmapKeyStore
+import com.trackr.data.remote.amap.AmapLruCache
 import com.trackr.data.remote.amap.AmapSdkManager
 import com.trackr.data.remote.amap.AmapSdkTransitService
 import com.trackr.data.remote.amap.AmapTipItem
@@ -18,6 +26,8 @@ import com.trackr.data.repository.IRouteGroupRepository
 import com.trackr.data.repository.ITransitRepository
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDetail
+import com.trackr.domain.model.BusLineDirection
+import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.CandidateLineRealtimeInfo
 import com.trackr.domain.model.DataSourceType
@@ -31,27 +41,64 @@ import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
 import com.trackr.service.TransferAutoSwitchManager
+import com.trackr.ui.screens.routeplan.MAX_VISIBLE_SCHEMES
 import com.trackr.util.CoordTransform
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
+
+/**
+ * 高德输入提示 / 公交算路通道。
+ *
+ * 默认实现（[FavoritesGroupViewModel] 内部）：SDK 优先，**只有 SDK 调用失败**才回落 Web 服务；
+ * SDK 成功但结果为空时不再重复请求 Web。单元测试可注入替身，避免发起真实请求。
+ */
+interface AmapRouteGateway {
+    /** 是否至少配置了一条可用通道（Android Key 或 Web 服务 Key） */
+    fun isConfigured(): Boolean
+
+    /** @param location 当前位置 "lng,lat"（GCJ-02），可为空 */
+    suspend fun searchTips(keyword: String, cityName: String, location: String?): Result<List<AmapTipItem>>
+
+    /** @param cityd 跨城时的终点城市 adcode，同城传 null */
+    suspend fun planTransit(
+        originLngLat: String,
+        destinationLngLat: String,
+        originName: String,
+        destName: String,
+        cityName: String,
+        cityd: String?
+    ): Result<List<AmapTransitSchemeResult>>
+}
 
 /**
  * 路线组与换乘追踪 ViewModel
  */
+@OptIn(FlowPreview::class)
 class FavoritesGroupViewModel(
     private val groupRepository: IRouteGroupRepository = TrackrApp.instance.routeGroupRepository,
     private val transitRepository: ITransitRepository = TrackrApp.instance.repository,
@@ -62,7 +109,11 @@ class FavoritesGroupViewModel(
     private val prefs: SharedPreferences? = runCatching { TrackrApp.instance.getSharedPreferences("trackr_prefs", Context.MODE_PRIVATE) }.getOrNull(),
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     enableAutoRefresh: Boolean = true,
-    private val enableAutoMigration: Boolean = true
+    private val enableAutoMigration: Boolean = true,
+    /** 高德通道替身（测试用）；为 null 时使用 SDK 优先、失败才走 Web 的默认实现 */
+    amapGatewayOverride: AmapRouteGateway? = null,
+    /** 墙钟（毫秒），用于算路缓存时间桶与对齐缓存过期；测试可替换 */
+    private val wallClockMillis: () -> Long = { System.currentTimeMillis() }
 ) : ViewModel() {
 
     companion object {
@@ -75,6 +126,43 @@ class FavoritesGroupViewModel(
         /** 一次性数据迁移版本号，避免每次 ViewModel 重建都全量重跑迁移逻辑 */
         const val PREF_KEY_MIGRATION_VERSION = "favorites_group_migration_version"
         const val CURRENT_MIGRATION_VERSION = 2
+
+        /**
+         * 早期版本写死的默认城市 ID（当时误标为"杭州"，实际是车来了的哈尔滨）。
+         * 存量候选线路上的这个值视为"未指定城市"，回落到当前所选城市。
+         */
+        const val LEGACY_PLACEHOLDER_CITY_ID = "033"
+
+        /** 起点为"我的位置"时的占位名称 */
+        const val MY_LOCATION_NAME = "我的位置"
+
+        /** 输入提示防抖 */
+        const val TIPS_DEBOUNCE_MS = 300L
+        private const val TIPS_CACHE_SIZE = 64
+
+        /** 算路结果缓存：最多 16 条，按 15 分钟时间桶失效 */
+        private const val PLAN_CACHE_SIZE = 16
+        const val PLAN_CACHE_BUCKET_MS = 15 * 60 * 1000L
+
+        /** 路线组变化触发实时刷新的防抖 */
+        const val ETA_REFRESH_DEBOUNCE_MS = 500L
+
+        /** 合成候选线路对齐结果缓存：命中保留 24 小时，未命中 10 分钟后重试 */
+        private const val ALIGN_HIT_TTL_MS = 24 * 60 * 60 * 1000L
+        private const val ALIGN_MISS_TTL_MS = 10 * 60 * 1000L
+
+        /** 方案与实时源对齐的最大并发 */
+        private const val ALIGN_CONCURRENCY = 4
+
+        /** 系统 lastKnown 定位兜底的最大年龄 */
+        const val MAX_LAST_KNOWN_AGE_MS = 10 * 60 * 1000L
+
+        /** 输入提示是否值得发请求：至少 2 个字符，或包含 1 个汉字 */
+        fun isTipsKeywordEligible(keyword: String): Boolean {
+            val kw = keyword.trim()
+            if (kw.isEmpty()) return false
+            return kw.length >= 2 || kw.any { it in '\u4e00'..'\u9fff' }
+        }
     }
 
     private val _selectedCategory = MutableStateFlow<GroupCategory?>(null)
@@ -170,6 +258,25 @@ class FavoritesGroupViewModel(
     private val _amapDestTips = MutableStateFlow<List<AmapTipItem>>(emptyList())
     val amapDestTips: StateFlow<List<AmapTipItem>> = _amapDestTips.asStateFlow()
 
+    /** 输入框原始关键字（已 trim），经防抖后驱动输入提示请求 */
+    private val originTipsQuery = MutableStateFlow("")
+    private val destTipsQuery = MutableStateFlow("")
+
+    /** 输入提示 LRU 缓存，键 = 城市 + 关键字 */
+    private val tipsCache = AmapLruCache<String, List<AmapTipItem>>(TIPS_CACHE_SIZE)
+
+    /** 算路 LRU 缓存，键 = 城市 + 6 位小数坐标 + 15 分钟时间桶 */
+    private val planCache = AmapLruCache<String, List<AmapTransitSchemeResult>>(PLAN_CACHE_SIZE)
+    private var planJob: Job? = null
+
+    /** 实时刷新任务：新一轮开始时取消旧的一轮，避免旧结果覆盖新结果 */
+    private var etaRefreshJob: Job? = null
+
+    private data class AlignmentCacheEntry(val match: CandidateLine?, val savedAtMs: Long)
+
+    /** 合成候选线路的对齐结果（内存缓存，避免每次 groups 变化都重新 search + getLineDetail） */
+    private val syntheticAlignmentCache = ConcurrentHashMap<String, AlignmentCacheEntry>()
+
     private val _plannedSchemes = MutableStateFlow<List<AmapTransitSchemeResult>>(emptyList())
     val plannedSchemes: StateFlow<List<AmapTransitSchemeResult>> = _plannedSchemes.asStateFlow()
 
@@ -187,21 +294,19 @@ class FavoritesGroupViewModel(
         _trackingMessage.value = null
     }
 
-    /** 高德 Android 平台 Key（地图渲染 / 搜索 / 定位 SDK），与包名 + SHA-1 绑定 */
-    private val _customAmapApiKey = MutableStateFlow<String?>(
-        prefs?.let { p ->
-            // 显式 Android Key 优先；旧版本只有单一输入框，Key 存在 web 槽位，这里做兼容回落
-            p.getString(PREF_KEY_AMAP_ANDROID_KEY, null)?.trim()?.ifBlank { null }
-                ?: p.getString(PREF_KEY_AMAP_KEY, null)?.trim()?.ifBlank { null }
-        }
-    )
+    /** 高德 Android 平台 Key（地图渲染 / 搜索 / 定位 SDK），与包名 + SHA-1 绑定；严格分槽，不回落 Web 槽位 */
+    private val _customAmapApiKey = MutableStateFlow(AmapKeyStore.readAndroidKey(prefs))
     val customAmapApiKey: StateFlow<String?> = _customAmapApiKey.asStateFlow()
 
     /** 高德 Web 服务 Key（restapi.amap.com 公交算路 / 输入提示），不绑定包名 */
-    private val _customAmapWebApiKey = MutableStateFlow<String?>(
-        prefs?.getString(PREF_KEY_AMAP_KEY, null)?.trim()?.ifBlank { null }
-    )
+    private val _customAmapWebApiKey = MutableStateFlow(AmapKeyStore.readWebKey(prefs))
     val customAmapWebApiKey: StateFlow<String?> = _customAmapWebApiKey.asStateFlow()
+
+    /** 当前生效的 Web 服务 Key：判断可用与实际发请求统一用它（用户配置 > BuildConfig） */
+    private fun effectiveWebServiceKey(): String =
+        AmapSdkManager.getEffectiveWebServiceKey(_customAmapWebApiKey.value)
+
+    private val amapGateway: AmapRouteGateway = amapGatewayOverride ?: DefaultAmapRouteGateway()
 
     init {
         // SDK Key 已在 TrackrApp 启动阶段完成注入，这里只在运行期配置变更后重新对齐一次
@@ -211,10 +316,13 @@ class FavoritesGroupViewModel(
         if (enableAutoMigration) {
             runDataMigrationIfNeeded()
         }
+        observeTipsQuery(originTipsQuery, _amapOriginTips)
+        observeTipsQuery(destTipsQuery, _amapDestTips)
         if (enableAutoRefresh) {
             viewModelScope.launch {
-                groups.collect { groupList ->
-                    refreshRealtimeEta(groupList)
+                // 防抖合并连续变更；新一轮开始时取消旧一轮（refreshRealtimeEta 内部也会取消上一个任务）
+                groups.debounce(ETA_REFRESH_DEBOUNCE_MS).collectLatest { groupList ->
+                    refreshRealtimeEta(groupList).join()
                 }
             }
             // 换乘引擎的下车站定位辅助判定需要精度与定位时刻，由拿到 Location 的地方直接调用
@@ -304,9 +412,7 @@ class FavoritesGroupViewModel(
             val group = groupRepository.getGroupById(groupId)
             val leg = group?.legs?.getOrNull(legIndex)
             val alignedLine = if (leg != null) {
-                val city = if (candidateLine.cityId.isNotBlank() && candidateLine.cityId != "033") {
-                    TransitCity(candidateLine.cityId, candidateLine.cityName)
-                } else transitRepository.selectedCity.value
+                val city = resolveCandidateCity(candidateLine, transitRepository.selectedCity.value)
                 val matched = findRealtimeLineMatch(
                     city = city,
                     lineName = candidateLine.lineName,
@@ -327,7 +433,7 @@ class FavoritesGroupViewModel(
      */
     fun saveCustomAmapApiKey(key: String) {
         val trimmed = key.trim().ifBlank { null }
-        prefs?.edit()?.putString(PREF_KEY_AMAP_ANDROID_KEY, trimmed)?.apply()
+        AmapKeyStore.writeAndroidKey(prefs, trimmed)
         _customAmapApiKey.value = trimmed
         runCatching {
             AmapSdkManager.applyApiKey(TrackrApp.instance, trimmed)
@@ -339,31 +445,19 @@ class FavoritesGroupViewModel(
      */
     fun saveCustomAmapWebApiKey(key: String) {
         val trimmed = key.trim().ifBlank { null }
-        prefs?.edit()?.putString(PREF_KEY_AMAP_KEY, trimmed)?.apply()
+        AmapKeyStore.writeWebKey(prefs, trimmed)
         _customAmapWebApiKey.value = trimmed
     }
 
     /**
-     * 搜索起点关键字候选项（优先高德，失败则智能降级至本地站点搜索）
+     * 搜索起点关键字候选项（优先高德，失败则智能降级至本地站点搜索）。
+     * 只记录关键字；真正的请求经 300ms 防抖、去重后在 [observeTipsQuery] 里发出，旧请求会被取消。
      */
     fun searchOriginTips(keyword: String) {
-        if (keyword.isBlank()) {
+        val kw = keyword.trim()
+        originTipsQuery.value = kw
+        if (!isTipsKeywordEligible(kw)) {
             _amapOriginTips.value = emptyList()
-            return
-        }
-        viewModelScope.launch {
-            val city = transitRepository.selectedCity.value
-            val sdkKey = _customAmapApiKey.value
-            val webKey = _customAmapWebApiKey.value
-            val sdkResult = amapSdkService?.searchPoiTips(keyword, city.cityName, sdkKey)
-            val tips = sdkResult?.getOrNull()
-                ?: runCatching { amapApiClient.searchPoiTips(keyword, city.cityName, webKey) }.getOrNull()?.getOrNull().orEmpty()
-
-            if (tips.isNotEmpty()) {
-                _amapOriginTips.value = tips
-            } else {
-                _amapOriginTips.value = searchLocalStopTips(keyword, city)
-            }
         }
     }
 
@@ -371,23 +465,130 @@ class FavoritesGroupViewModel(
      * 搜索终点关键字候选项（优先高德 SDK，失败则降级至 Web API 或本地站点搜索）
      */
     fun searchDestTips(keyword: String) {
-        if (keyword.isBlank()) {
+        val kw = keyword.trim()
+        destTipsQuery.value = kw
+        if (!isTipsKeywordEligible(kw)) {
             _amapDestTips.value = emptyList()
-            return
         }
-        viewModelScope.launch {
-            val city = transitRepository.selectedCity.value
-            val sdkKey = _customAmapApiKey.value
-            val webKey = _customAmapWebApiKey.value
-            val sdkResult = amapSdkService?.searchPoiTips(keyword, city.cityName, sdkKey)
-            val tips = sdkResult?.getOrNull()
-                ?: runCatching { amapApiClient.searchPoiTips(keyword, city.cityName, webKey) }.getOrNull()?.getOrNull().orEmpty()
+    }
 
-            if (tips.isNotEmpty()) {
-                _amapDestTips.value = tips
-            } else {
-                _amapDestTips.value = searchLocalStopTips(keyword, city)
+    /**
+     * 输入提示管道：debounce → distinctUntilChanged → collectLatest（新关键字到来时取消旧请求）。
+     * 结果回来时若输入框已变化则丢弃，避免旧前缀的结果覆盖新结果。
+     */
+    private fun observeTipsQuery(
+        query: MutableStateFlow<String>,
+        target: MutableStateFlow<List<AmapTipItem>>
+    ) {
+        viewModelScope.launch {
+            query
+                .debounce(TIPS_DEBOUNCE_MS)
+                // 同一关键字不重复请求；但若提示已被清空（如关闭后重新输入同一个词），允许再查一次（命中缓存）
+                .distinctUntilChanged { old, new -> old == new && target.value.isNotEmpty() }
+                .collectLatest { keyword ->
+                    if (!isTipsKeywordEligible(keyword)) {
+                        target.value = emptyList()
+                        return@collectLatest
+                    }
+                    val tips = loadPoiTips(keyword, transitRepository.selectedCity.value)
+                    if (query.value == keyword) {
+                        target.value = tips
+                    }
+                }
+        }
+    }
+
+    /** 查询输入提示：先查 LRU 缓存，再走高德（SDK 失败才走 Web），都没有结果时降级为本地站点搜索 */
+    private suspend fun loadPoiTips(keyword: String, city: TransitCity): List<AmapTipItem> {
+        val cacheKey = "${city.cityId}|${city.cityName}|$keyword"
+        tipsCache.get(cacheKey)?.let { return it }
+
+        val amapTips = if (amapGateway.isConfigured()) {
+            amapGateway.searchTips(keyword, city.cityName, currentGcjLngLat()).getOrNull().orEmpty()
+        } else {
+            emptyList()
+        }
+        val tips = amapTips.ifEmpty { searchLocalStopTips(keyword, city) }
+        if (tips.isNotEmpty()) {
+            tipsCache.put(cacheKey, tips)
+        }
+        return tips
+    }
+
+    /** 当前设备定位转成高德需要的 GCJ-02 "lng,lat"；无定位时返回 null */
+    private fun currentGcjLngLat(): String? {
+        val (lat, lng) = transitRepository.userLocation.value ?: return null
+        val (gcjLat, gcjLng) = CoordTransform.wgs84ToGcj02(lat, lng)
+        return "$gcjLng,$gcjLat"
+    }
+
+    /**
+     * 默认高德通道：SDK 优先；只有 SDK 调用失败（未配置 Key / 网络 / 鉴权等）才回落 Web 服务。
+     * SDK 成功但结果为空时直接返回空结果，不再用 Web 重复请求。
+     */
+    private inner class DefaultAmapRouteGateway : AmapRouteGateway {
+        private fun sdkUsable(): Boolean =
+            amapSdkService != null && AmapSdkManager.isAndroidKeyConfigured(_customAmapApiKey.value)
+
+        override fun isConfigured(): Boolean = sdkUsable() || effectiveWebServiceKey().isNotEmpty()
+
+        override suspend fun searchTips(
+            keyword: String,
+            cityName: String,
+            location: String?
+        ): Result<List<AmapTipItem>> {
+            var sdkFailure: Throwable? = null
+            val sdk = amapSdkService
+            if (sdk != null && sdkUsable()) {
+                val result = sdk.searchPoiTips(keyword, cityName, _customAmapApiKey.value, location)
+                currentCoroutineContext().ensureActive()
+                if (result.isSuccess) return result
+                sdkFailure = result.exceptionOrNull()
             }
+            val webKey = effectiveWebServiceKey()
+            if (webKey.isNotEmpty()) {
+                return amapApiClient.searchPoiTips(keyword, cityName, webKey, location)
+            }
+            return Result.failure(sdkFailure ?: IllegalStateException("未配置高德 Key"))
+        }
+
+        override suspend fun planTransit(
+            originLngLat: String,
+            destinationLngLat: String,
+            originName: String,
+            destName: String,
+            cityName: String,
+            cityd: String?
+        ): Result<List<AmapTransitSchemeResult>> {
+            var sdkFailure: Throwable? = null
+            val sdk = amapSdkService
+            if (sdk != null && sdkUsable()) {
+                val result = sdk.planTransit(
+                    originLngLat = originLngLat,
+                    destinationLngLat = destinationLngLat,
+                    originName = originName,
+                    destName = destName,
+                    city = cityName,
+                    customApiKey = _customAmapApiKey.value,
+                    cityd = cityd
+                )
+                currentCoroutineContext().ensureActive()
+                if (result.isSuccess) return result
+                sdkFailure = result.exceptionOrNull()
+            }
+            val webKey = effectiveWebServiceKey()
+            if (webKey.isNotEmpty()) {
+                return amapApiClient.planTransit(
+                    originLngLat = originLngLat,
+                    destinationLngLat = destinationLngLat,
+                    originName = originName,
+                    destName = destName,
+                    city = cityName,
+                    apiKey = webKey,
+                    cityd = cityd
+                )
+            }
+            return Result.failure(sdkFailure ?: IllegalStateException("未配置高德 Key"))
         }
     }
 
@@ -431,90 +632,49 @@ class FavoritesGroupViewModel(
     }
 
     /**
-     * 执行公交路线规划（高德云端规划 + 实时公交站点直达/换乘双引擎）
+     * 执行公交路线规划（高德云端规划 + 实时公交站点直达/换乘双引擎）。
+     *
+     * - 新的规划会取消上一个仍在进行的规划；
+     * - 结果按「城市 + 6 位小数坐标 + 15 分钟时间桶」缓存（LRU 16 条）；
+     * - 高德 SDK 成功但无方案时不再用 Web 重复算路，只有 SDK 调用失败才回落 Web；
+     * - 起点为「我的位置」但定位不可用时直接报错，不拿这四个字去搜 POI。
      */
     fun planTransitRoute(
         origin: AmapTipItem,
         destination: AmapTipItem,
         onComplete: ((Boolean) -> Unit)? = null
     ) {
-        viewModelScope.launch {
+        planJob?.cancel()
+        planJob = viewModelScope.launch {
             _isPlanningRoute.value = true
             _planErrorMessage.value = null
             _plannedSchemes.value = emptyList()
 
             val city = transitRepository.selectedCity.value
-            val sdkKey = _customAmapApiKey.value
-            val webKey = _customAmapWebApiKey.value
-            val hasAmapSdk = AmapSdkManager.isAndroidKeyConfigured(sdkKey)
-            val hasAmapWeb = AmapSdkManager.isWebServiceKeyConfigured(webKey)
-            val hasAmap = hasAmapSdk || hasAmapWeb
+            val hasAmap = amapGateway.isConfigured()
 
             var effectiveOrigin = origin
             var effectiveDest = destination
 
-            // 1. 解析“我的位置”
-            if (effectiveOrigin.name == "我的位置" || effectiveOrigin.name.isBlank()) {
-                val loc = transitRepository.userLocation.value
-                var resolvedLat: Double? = loc?.first
-                var resolvedLng: Double? = loc?.second
-
-                if (resolvedLat == null || resolvedLng == null) {
-                    val locManager = runCatching {
-                        TrackrApp.instance.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
-                    }.getOrNull()
-                    val lastLoc = locManager?.let { lm ->
-                        runCatching {
-                            lm.getLastKnownLocation(android.location.LocationManager.GPS_PROVIDER)
-                                ?: lm.getLastKnownLocation(android.location.LocationManager.NETWORK_PROVIDER)
-                        }.getOrNull()
-                    }
-                    if (lastLoc != null) {
-                        resolvedLat = lastLoc.latitude
-                        resolvedLng = lastLoc.longitude
-                    }
+            // 1. 解析"我的位置"：定位不到就直接提示，不再拿"我的位置"四个字去搜 POI
+            if (isMyLocationTip(effectiveOrigin)) {
+                val resolved = resolveMyLocationTip(city)
+                if (resolved == null) {
+                    _planErrorMessage.value = "定位不可用，无法以【$MY_LOCATION_NAME】作为出发地。请开启定位后重试，或手动输入出发地。"
+                    _isPlanningRoute.value = false
+                    onComplete?.invoke(false)
+                    return@launch
                 }
-
-                if (resolvedLat != null && resolvedLng != null) {
-                    val nearby = runCatching {
-                        transitRepository.getNearbyStops(city, resolvedLat, resolvedLng, 1).getOrNull()?.firstOrNull()
-                    }.getOrNull()
-                    // 系统定位是 WGS-84，高德算路要求 GCJ-02，必须显式转换后再拼参数
-                    val (originGcjLat, originGcjLng) = CoordTransform.wgs84ToGcj02(resolvedLat, resolvedLng)
-                    effectiveOrigin = if (nearby != null) {
-                        AmapTipItem(
-                            name = "我的位置(${nearby.name})",
-                            district = city.cityName,
-                            address = nearby.name,
-                            location = "$originGcjLng,$originGcjLat"
-                        )
-                    } else {
-                        AmapTipItem(
-                            name = "我的位置",
-                            district = city.cityName,
-                            address = "当前定位",
-                            location = "$originGcjLng,$originGcjLat"
-                        )
-                    }
-                }
+                effectiveOrigin = resolved
             }
 
-            // 2. 补全缺少经纬度的起终点坐标
+            // 2. 补全缺少经纬度的起终点坐标（高德 SDK 成功但无结果时同样不再走 Web）
             suspend fun resolveLocation(tip: AmapTipItem): AmapTipItem {
                 if (tip.location.contains(",")) return tip
                 if (hasAmap) {
-                    if (hasAmapSdk) {
-                        val sdkFound = amapSdkService?.searchPoiTips(tip.name, city.cityName, sdkKey)
-                            ?.getOrNull()?.firstOrNull { it.location.contains(",") }
-                        if (sdkFound != null) return sdkFound
-                    }
-
-                    if (hasAmapWeb) {
-                        val webFound = runCatching {
-                            amapApiClient.searchPoiTips(tip.name, city.cityName, webKey)
-                        }.getOrNull()?.getOrNull()?.firstOrNull { it.location.contains(",") }
-                        if (webFound != null) return webFound
-                    }
+                    val amapFound = amapGateway.searchTips(tip.name, city.cityName, currentGcjLngLat())
+                        .getOrNull()?.firstOrNull { it.location.contains(",") }
+                    if (amapFound != null) return amapFound
                 }
                 val localFound = searchLocalStopTips(tip.name, city).firstOrNull { it.location.contains(",") }
                 if (localFound != null) return localFound
@@ -524,47 +684,43 @@ class FavoritesGroupViewModel(
             effectiveOrigin = resolveLocation(effectiveOrigin)
             effectiveDest = resolveLocation(effectiveDest)
 
+            val cacheKey = buildPlanCacheKey(city, effectiveOrigin.location, effectiveDest.location)
+            val cached = cacheKey?.let { planCache.get(it) }
+
             var schemes: List<AmapTransitSchemeResult> = emptyList()
 
-            if (effectiveOrigin.location.contains(",") && effectiveDest.location.contains(",")) {
-                if (hasAmapSdk) {
-                    val sdkResult = amapSdkService?.planTransit(
+            if (cached != null) {
+                schemes = cached
+            } else {
+                if (hasAmap && effectiveOrigin.location.contains(",") && effectiveDest.location.contains(",")) {
+                    schemes = amapGateway.planTransit(
                         originLngLat = effectiveOrigin.location,
                         destinationLngLat = effectiveDest.location,
                         originName = effectiveOrigin.name,
                         destName = effectiveDest.name,
-                        city = city.cityName,
-                        customApiKey = sdkKey
-                    )
-                    schemes = sdkResult?.getOrNull().orEmpty()
+                        cityName = city.cityName,
+                        cityd = resolveCrossCityCode(effectiveOrigin, effectiveDest, city)
+                    ).getOrNull().orEmpty()
+
+                    if (schemes.isNotEmpty()) {
+                        schemes = alignAmapSchemesWithRealtimeSource(schemes, city)
+                    }
                 }
 
-                if (schemes.isEmpty() && hasAmapWeb) {
-                    val webResult = amapApiClient.planTransit(
-                        originLngLat = effectiveOrigin.location,
-                        destinationLngLat = effectiveDest.location,
-                        originName = effectiveOrigin.name,
-                        destName = effectiveDest.name,
-                        city = city.cityName,
-                        apiKey = webKey
-                    )
-                    schemes = webResult.getOrNull().orEmpty()
+                if (schemes.isEmpty()) {
+                    schemes = planLocalTransitRoute(effectiveOrigin, effectiveDest, city)
                 }
 
-                if (schemes.isNotEmpty()) {
-                    schemes = alignAmapSchemesWithRealtimeSource(schemes, city)
+                // 将用户选择的起终点 POI 坐标（GCJ-02 "lng,lat"）注入方案，供地图起终点 marker 使用
+                val originPoint = parseLngLatToGeoPoint(effectiveOrigin.location)
+                val destPoint = parseLngLatToGeoPoint(effectiveDest.location)
+                if (originPoint != null || destPoint != null) {
+                    schemes = schemes.map { it.copy(originPoint = originPoint, destinationPoint = destPoint) }
                 }
-            }
 
-            if (schemes.isEmpty()) {
-                schemes = planLocalTransitRoute(effectiveOrigin, effectiveDest, city)
-            }
-
-            // 将用户选择的起终点 POI 坐标（GCJ-02 "lng,lat"）注入方案，供地图起终点 marker 使用
-            val originPoint = parseLngLatToGeoPoint(effectiveOrigin.location)
-            val destPoint = parseLngLatToGeoPoint(effectiveDest.location)
-            if (originPoint != null || destPoint != null) {
-                schemes = schemes.map { it.copy(originPoint = originPoint, destinationPoint = destPoint) }
+                if (schemes.isNotEmpty() && cacheKey != null) {
+                    planCache.put(cacheKey, schemes)
+                }
             }
 
             if (schemes.isNotEmpty()) {
@@ -583,6 +739,98 @@ class FavoritesGroupViewModel(
         }
     }
 
+    private fun isMyLocationTip(tip: AmapTipItem): Boolean =
+        tip.name == MY_LOCATION_NAME || tip.name.isBlank()
+
+    /**
+     * 把"我的位置"解析为带 GCJ-02 坐标的起点；定位不可用时返回 null。
+     * 优先用首页定位链路写入的坐标，其次是系统 lastKnown（需有权限且不超过 10 分钟）。
+     */
+    private suspend fun resolveMyLocationTip(city: TransitCity): AmapTipItem? {
+        val (lat, lng) = transitRepository.userLocation.value ?: lastKnownWgsLocation() ?: return null
+        val nearby = runCatching {
+            transitRepository.getNearbyStops(city, lat, lng, 1).getOrNull()?.firstOrNull()
+        }.getOrNull()
+        // 系统定位是 WGS-84，高德算路要求 GCJ-02，必须显式转换后再拼参数
+        val (originGcjLat, originGcjLng) = CoordTransform.wgs84ToGcj02(lat, lng)
+        return if (nearby != null) {
+            AmapTipItem(
+                name = "$MY_LOCATION_NAME(${nearby.name})",
+                district = city.cityName,
+                address = nearby.name,
+                location = "$originGcjLng,$originGcjLat"
+            )
+        } else {
+            AmapTipItem(
+                name = MY_LOCATION_NAME,
+                district = city.cityName,
+                address = "当前定位",
+                location = "$originGcjLng,$originGcjLat"
+            )
+        }
+    }
+
+    /**
+     * 系统 lastKnown 定位兜底（WGS-84）：先检查定位权限，只接受 10 分钟内的定位，多个来源取精度最高的。
+     */
+    @SuppressLint("MissingPermission")
+    private fun lastKnownWgsLocation(): Pair<Double, Double>? {
+        val app = runCatching { TrackrApp.instance }.getOrNull() ?: return null
+        val granted = ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_COARSE_LOCATION) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!granted) return null
+        val lm = app.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+        val best = listOf(
+            LocationManager.GPS_PROVIDER,
+            LocationManager.NETWORK_PROVIDER,
+            LocationManager.PASSIVE_PROVIDER
+        ).mapNotNull { provider ->
+            try {
+                lm.getLastKnownLocation(provider)
+            } catch (_: SecurityException) {
+                null
+            } catch (_: Exception) {
+                null
+            }
+        }.filter { locationAgeMillis(it) in 0..MAX_LAST_KNOWN_AGE_MS }
+            .minByOrNull { if (it.hasAccuracy()) it.accuracy else Float.MAX_VALUE }
+        return best?.let { it.latitude to it.longitude }
+    }
+
+    /** 定位年龄：优先用单调时钟 elapsedRealtimeNanos（不受改系统时间影响），缺失时回落墙钟 */
+    private fun locationAgeMillis(loc: Location): Long =
+        if (loc.elapsedRealtimeNanos > 0L) {
+            (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000L
+        } else {
+            System.currentTimeMillis() - loc.time
+        }
+
+    /** 算路缓存键：城市 + 6 位小数坐标 + 15 分钟时间桶；坐标非法时不缓存 */
+    private fun buildPlanCacheKey(city: TransitCity, originLngLat: String, destLngLat: String): String? {
+        val o = AmapTransitApiClient.formatLngLat(originLngLat) ?: return null
+        val d = AmapTransitApiClient.formatLngLat(destLngLat) ?: return null
+        val bucket = wallClockMillis() / PLAN_CACHE_BUCKET_MS
+        return "${city.cityId}|${city.cityName}|$o|$d|$bucket"
+    }
+
+    /**
+     * 起终点跨城时返回终点城市 adcode（传给高德 cityd），同城或拿不到终点城市时返回 null。
+     * 起点有 adcode 时按地级市 adcode 比较；没有时（如"我的位置"）看终点行政区文本是否包含当前城市名。
+     */
+    private fun resolveCrossCityCode(origin: AmapTipItem, dest: AmapTipItem, city: TransitCity): String? {
+        val destCityCode = AmapTransitApiClient.cityAdcodeOf(dest.adcode) ?: return null
+        val originCityCode = AmapTransitApiClient.cityAdcodeOf(origin.adcode)
+        val isCrossCity = if (originCityCode != null) {
+            originCityCode != destCityCode
+        } else {
+            val shortName = city.cityName.trim().removeSuffix("市")
+            dest.district.isNotBlank() && shortName.isNotBlank() && !dest.district.contains(shortName)
+        }
+        return if (isCrossCity) destCityCode else null
+    }
+
     /** 解析高德 "lng,lat" 字符串为 GeoPoint（GCJ-02） */
     private fun parseLngLatToGeoPoint(lngLat: String): GeoPoint? {
         val parts = lngLat.split(",")
@@ -592,77 +840,135 @@ class FavoritesGroupViewModel(
         return GeoPoint(lat = lat, lng = lng)
     }
 
+    /** 方案线路与实时源的匹配结果：[fromStop]/[toStop] 为空表示只对齐了线路，没对齐站序 */
+    private data class SchemeLineMatch(
+        val direction: BusLineDirection,
+        val fromStop: BusStop?,
+        val toStop: BusStop?
+    )
+
+    /**
+     * 把高德方案里的候选线路对齐到实时公交源（真实 lineId / 方向 / 站序）。
+     * 只处理界面可见的前 [MAX_VISIBLE_SCHEMES] 个方案；同一「线路名 + 上车站 + 下车站」只查一次；
+     * 并发不超过 [ALIGN_CONCURRENCY]。
+     */
     private suspend fun alignAmapSchemesWithRealtimeSource(
         schemes: List<AmapTransitSchemeResult>,
         city: TransitCity
     ): List<AmapTransitSchemeResult> {
         val coord = coordinator ?: return schemes
+        val visible = schemes.take(MAX_VISIBLE_SCHEMES)
+        val rest = schemes.drop(MAX_VISIBLE_SCHEMES)
         return withContext(ioDispatcher) {
-            schemes.map { scheme ->
+            val semaphore = Semaphore(ALIGN_CONCURRENCY)
+            val memo = LinkedHashMap<String, Deferred<SchemeLineMatch?>>()
+
+            fun memoKey(lineName: String, fromCore: String, toCore: String) = "$lineName|$fromCore|$toCore"
+
+            // 1. 去重后并发查询
+            for (scheme in visible) {
+                for (leg in scheme.group.legs) {
+                    val fromCore = RouteProjectionMath.coreStopName(leg.fromStopName)
+                    val toCore = RouteProjectionMath.coreStopName(leg.toStopName)
+                    for (candidate in leg.candidateLines) {
+                        val key = memoKey(candidate.lineName, fromCore, toCore)
+                        if (!memo.containsKey(key)) {
+                            val lineName = candidate.lineName
+                            memo[key] = async {
+                                semaphore.withPermit { matchSchemeLine(coord, city, lineName, fromCore, toCore) }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 2. 套用匹配结果
+            val aligned = visible.map { scheme ->
                 val newLegs = scheme.group.legs.map { leg ->
                     val fromCore = RouteProjectionMath.coreStopName(leg.fromStopName)
                     val toCore = RouteProjectionMath.coreStopName(leg.toStopName)
-
                     val updatedCandidates = leg.candidateLines.map { candidate ->
-                        runCatching {
-                            val searchRes = coord.search(city, candidate.lineName, EngineMode.CHELAILE)
-                            val matchedDirs = searchRes.lines.flatMap { it.directions }.filter { dir ->
-                                dir.name.contains(candidate.lineName) || candidate.lineName.contains(dir.name)
-                            }
-                            var bestLine: CandidateLine? = null
-                            for (dir in matchedDirs) {
-                                val detail = runCatching {
-                                    coord.getLineDetail(
-                                        city,
-                                        LineDetailRequest(
-                                            lineId = dir.lineId,
-                                            source = dir.source,
-                                            lineNameHint = dir.name,
-                                            directionHint = dir.direction
-                                        )
-                                    )
-                                }.getOrNull()
-                                if (detail != null) {
-                                    val fromStop = detail.stops.find {
-                                        it.name.contains(fromCore) || fromCore.contains(RouteProjectionMath.coreStopName(it.name))
-                                    }
-                                    val toStop = detail.stops.find {
-                                        it.name.contains(toCore) || toCore.contains(RouteProjectionMath.coreStopName(it.name))
-                                    }
-                                    if (fromStop != null && toStop != null && fromStop.order < toStop.order) {
-                                        bestLine = candidate.copy(
-                                            cityId = city.cityId,
-                                            cityName = city.cityName,
-                                            lineId = dir.lineId,
-                                            direction = dir.direction,
-                                            source = dir.source,
-                                            fromStopOrder = fromStop.order,
-                                            toStopOrder = toStop.order,
-                                            startStopName = fromStop.name,
-                                            endStopName = toStop.name,
-                                            mygolbsCityCode = city.mygolbsCityCode
-                                        )
-                                        break
-                                    }
-                                }
-                                if (bestLine == null) {
-                                    bestLine = candidate.copy(
-                                        cityId = city.cityId,
-                                        cityName = city.cityName,
-                                        lineId = dir.lineId,
-                                        direction = dir.direction,
-                                        source = dir.source,
-                                        mygolbsCityCode = city.mygolbsCityCode
-                                    )
-                                }
-                            }
-                            bestLine ?: candidate
-                        }.getOrDefault(candidate)
+                        val match = memo[memoKey(candidate.lineName, fromCore, toCore)]?.await()
+                        if (match != null) applySchemeLineMatch(candidate, match, city) else candidate
                     }
                     leg.copy(candidateLines = updatedCandidates)
                 }
                 scheme.copy(group = scheme.group.copy(legs = newLegs))
             }
+            aligned + rest
+        }
+    }
+
+    /** 在实时源里查找线路：站序能对上的方向优先，否则退而取第一个同名方向 */
+    private suspend fun matchSchemeLine(
+        coord: TransitProviderCoordinator,
+        city: TransitCity,
+        lineName: String,
+        fromCore: String,
+        toCore: String
+    ): SchemeLineMatch? = runCatching {
+        val searchRes = coord.search(city, lineName, EngineMode.CHELAILE)
+        val matchedDirs = searchRes.lines.flatMap { it.directions }.filter { dir ->
+            dir.name.contains(lineName) || lineName.contains(dir.name)
+        }
+        var fallback: SchemeLineMatch? = null
+        for (dir in matchedDirs) {
+            // 线路详情只走 transitRepository 一条路径，失败不再对同一上游重复请求
+            val detail = transitRepository.getLineDetail(
+                city = city,
+                lineId = dir.lineId,
+                source = dir.source,
+                lineNameHint = dir.name,
+                directionHint = dir.direction
+            ).getOrNull()
+            if (detail != null) {
+                val fromStop = detail.stops.find {
+                    it.name.contains(fromCore) || fromCore.contains(RouteProjectionMath.coreStopName(it.name))
+                }
+                val toStop = detail.stops.find {
+                    it.name.contains(toCore) || toCore.contains(RouteProjectionMath.coreStopName(it.name))
+                }
+                if (fromStop != null && toStop != null && fromStop.order < toStop.order) {
+                    return@runCatching SchemeLineMatch(dir, fromStop, toStop)
+                }
+            }
+            if (fallback == null) {
+                fallback = SchemeLineMatch(dir, null, null)
+            }
+        }
+        fallback
+    }.getOrNull()
+
+    private fun applySchemeLineMatch(
+        candidate: CandidateLine,
+        match: SchemeLineMatch,
+        city: TransitCity
+    ): CandidateLine {
+        val dir = match.direction
+        val fromStop = match.fromStop
+        val toStop = match.toStop
+        return if (fromStop != null && toStop != null) {
+            candidate.copy(
+                cityId = city.cityId,
+                cityName = city.cityName,
+                lineId = dir.lineId,
+                direction = dir.direction,
+                source = dir.source,
+                fromStopOrder = fromStop.order,
+                toStopOrder = toStop.order,
+                startStopName = fromStop.name,
+                endStopName = toStop.name,
+                mygolbsCityCode = city.mygolbsCityCode
+            )
+        } else {
+            candidate.copy(
+                cityId = city.cityId,
+                cityName = city.cityName,
+                lineId = dir.lineId,
+                direction = dir.direction,
+                source = dir.source,
+                mygolbsCityCode = city.mygolbsCityCode
+            )
         }
     }
 
@@ -923,6 +1229,10 @@ class FavoritesGroupViewModel(
     }
 
     fun clearPlanning() {
+        planJob?.cancel()
+        _isPlanningRoute.value = false
+        originTipsQuery.value = ""
+        destTipsQuery.value = ""
         _plannedSchemes.value = emptyList()
         _amapOriginTips.value = emptyList()
         _amapDestTips.value = emptyList()
@@ -1090,11 +1400,13 @@ class FavoritesGroupViewModel(
         val fromCore = RouteProjectionMath.coreStopName(fromStopName)
         val toCore = RouteProjectionMath.coreStopName(toStopName)
 
-        val searchRes = runCatching {
-            coordinator?.search(city, lineName, EngineMode.CHELAILE)
-        }.getOrNull() ?: runCatching {
-            transitRepository.search(city, lineName).getOrNull()
-        }.getOrNull()
+        // 只走一条路径：有 coordinator 时直接按车来了搜索（不写搜索历史），否则走仓库；失败不再对同一上游重复请求
+        val coord = coordinator
+        val searchRes = if (coord != null) {
+            runCatching { coord.search(city, lineName, EngineMode.CHELAILE) }.getOrNull()
+        } else {
+            runCatching { transitRepository.search(city, lineName).getOrNull() }.getOrNull()
+        }
 
         val matchedDirs = searchRes?.lines?.flatMap { it.directions }?.filter { dir ->
             dir.name.contains(lineName) || lineName.contains(dir.name)
@@ -1107,25 +1419,7 @@ class FavoritesGroupViewModel(
         }
 
         for (dir in sortedDirs) {
-            val detail = runCatching {
-                coordinator?.getLineDetail(
-                    city,
-                    LineDetailRequest(
-                        lineId = dir.lineId,
-                        source = dir.source,
-                        lineNameHint = dir.name,
-                        directionHint = dir.direction
-                    )
-                )
-            }.getOrNull() ?: runCatching {
-                transitRepository.getLineDetail(
-                    city = city,
-                    lineId = dir.lineId,
-                    source = dir.source,
-                    lineNameHint = dir.name,
-                    directionHint = dir.direction
-                ).getOrNull()
-            }.getOrNull()
+            val detail = fetchLineDetailOnce(city, dir)
 
             if (detail != null) {
                 val fromStop = detail.stops.find {
@@ -1152,25 +1446,7 @@ class FavoritesGroupViewModel(
 
                 val rev = detail.reverseDirection
                 if (rev != null) {
-                    val revDetail = runCatching {
-                        coordinator?.getLineDetail(
-                            city,
-                            LineDetailRequest(
-                                lineId = rev.lineId,
-                                source = rev.source,
-                                lineNameHint = rev.name,
-                                directionHint = rev.direction
-                            )
-                        )
-                    }.getOrNull() ?: runCatching {
-                        transitRepository.getLineDetail(
-                            city = city,
-                            lineId = rev.lineId,
-                            source = rev.source,
-                            lineNameHint = rev.name,
-                            directionHint = rev.direction
-                        ).getOrNull()
-                    }.getOrNull()
+                    val revDetail = fetchLineDetailOnce(city, rev)
 
                     if (revDetail != null) {
                         val revFromStop = revDetail.stops.find {
@@ -1203,6 +1479,26 @@ class FavoritesGroupViewModel(
         return null
     }
 
+    /** 线路详情统一只走 transitRepository（仓库层负责去重 / 缓存），失败不再换通道重复请求同一上游 */
+    private suspend fun fetchLineDetailOnce(city: TransitCity, dir: BusLineDirection): BusLineDetail? =
+        runCatching {
+            transitRepository.getLineDetail(
+                city = city,
+                lineId = dir.lineId,
+                source = dir.source,
+                lineNameHint = dir.name,
+                directionHint = dir.direction
+            ).getOrNull()
+        }.getOrNull()
+
+    /** 候选线路所属城市；未填或为历史占位 ID 时回落到 [defaultCity] */
+    private fun resolveCandidateCity(candidate: CandidateLine, defaultCity: TransitCity): TransitCity =
+        if (candidate.cityId.isNotBlank() && candidate.cityId != LEGACY_PLACEHOLDER_CITY_ID) {
+            TransitCity(candidate.cityId, candidate.cityName)
+        } else {
+            defaultCity
+        }
+
     /**
      * 将路线组中各段候选线路与实时公交数据源进行站序和真实 lineId 对齐
      */
@@ -1212,9 +1508,7 @@ class FavoritesGroupViewModel(
             val newCandidates = leg.candidateLines.map { candidate ->
                 val isSynthetic = candidate.lineId.startsWith("line_") || candidate.fromStopOrder >= candidate.toStopOrder
                 if (isSynthetic) {
-                    val lineCity = if (candidate.cityId.isNotBlank() && candidate.cityId != "033") {
-                        TransitCity(candidate.cityId, candidate.cityName)
-                    } else defaultCity
+                    val lineCity = resolveCandidateCity(candidate, defaultCity)
                     val matched = findRealtimeLineMatch(
                         city = lineCity,
                         lineName = candidate.lineName,
@@ -1250,9 +1544,7 @@ class FavoritesGroupViewModel(
             }
             val reversedCandidates = originalLeg.candidateLines.map { candidate ->
                 val flippedDir = if (candidate.direction == 0) 1 else 0
-                val lineCity = if (candidate.cityId.isNotBlank() && candidate.cityId != "033") {
-                    TransitCity(candidate.cityId, candidate.cityName)
-                } else defaultCity
+                val lineCity = resolveCandidateCity(candidate, defaultCity)
                 val matched = findRealtimeLineMatch(
                     city = lineCity,
                     lineName = candidate.lineName,
@@ -1313,26 +1605,49 @@ class FavoritesGroupViewModel(
     }
 
     /**
-     * 刷新路线组中所有候选线路在途车辆实时状态并聚合计算最先到站线路
+     * 刷新路线组中所有候选线路在途车辆实时状态并聚合计算最先到站线路。
+     * 新一轮刷新会取消上一轮尚未完成的刷新，避免旧结果覆盖新结果。
      */
-    fun refreshRealtimeEta(groupList: List<TransitGroup> = groups.value): Job =
-        viewModelScope.launch(ioDispatcher) {
+    fun refreshRealtimeEta(groupList: List<TransitGroup> = groups.value): Job {
+        etaRefreshJob?.cancel()
+        val job = viewModelScope.launch(ioDispatcher) {
+            refreshRealtimeEtaInternal(groupList)
+        }
+        etaRefreshJob = job
+        return job
+    }
+
+    /** 合成候选线路的对齐（带内存缓存：命中 24 小时，未命中 10 分钟内不重查） */
+    private suspend fun alignSyntheticCandidateCached(leg: TransitLeg, candidate: CandidateLine): CandidateLine? {
+        val city = resolveCandidateCity(candidate, transitRepository.selectedCity.value)
+        val cacheKey = listOf(
+            city.cityId, city.cityName, candidate.lineName, leg.fromStopName, leg.toStopName, candidate.direction
+        ).joinToString("|")
+        val now = wallClockMillis()
+        syntheticAlignmentCache[cacheKey]?.let { entry ->
+            val ttl = if (entry.match != null) ALIGN_HIT_TTL_MS else ALIGN_MISS_TTL_MS
+            if (now - entry.savedAtMs in 0 until ttl) return entry.match
+        }
+        val matched = findRealtimeLineMatch(
+            city = city,
+            lineName = candidate.lineName,
+            fromStopName = leg.fromStopName,
+            toStopName = leg.toStopName,
+            preferredDirection = candidate.direction
+        )
+        currentCoroutineContext().ensureActive()
+        syntheticAlignmentCache[cacheKey] = AlignmentCacheEntry(matched, now)
+        return matched
+    }
+
+    private suspend fun refreshRealtimeEtaInternal(groupList: List<TransitGroup>): Unit = coroutineScope {
             val candidateAlignmentMap = mutableMapOf<String, CandidateLine>()
             for (group in groupList) {
                 for (leg in group.legs) {
                     for (candidate in leg.candidateLines) {
                         val key = "${group.id}_${leg.legIndex}_${candidate.lineId}"
                         if (candidate.lineId.startsWith("line_") || candidate.fromStopOrder >= candidate.toStopOrder) {
-                            val city = if (candidate.cityId.isNotBlank() && candidate.cityId != "033") {
-                                TransitCity(candidate.cityId, candidate.cityName)
-                            } else transitRepository.selectedCity.value
-                            val matched = findRealtimeLineMatch(
-                                city = city,
-                                lineName = candidate.lineName,
-                                fromStopName = leg.fromStopName,
-                                toStopName = leg.toStopName,
-                                preferredDirection = candidate.direction
-                            )
+                            val matched = alignSyntheticCandidateCached(leg, candidate)
                             if (matched != null) {
                                 candidateAlignmentMap[key] = matched
                             }
@@ -1350,7 +1665,7 @@ class FavoritesGroupViewModel(
                     }
                 }
 
-            if (allCandidates.isEmpty()) return@launch
+            if (allCandidates.isEmpty()) return@coroutineScope
 
             data class QueryKey(
                 val cityId: String,
@@ -1378,18 +1693,8 @@ class FavoritesGroupViewModel(
             val detailResults = uniqueQueries.map { query ->
                 async {
                     val city = TransitCity(cityId = query.cityId, cityName = query.cityName)
+                    // 只走 transitRepository 一条路径，失败不再对同一上游重复请求
                     val detail: BusLineDetail? = runCatching {
-                        coordinator?.getLineDetail(
-                            city = city,
-                            request = LineDetailRequest(
-                                lineId = query.lineId,
-                                targetOrder = query.targetOrder,
-                                source = query.source,
-                                lineNameHint = query.lineName,
-                                directionHint = query.direction
-                            )
-                        )
-                    }.getOrNull() ?: runCatching {
                         transitRepository.getLineDetail(
                             city = city,
                             lineId = query.lineId,

@@ -2,6 +2,8 @@ package com.trackr.ui.screens.favoritesgroup
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.trackr.data.remote.amap.AmapTipItem
+import com.trackr.data.remote.amap.AmapTransitSchemeResult
 import com.trackr.data.repository.FakeTransitRepository
 import com.trackr.data.repository.RouteGroupRepository
 import com.trackr.domain.model.BusLineDetail
@@ -16,6 +18,7 @@ import com.trackr.domain.model.TransitLeg
 import com.trackr.service.TransferAutoSwitchManager
 import com.trackr.util.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -67,6 +70,240 @@ class FavoritesGroupViewModelTest {
             ioDispatcher = mainDispatcherRule.testDispatcher,
             enableAutoRefresh = false
         )
+    }
+
+    /** 高德通道替身：记录请求，不发真实 HTTP / SDK 调用 */
+    private class FakeAmapGateway : AmapRouteGateway {
+        data class PlanCall(val originLngLat: String, val destLngLat: String, val destName: String, val cityd: String?)
+
+        var configured = true
+        val tipQueries = mutableListOf<String>()
+        var tipsProvider: (String) -> List<AmapTipItem> = { kw ->
+            listOf(AmapTipItem(name = "${kw}站", location = "120.100000,30.200000"))
+        }
+        val planCalls = mutableListOf<PlanCall>()
+        var planDelayMs = 0L
+        var planResult: (PlanCall) -> List<AmapTransitSchemeResult> = { emptyList() }
+
+        override fun isConfigured(): Boolean = configured
+
+        override suspend fun searchTips(
+            keyword: String,
+            cityName: String,
+            location: String?
+        ): Result<List<AmapTipItem>> {
+            tipQueries += keyword
+            return Result.success(tipsProvider(keyword))
+        }
+
+        override suspend fun planTransit(
+            originLngLat: String,
+            destinationLngLat: String,
+            originName: String,
+            destName: String,
+            cityName: String,
+            cityd: String?
+        ): Result<List<AmapTransitSchemeResult>> {
+            val call = PlanCall(originLngLat, destinationLngLat, destName, cityd)
+            planCalls += call
+            if (planDelayMs > 0) delay(planDelayMs)
+            return Result.success(planResult(call))
+        }
+    }
+
+    private fun createViewModelWithGateway(gateway: AmapRouteGateway): FavoritesGroupViewModel {
+        return FavoritesGroupViewModel(
+            groupRepository = groupRepository,
+            transitRepository = fakeTransitRepository,
+            coordinator = null,
+            amapSdkService = null,
+            ioDispatcher = mainDispatcherRule.testDispatcher,
+            enableAutoRefresh = false,
+            enableAutoMigration = false,
+            amapGatewayOverride = gateway,
+            wallClockMillis = { 1_000_000_000L }
+        )
+    }
+
+    private fun sampleScheme(title: String): AmapTransitSchemeResult = AmapTransitSchemeResult(
+        title = title,
+        durationMinutes = 20,
+        walkingMeters = 100,
+        costYuan = "2.0",
+        transferCount = 0,
+        group = TransitGroup(
+            id = "scheme_$title",
+            name = title,
+            legs = listOf(
+                TransitLeg(
+                    legIndex = 0,
+                    fromStopName = "甲站",
+                    toStopName = "乙站",
+                    candidateLines = listOf(
+                        CandidateLine(cityId = "", lineId = "amap_1", lineName = "1路", fromStopOrder = 1, toStopOrder = 4)
+                    )
+                )
+            )
+        )
+    )
+
+    @Test
+    fun searchTips_debouncesAndOnlyRequestsLatestKeyword() = runTest {
+        val gateway = FakeAmapGateway()
+        val viewModel = createViewModelWithGateway(gateway)
+        testScheduler.runCurrent()
+
+        viewModel.searchDestTips("人")
+        testScheduler.advanceTimeBy(100)
+        viewModel.searchDestTips("人民")
+        testScheduler.advanceTimeBy(100)
+        viewModel.searchDestTips("人民广场")
+        testScheduler.advanceTimeBy(FavoritesGroupViewModel.TIPS_DEBOUNCE_MS - 1)
+        testScheduler.runCurrent()
+
+        // 防抖窗口内不发请求
+        assertTrue(gateway.tipQueries.isEmpty())
+
+        testScheduler.advanceTimeBy(2)
+        testScheduler.runCurrent()
+
+        // 连续输入只为最后一个关键字请求一次
+        assertEquals(listOf("人民广场"), gateway.tipQueries)
+        assertEquals("人民广场站", viewModel.amapDestTips.value.firstOrNull()?.name)
+    }
+
+    @Test
+    fun searchTips_ignoresTooShortKeyword_andClearsTips() = runTest {
+        val gateway = FakeAmapGateway()
+        val viewModel = createViewModelWithGateway(gateway)
+        testScheduler.runCurrent()
+
+        viewModel.searchOriginTips("a")
+        testScheduler.advanceTimeBy(1_000)
+        testScheduler.runCurrent()
+
+        assertTrue(gateway.tipQueries.isEmpty())
+        assertTrue(viewModel.amapOriginTips.value.isEmpty())
+    }
+
+    @Test
+    fun searchTips_sameCityAndKeyword_hitsLruCache() = runTest {
+        val gateway = FakeAmapGateway()
+        val viewModel = createViewModelWithGateway(gateway)
+        testScheduler.runCurrent()
+
+        viewModel.searchOriginTips("西湖")
+        testScheduler.advanceTimeBy(400)
+        testScheduler.runCurrent()
+        viewModel.searchOriginTips("西湖文化")
+        testScheduler.advanceTimeBy(400)
+        testScheduler.runCurrent()
+        viewModel.searchOriginTips("西湖")
+        testScheduler.advanceTimeBy(400)
+        testScheduler.runCurrent()
+
+        assertEquals(listOf("西湖", "西湖文化"), gateway.tipQueries)
+        assertEquals("西湖站", viewModel.amapOriginTips.value.firstOrNull()?.name)
+    }
+
+    @Test
+    fun planTransitRoute_cancelsPreviousPlan_andCachesSameQuery() = runTest {
+        val gateway = FakeAmapGateway().apply {
+            planResult = { call -> listOf(sampleScheme(call.destName)) }
+            planDelayMs = 1_000
+        }
+        val viewModel = createViewModelWithGateway(gateway)
+        testScheduler.runCurrent()
+
+        val origin = AmapTipItem(name = "起点", location = "120.1234567,30.1234567")
+        val destB = AmapTipItem(name = "B", location = "120.2,30.2")
+        val destC = AmapTipItem(name = "C", location = "120.3,30.3")
+
+        viewModel.planTransitRoute(origin, destB)
+        testScheduler.advanceTimeBy(100)
+        // 新的规划取消上一次，旧结果不会覆盖新结果
+        viewModel.planTransitRoute(origin, destC)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("C"), viewModel.plannedSchemes.value.map { it.title })
+        assertFalse(viewModel.isPlanningRoute.value)
+
+        // 同城市、同坐标、同一 15 分钟时间桶：命中缓存，不再请求高德
+        val callsBefore = gateway.planCalls.size
+        viewModel.planTransitRoute(origin, destC.copy(location = "120.3000001,30.3000001"))
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(callsBefore, gateway.planCalls.size)
+        assertEquals(listOf("C"), viewModel.plannedSchemes.value.map { it.title })
+        // 坐标按 6 位小数传给高德通道之前保持原样，由客户端负责格式化
+        assertEquals("120.1234567,30.1234567", gateway.planCalls.first().originLngLat)
+    }
+
+    @Test
+    fun planTransitRoute_myLocationUnavailable_reportsErrorWithoutPoiSearch() = runTest {
+        val gateway = FakeAmapGateway()
+        val viewModel = createViewModelWithGateway(gateway)
+        testScheduler.runCurrent()
+
+        var completed: Boolean? = null
+        viewModel.planTransitRoute(
+            origin = AmapTipItem(name = FavoritesGroupViewModel.MY_LOCATION_NAME),
+            destination = AmapTipItem(name = "B", location = "120.2,30.2"),
+            onComplete = { completed = it }
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(false, completed)
+        assertTrue(gateway.tipQueries.isEmpty())
+        assertTrue(gateway.planCalls.isEmpty())
+        assertTrue(viewModel.planErrorMessage.value.orEmpty().contains("定位不可用"))
+        assertFalse(viewModel.isPlanningRoute.value)
+    }
+
+    @Test
+    fun planTransitRoute_passesCitydOnlyWhenCrossCity() = runTest {
+        val gateway = FakeAmapGateway()
+        val viewModel = createViewModelWithGateway(gateway)
+        testScheduler.runCurrent()
+
+        // 杭州 -> 上海：跨城，传终点城市 adcode
+        viewModel.planTransitRoute(
+            AmapTipItem(name = "西湖", location = "120.15,30.25", adcode = "330106"),
+            AmapTipItem(name = "外滩", location = "121.49,31.24", district = "上海市黄浦区", adcode = "310101")
+        )
+        testScheduler.advanceUntilIdle()
+        // 同城：不传 cityd
+        viewModel.planTransitRoute(
+            AmapTipItem(name = "西湖", location = "120.15,30.25", adcode = "330106"),
+            AmapTipItem(name = "武林广场", location = "120.17,30.27", adcode = "330103")
+        )
+        testScheduler.advanceUntilIdle()
+        // 起点无 adcode（如我的位置）：按终点行政区是否包含当前城市名判断
+        viewModel.planTransitRoute(
+            AmapTipItem(name = "某地", location = "120.15,30.25"),
+            AmapTipItem(name = "外滩", location = "121.49,31.24", district = "上海市黄浦区", adcode = "310101")
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf("310100", null, "310100"), gateway.planCalls.map { it.cityd })
+    }
+
+    @Test
+    fun customAmapApiKey_doesNotFallBackToLegacyWebSlot() {
+        val sharedPrefs = context.getSharedPreferences("test_prefs_legacy", Context.MODE_PRIVATE)
+        sharedPrefs.edit().clear().putString("custom_amap_web_key", "legacy_single_key").commit()
+
+        val viewModel = FavoritesGroupViewModel(
+            groupRepository = groupRepository,
+            transitRepository = fakeTransitRepository,
+            amapSdkService = null,
+            prefs = sharedPrefs,
+            enableAutoRefresh = false
+        )
+
+        // Android Key 与 Web Key 严格分槽：Web 槽位里的值不再被当作 Android Key 喂给 SDK
+        assertNull(viewModel.customAmapApiKey.value)
+        assertEquals("legacy_single_key", viewModel.customAmapWebApiKey.value)
     }
 
     @Test
