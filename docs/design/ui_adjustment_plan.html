@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BusOnRoad · UI 调整方案</title>
+<style>
+  :root {
+    --primary: #0061A4; --on-primary: #fff; --primary-c: #D1E4FF; --on-primary-c: #001D36;
+    --secondary-c: #E8DEF8; --leg2: #7C4DFF;
+    --surface: #FDFCFF; --surface-c: #F1F0F4; --surface-ch: #E6E5EA; --on-surface: #1A1C1E; --on-surface-v: #43474E;
+    --outline: #73777F; --outline-v: #C3C7CF;
+    --success: #146C2E; --success-c: #B7F1B9; --warn: #8B5000; --warn-c: #FFDCBE;
+    --error: #BA1A1A; --error-c: #FFDAD6;
+    --bg: #ECEEF2;
+  }
+  body.dark {
+    --primary: #9ECAFF; --on-primary: #003258; --primary-c: #00497D; --on-primary-c: #D1E4FF;
+    --secondary-c: #4A4458; --leg2: #CFBCFF;
+    --surface: #1A1C1E; --surface-c: #222428; --surface-ch: #2C2E33; --on-surface: #E2E2E6; --on-surface-v: #C3C7CF;
+    --outline: #8D9199; --outline-v: #43474E;
+    --success: #9CD67D; --success-c: #0F5223; --warn: #FFB870; --warn-c: #693C00;
+    --error: #FFB4AB; --error-c: #93000A;
+    --bg: #101214;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "PingFang SC", "Noto Sans SC", Roboto, sans-serif; background: var(--bg); color: var(--on-surface); line-height: 1.5; }
+  header { position: sticky; top: 0; z-index: 9; background: var(--surface); border-bottom: 1px solid var(--outline-v); padding: 12px 24px; display: flex; align-items: center; gap: 16px; }
+  header h1 { font-size: 18px; margin: 0; flex: 1; }
+  nav a { color: var(--primary); text-decoration: none; font-size: 14px; margin-left: 14px; }
+  button.toggle { border: 1px solid var(--outline); background: transparent; color: var(--on-surface); border-radius: 18px; padding: 6px 14px; cursor: pointer; }
+  main { max-width: 1180px; margin: 0 auto; padding: 24px; }
+  section { margin-bottom: 48px; }
+  h2 { font-size: 20px; margin: 0 0 4px; }
+  .lead { color: var(--on-surface-v); margin: 0 0 16px; font-size: 14px; }
+  .principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+  .pcard { background: var(--surface); border-radius: 16px; padding: 14px 16px; border: 1px solid var(--outline-v); }
+  .pcard b { display: block; margin-bottom: 4px; }
+  .pcard span { font-size: 13px; color: var(--on-surface-v); }
+  .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start; }
+  @media (max-width: 820px) { .compare { grid-template-columns: 1fr; } }
+  .col-label { font-size: 13px; font-weight: 700; margin-bottom: 8px; display: inline-block; padding: 2px 10px; border-radius: 10px; }
+  .before .col-label { background: var(--error-c); color: var(--error); }
+  .after .col-label { background: var(--success-c); color: var(--success); }
+  .phone { width: 360px; max-width: 100%; background: var(--surface-c); border-radius: 28px; padding: 14px; border: 1px solid var(--outline-v); }
+  .notes { margin-top: 10px; font-size: 13px; padding-left: 18px; color: var(--on-surface-v); }
+  .notes li { margin-bottom: 4px; }
+  .notes .bad { color: var(--error); }
+
+  /* ---------- 通用组件 ---------- */
+  .card { background: var(--surface); border-radius: 20px; padding: 14px; box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .between { justify-content: space-between; }
+  .title { font-weight: 800; font-size: 16px; }
+  .sub { font-size: 12px; color: var(--on-surface-v); }
+  .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 8px; font-size: 12px; font-weight: 700; background: var(--surface-ch); color: var(--on-surface-v); white-space: nowrap; }
+  .chip.line1 { background: var(--primary); color: var(--on-primary); }
+  .chip.line2 { background: var(--leg2); color: #fff; }
+  body.dark .chip.line2 { color: #21005D; }
+  .chip.sel { outline: 2px solid var(--primary); outline-offset: 1px; }
+  .badge { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 6px; }
+  .badge.fast { background: var(--success-c); color: var(--success); }
+  .badge.phase { background: var(--primary-c); color: var(--on-primary-c); }
+  .eta-big { font-size: 26px; font-weight: 900; color: var(--primary); line-height: 1.1; }
+  .eta-big small { font-size: 13px; font-weight: 600; color: var(--on-surface-v); }
+  .eta-ok { color: var(--success); }
+  .ibtn { width: 32px; height: 32px; border-radius: 16px; display: inline-grid; place-items: center; color: var(--on-surface-v); font-size: 15px; }
+  .ibtn48 { width: 48px; height: 48px; border-radius: 24px; display: inline-grid; place-items: center; color: var(--on-surface-v); font-size: 20px; }
+  .pill { border-radius: 20px; padding: 8px 14px; font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; }
+  .pill.tonal { background: var(--primary-c); color: var(--on-primary-c); }
+  .pill.filled { background: var(--primary); color: var(--on-primary); }
+  .pill.outline { border: 1px solid var(--outline); color: var(--primary); }
+  .pill.err { background: var(--error-c); color: var(--error); }
+  .divider { height: 1px; background: var(--outline-v); margin: 10px 0; }
+
+  /* 时间轴 */
+  .tl { position: relative; margin-top: 10px; }
+  .tl-item { display: grid; grid-template-columns: 22px 1fr; column-gap: 10px; }
+  .tl-rail { display: flex; flex-direction: column; align-items: center; }
+  .tl-dot { width: 12px; height: 12px; border-radius: 6px; border: 3px solid var(--primary); background: var(--surface); flex: none; margin-top: 4px; }
+  .tl-dot.end { border-color: var(--success); background: var(--success); }
+  .tl-dot.done { background: var(--outline); border-color: var(--outline); }
+  .tl-line { width: 4px; flex: 1; border-radius: 2px; background: var(--primary); min-height: 16px; }
+  .tl-line.l2 { background: var(--leg2); }
+  .tl-line.walk { width: 0; border-left: 3px dotted var(--outline); background: none; }
+  .tl-line.done { background: var(--outline-v); }
+  .tl-body { padding-bottom: 12px; }
+  .stop { font-weight: 700; font-size: 14px; }
+  .stop.muted { color: var(--outline); font-weight: 600; }
+  .ride { background: var(--surface-c); border-radius: 12px; padding: 8px 10px; margin-top: 6px; }
+  .ride.active { background: var(--primary-c); color: var(--on-primary-c); }
+  .ride.active .sub { color: var(--on-primary-c); opacity: .85; }
+  .walk-note { font-size: 12px; color: var(--on-surface-v); padding: 2px 0 10px; }
+
+  /* 进度条 */
+  .stepper { display: flex; gap: 4px; margin: 10px 0 4px; }
+  .stepper div { flex: 1; height: 6px; border-radius: 3px; background: var(--outline-v); }
+  .stepper .on { background: var(--primary); }
+  .stepper .half { background: linear-gradient(90deg, var(--primary) 40%, var(--outline-v) 40%); }
+
+  /* 旧版卡片样式 */
+  .old .title { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
+  .old-rail { width: 2px; height: 84px; background: var(--outline-v); flex: none; }
+  .old-green { background: #00875A; color: #fff; }
+
+  /* 地图 */
+  .map { height: 300px; border-radius: 20px; position: relative; overflow: hidden; background:
+    repeating-linear-gradient(0deg, transparent 0 38px, rgba(127,127,127,.12) 38px 40px),
+    repeating-linear-gradient(90deg, transparent 0 38px, rgba(127,127,127,.12) 38px 40px), var(--surface-ch); }
+  .map svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .sheet { background: var(--surface); border-radius: 24px 24px 16px 16px; padding: 10px 14px 14px; margin-top: -24px; position: relative; box-shadow: 0 -2px 8px rgba(0,0,0,.12); }
+  .handle { width: 36px; height: 4px; border-radius: 2px; background: var(--outline-v); margin: 0 auto 10px; }
+  .wrap { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .nowrap-overflow { display: flex; gap: 6px; overflow: hidden; white-space: nowrap; }
+  .segbar { display: flex; height: 26px; border-radius: 8px; overflow: hidden; font-size: 11px; font-weight: 700; margin: 8px 0; }
+  .segbar div { display: grid; place-items: center; color: #fff; }
+  .segbar .w { background: var(--surface-ch); color: var(--on-surface-v); }
+  .segbar .b1 { background: var(--primary); color: var(--on-primary); }
+  .segbar .b2 { background: var(--leg2); }
+  body.dark .segbar .b2 { color: #21005D; }
+
+  /* 通知 */
+  .notif { background: var(--surface); border-radius: 20px; padding: 12px 14px; }
+  .notif .app { font-size: 11px; color: var(--on-surface-v); }
+  .prog { height: 6px; border-radius: 3px; background: var(--outline-v); margin: 8px 0; position: relative; }
+  .prog i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--primary); }
+  .actions { display: flex; gap: 18px; font-size: 13px; font-weight: 700; color: var(--primary); margin-top: 6px; }
+  /* Android 16 ProgressStyle：站点标点 + 车辆图标 */
+  .ps { position: relative; height: 26px; margin: 10px 4px 4px; }
+  .ps .track { position: absolute; left: 0; right: 0; top: 11px; height: 4px; border-radius: 2px; background: #3B608C55; }
+  .ps .done { position: absolute; left: 0; top: 11px; height: 4px; border-radius: 2px; background: #1B8755; }
+  .ps .pt { position: absolute; top: 8px; width: 10px; height: 10px; border-radius: 5px; margin-left: -5px; background: #3B608C; border: 2px solid var(--surface); }
+  .ps .pt.on { background: #1B8755; }
+  .ps .bus { position: absolute; top: 0; width: 26px; height: 26px; margin-left: -13px; border-radius: 13px; background: #1B8755; color: #fff; display: grid; place-items: center; font-size: 13px; box-shadow: 0 1px 3px rgba(0,0,0,.3); }
+  .ps-labels { display: flex; justify-content: space-between; font-size: 11px; color: var(--on-surface-v); margin: 0 0 4px; }
+  /* 方案切换 */
+  .tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px; }
+  .tab { border: 1px solid var(--outline-v); border-radius: 12px; padding: 6px 4px; text-align: center; cursor: pointer; background: var(--surface); transition: all .15s; user-select: none; }
+  .tab b { display: block; font-size: 15px; }
+  .tab span { display: block; font-size: 10px; color: var(--on-surface-v); white-space: nowrap; }
+  .tab .tag { font-weight: 700; color: var(--primary); }
+  .tab.on { background: var(--primary-c); border-color: var(--primary); }
+  .tab.on b, .tab.on span { color: var(--on-primary-c); }
+  .dots { display: flex; justify-content: center; gap: 5px; margin-top: 8px; }
+  .dots i { width: 6px; height: 6px; border-radius: 3px; background: var(--outline-v); }
+  .dots i.on { width: 16px; background: var(--primary); }
+  #planDetail { touch-action: pan-y; }
+  #planSvg path, #planSvg circle { transition: opacity .2s; }
+  .capsule { display: inline-flex; align-items: center; gap: 6px; background: #000; color: #fff; border-radius: 14px; padding: 3px 10px; font-size: 12px; font-weight: 700; }
+
+  table { width: 100%; border-collapse: collapse; background: var(--surface); border-radius: 16px; overflow: hidden; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--outline-v); vertical-align: top; }
+  th { background: var(--surface-ch); }
+  td code { font-size: 12px; background: var(--surface-c); padding: 1px 5px; border-radius: 4px; }
+  .p0 { color: var(--error); font-weight: 800; } .p1 { color: var(--warn); font-weight: 800; } .p2 { color: var(--outline); font-weight: 800; }
+  .tokens { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
+  .tok { border-radius: 12px; padding: 10px; font-size: 12px; border: 1px solid var(--outline-v); background: var(--surface); }
+  .sw { height: 28px; border-radius: 8px; margin-bottom: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>BusOnRoad · UI 调整方案</h1>
+  <nav>
+    <a href="#p">原则</a><a href="#multi">多程卡片</a><a href="#single">单程卡片</a><a href="#plan">路线规划</a><a href="#notif">通知</a><a href="#list">改动清单</a>
+  </nav>
+  <button class="toggle" onclick="document.body.classList.toggle('dark')">切换深色</button>
+</header>
+
+<main>
+
+<!-- ================= 原则 ================= -->
+<section id="p">
+  <h2>调整原则</h2>
+  <p class="lead">一句话：先告诉用户"现在该干嘛"，再告诉他"还要多久"。</p>
+  <div class="principles">
+    <div class="pcard"><b>1. 一张卡只有一个主数字</b><span>大字显示"车离我还有几分钟"。其他信息都比它小。</span></div>
+    <div class="pcard"><b>2. 显示当前阶段</b><span>追踪时标出"等车 / 乘车 / 换乘步行"，和新的两阶段追踪逻辑对应。</span></div>
+    <div class="pcard"><b>3. 不显示没用的数字</b><span>第 2 程的车现在离换乘站多远，对用户没用。改为显示"预计换乘时间"，或者不显示。</span></div>
+    <div class="pcard"><b>4. 颜色全部用主题色</b><span>去掉写死的 <code>0xFF00875A</code> 等颜色。成功、警告也做成主题颜色，深色模式能自动适配。</span></div>
+    <div class="pcard"><b>5. 好点、不挤</b><span>点击区域至少 48dp。不常用的操作收进 ⋮ 菜单。线路胶囊放不下时自动换行。</span></div>
+    <div class="pcard"><b>6. 图标和文字不重复</b><span>去掉 "■ 结束追踪"、"★ 存入收藏" 里多出来的文字符号。</span></div>
+  </div>
+</section>
+
+<!-- ================= 多程卡片 ================= -->
+<section id="multi">
+  <h2>多程换乘卡片（收藏页）</h2>
+  <p class="lead">文件：<code>TransitGroupCard.kt</code>（Mode B）、<code>LegTimelineItem.kt</code></p>
+  <div class="compare">
+    <div class="before">
+      <span class="col-label">现在</span>
+      <div class="phone">
+        <div class="card old">
+          <div class="row between">
+            <div class="title">科技园 ➔ 车公庙 (通勤…</div>
+            <div class="row" style="gap:0"><span class="ibtn">🔖</span><span class="ibtn">⇄</span><span class="ibtn">✎</span><span class="ibtn">🗑</span></div>
+          </div>
+          <div class="row between" style="margin-top:4px">
+            <span class="sub">换乘 1 次 · 同站换乘</span>
+            <span class="pill tonal" style="padding:3px 10px;font-size:11px">▶ ▷ 开启追踪</span>
+          </div>
+          <div style="margin-top:10px">
+            <div class="row"><span style="width:10px;height:10px;border-radius:5px;background:#00875A"></span><span class="stop">科技园</span></div>
+            <div class="row" style="align-items:flex-start;margin:6px 0 6px 4px">
+              <div class="old-rail"></div>
+              <div style="font-size:12px">
+                <div><b>第 1 程</b> · <span class="chip">B612</span> <span class="chip">M375</span></div>
+                <div style="color:var(--primary);font-weight:800">还有 3 站 · 约 6 分钟</div>
+                <div class="sub">下车: 深大北门 (乘 4 站)</div>
+              </div>
+            </div>
+            <div class="row" style="align-items:flex-start;margin:6px 0 6px 4px">
+              <div class="old-rail"></div>
+              <div style="font-size:12px">
+                <div><b>第 2 程</b> · <span class="chip">M492</span></div>
+                <div style="color:var(--primary);font-weight:800">还有 1 站 · 约 2 分钟</div>
+                <div class="sub">下车: 车公庙 (乘 4 站)</div>
+              </div>
+            </div>
+            <div class="row"><span style="width:10px;height:10px;border-radius:5px;background:var(--error)"></span><span class="stop">车公庙</span></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li class="bad">标题被截断，起点和终点看不全。</li>
+        <li class="bad">4 个 32dp 小图标一直显示，难点，也显得挤。</li>
+        <li class="bad">第 2 程的"还有 1 站"是车现在的位置，等你到了，车早开走了。</li>
+        <li class="bad">竖线高度写死 84dp，文字一换行就对不齐。</li>
+        <li class="bad">"乘 4 站"可能是假站序算出来的。</li>
+        <li class="bad">追踪时看不出现在在哪一步。</li>
+      </ul>
+    </div>
+
+    <div class="after">
+      <span class="col-label">调整后 · 未追踪</span>
+      <div class="phone">
+        <div class="card">
+          <div class="row between">
+            <div>
+              <div class="title">科技园 → 车公庙</div>
+              <div class="sub">换乘 1 次 · 步行 0 米 · 约 32 分钟</div>
+            </div>
+            <span class="ibtn48">⋮</span>
+          </div>
+          <div class="divider"></div>
+          <div class="row between">
+            <div>
+              <div class="sub">第 1 程 · <span class="chip line1">B612</span> 最快</div>
+              <div class="eta-big">6 <small>分钟后到 科技园</small></div>
+              <div class="sub">还有 3 站 · 粤B·58921</div>
+            </div>
+            <span class="pill filled">▶ 开始追踪</span>
+          </div>
+          <div class="tl">
+            <div class="tl-item"><div class="tl-rail"><div class="tl-dot"></div><div class="tl-line"></div></div>
+              <div class="tl-body"><div class="stop">科技园</div>
+                <div class="ride"><div class="wrap"><span class="chip line1 sel">B612 · 3站</span><span class="chip">M375 · 7站</span><span class="chip">+ 添加</span></div>
+                <div class="sub" style="margin-top:4px">坐 4 站 · 开往 深大北门</div></div></div></div>
+            <div class="tl-item"><div class="tl-rail"><div class="tl-dot"></div><div class="tl-line l2"></div></div>
+              <div class="tl-body"><div class="stop">深大北门 <span class="sub">换乘</span></div>
+                <div class="ride"><div class="wrap"><span class="chip line2 sel">M492</span></div>
+                <div class="sub" style="margin-top:4px">坐 5 站 · 预计 07:58 上车</div></div></div></div>
+            <div class="tl-item"><div class="tl-rail"><div class="tl-dot end"></div></div>
+              <div class="tl-body" style="padding-bottom:0"><div class="stop">车公庙</div></div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>标题只放起点 → 终点，可以两行。分组名放到列表的分区标题。</li>
+        <li>收藏、返程、编辑、删除收进 ⋮ 菜单（48dp）。</li>
+        <li>主数字只看第 1 程上车站：几分钟后到。</li>
+        <li>第 2 程显示"预计几点上车"，用第 1 程 ETA + 乘车时长估算；算不出来就不显示。</li>
+        <li>竖线用 <code>IntrinsicSize.Min</code> 跟着内容高度走。</li>
+        <li>站序没对齐时，显示"站数待确认"，不显示假数字。</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="compare" style="margin-top:24px">
+    <div class="after">
+      <span class="col-label">调整后 · 追踪中 · 等车阶段</span>
+      <div class="phone">
+        <div class="card" style="border:2px solid var(--primary)">
+          <div class="row between">
+            <div class="title">科技园 → 车公庙</div>
+            <span class="badge phase">第 1 / 2 程 · 等车</span>
+          </div>
+          <div class="stepper"><div class="half"></div><div></div></div>
+          <div class="row between" style="margin-top:8px">
+            <div>
+              <div class="sub"><span class="chip line1">B612</span> 开往 深大北门</div>
+              <div class="eta-big">4 <small>分钟后到 科技园</small></div>
+              <div class="sub">还有 2 站 · 粤B·58921 · 已锁定这辆车</div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px;gap:8px">
+            <span class="pill tonal">✓ 我已上车</span>
+            <span class="pill err">■ 结束</span>
+          </div>
+          <div class="tl">
+            <div class="tl-item"><div class="tl-rail"><div class="tl-dot"></div><div class="tl-line"></div></div>
+              <div class="tl-body"><div class="stop">科技园 <span class="badge phase">你在这里</span></div>
+                <div class="ride active"><b>B612</b> 坐 4 站<div class="sub">在等车</div></div></div></div>
+            <div class="tl-item"><div class="tl-rail"><div class="tl-dot"></div><div class="tl-line l2"></div></div>
+              <div class="tl-body"><div class="stop">深大北门</div><div class="ride"><b>M492</b> 坐 5 站</div></div></div>
+            <div class="tl-item"><div class="tl-rail"><div class="tl-dot end"></div></div>
+              <div class="tl-body" style="padding-bottom:0"><div class="stop">车公庙</div></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="after">
+      <span class="col-label">调整后 · 追踪中 · 乘车阶段</span>
+      <div class="phone">
+        <div class="card" style="border:2px solid var(--primary)">
+          <div class="row between">
+            <div class="title">科技园 → 车公庙</div>
+            <span class="badge phase">第 1 / 2 程 · 乘车</span>
+          </div>
+          <div class="stepper"><div class="on"></div><div></div></div>
+          <div class="row between" style="margin-top:8px">
+            <div>
+              <div class="sub"><span class="chip line1">B612</span> 粤B·58921</div>
+              <div class="eta-big eta-ok">2 <small>站后在 深大北门 下车</small></div>
+              <div class="sub">约 5 分钟 · 下车后换乘 M492</div>
+            </div>
+          </div>
+          <div class="row" style="margin-top:10px;gap:8px">
+            <span class="pill tonal">⏭ 跳到下一程</span>
+            <span class="pill err">■ 结束</span>
+          </div>
+          <div class="tl">
+            <div class="tl-item"><div class="tl-rail"><div class="tl-dot done"></div><div class="tl-line"></div></div>
+              <div class="tl-body"><div class="stop muted">科技园</div>
+                <div class="ride active"><b>B612</b> 已坐 2 / 4 站<div class="sub">车上</div></div></div></div>
+            <div class="tl-item"><div class="tl-rail"><div class="tl-dot"></div><div class="tl-line l2"></div></div>
+              <div class="tl-body"><div class="stop">深大北门 <span class="sub">下车换乘</span></div>
+                <div class="ride"><b>M492</b> 现在离深大北门 6 站 · 约 12 分钟</div></div></div>
+            <div class="tl-item"><div class="tl-rail"><div class="tl-dot end"></div></div>
+              <div class="tl-body" style="padding-bottom:0"><div class="stop">车公庙</div></div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>快到换乘站时，才显示下一程车离换乘站多远。这时这个数字才有用。</li>
+        <li>"我已上车"和"跳到下一程"对应子代理新加的手动操作。</li>
+        <li>已经走过的站变灰。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 单程卡片 ================= -->
+<section id="single">
+  <h2>单程（直达）卡片</h2>
+  <p class="lead">文件：<code>TransitGroupCard.kt</code>（Mode A）</p>
+  <div class="compare">
+    <div class="before">
+      <span class="col-label">现在</span>
+      <div class="phone">
+        <div class="card">
+          <div class="nowrap-overflow"><span class="chip">B612 3站</span><span class="chip">M375 7站</span><span class="chip">M492 等待发车</span><span class="chip">+</span></div>
+          <div style="margin-top:8px;padding:12px;border-radius:16px;border:1px solid var(--outline-v)">
+            <div class="row between">
+              <div><b>B612 路</b> <span class="badge old-green">最快</span><div class="sub">开往 深大北门方向</div></div>
+              <div style="text-align:right"><b style="color:#00875A">还有 3 站 · 6分钟</b><div class="sub">粤B·58921</div></div>
+            </div>
+            <div class="divider"></div>
+            <div class="row between"><span class="sub">下车站: 深大北门 (乘 4 站)</span><span class="sub" style="color:var(--primary)">实时轨迹 &gt;</span></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li class="bad">绿色写死，深色模式下对比度不够。</li>
+        <li class="bad">ETA 和线路名一样大，找不到重点。</li>
+        <li class="bad">"实时轨迹 &gt;" 字很小，不好点。</li>
+      </ul>
+    </div>
+    <div class="after">
+      <span class="col-label">调整后</span>
+      <div class="phone">
+        <div class="card">
+          <div class="row between">
+            <div><div class="title">科技园 → 深大北门</div><div class="sub">直达 · 坐 4 站</div></div>
+            <span class="ibtn48">⋮</span>
+          </div>
+          <div class="divider"></div>
+          <div class="wrap"><span class="chip line1 sel">B612 · 3站</span><span class="chip">M375 · 7站</span><span class="chip">M492 · 未发车</span><span class="chip">+ 添加</span></div>
+          <div class="row between" style="margin-top:10px">
+            <div>
+              <div class="sub">B612 <span class="badge fast">最快</span> · 开往 深大北门</div>
+              <div class="eta-big">6 <small>分钟</small></div>
+              <div class="sub">还有 3 站 · 粤B·58921</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-end">
+              <span class="pill filled">▶ 追踪</span>
+              <span class="pill outline">看轨迹</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 路线规划 ================= -->
+<section id="plan">
+  <h2>路线规划页（地图 + 底部方案面板）</h2>
+  <p class="lead">文件：<code>RoutePlanScreen.kt</code>。地图画线的问题子代理正在修，这里只看面板。</p>
+  <div class="compare">
+    <div class="before">
+      <span class="col-label">现在</span>
+      <div class="phone">
+        <div class="map">
+          <svg viewBox="0 0 330 300"><line x1="60" y1="240" x2="270" y2="60" stroke="#0061A4" stroke-width="7" stroke-linecap="round"/>
+            <circle cx="60" cy="240" r="7" fill="#e53935"/><circle cx="270" cy="60" r="7" fill="#e53935"/></svg>
+        </div>
+        <div class="sheet">
+          <div class="handle"></div>
+          <div class="row between"><div class="row"><span class="badge phase">推荐方案</span><b>约 32 分钟</b></div><span class="sub" style="color:var(--primary)">展开全部方案 (4) ▾</span></div>
+          <div class="sub" style="margin-top:4px">步行 820米 · 换乘 1 次 · 预估费用 ¥4.0</div>
+          <div class="nowrap-overflow" style="margin-top:8px"><span class="chip">B612</span><span class="chip">M375</span><span class="chip">B796</span>➔<span class="chip">M492</span><span class="chip">3…</span></div>
+          <div class="row" style="margin-top:12px;gap:10px"><span class="pill outline" style="flex:1;justify-content:center">☆ ★ 存入收藏</span><span class="pill filled" style="flex:1;justify-content:center">▶ ▷ 开启监控</span></div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li class="bad">地图只有一条直线（正在修）。</li>
+        <li class="bad">胶囊一行放不下，后面被挤掉。备选线路和主线路长得一样。</li>
+        <li class="bad">看不出步行和坐车各占多少时间。</li>
+        <li class="bad">点胶囊跳到下车站，应该是上车站。</li>
+      </ul>
+    </div>
+    <div class="after">
+      <span class="col-label">调整后 · 4 个方案快速切换（可点）</span>
+      <div class="phone">
+        <div class="map" id="planMap"><svg viewBox="0 0 330 300" id="planSvg"></svg></div>
+        <div class="sheet">
+          <div class="handle"></div>
+          <div class="tabs" id="planTabs"></div>
+          <div id="planDetail"></div>
+          <div class="dots" id="planDots"></div>
+          <div class="row" style="margin-top:12px;gap:10px"><span class="pill outline" style="flex:1;justify-content:center">☆ 收藏</span><span class="pill filled" style="flex:2;justify-content:center">▶ 开始追踪</span></div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>面板顶部放 4 个方案标签，一直可见。点一下就切换，不用先"展开全部"。</li>
+        <li>标签只写 3 样东西：总时长、换乘次数、一个特点（最快 / 少换乘 / 少步行 / 地铁）。</li>
+        <li>下面的详情可以左右滑动切换，和标签联动。用 <code>HorizontalPager</code> 加 <code>PrimaryScrollableTabRow</code>。</li>
+        <li>地图上，选中的方案画粗线、有颜色，其他 3 个画成细灰线。切换时不用重新缩放地图，一眼就能比较。</li>
+        <li>详情里保留分段条和每程线路，备选线路写"或 xxx"。</li>
+        <li>主按钮只写"开始追踪"，不会自动收藏。这次追踪只算临时的一次，想收藏就点左边的"收藏"。站序对齐完成后才开始追踪。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 通知 ================= -->
+<section id="notif">
+  <h2>实时通知（含流体云 / 焦点通知）</h2>
+  <p class="lead">文件：<code>LiveProgressNotificationHelper.kt</code>。站点样式不变：还是 <code>ProgressStyle</code> 加站点圆点、小车图标、绿色是走过的、蓝色是没走的、最多 4 个点。要改的是这条线从哪站画到哪站，还有文字。</p>
+  <div class="compare">
+    <div class="before">
+      <span class="col-label">现在</span>
+      <div class="phone" style="display:flex;flex-direction:column;gap:10px">
+        <div><span class="capsule">🚌 剩5站</span></div>
+        <div class="notif">
+          <div class="app">BusOnRoad · 换乘追踪 · 第1/2程</div>
+          <b>[1/2程] B612 开往 深大北门</b>
+          <div class="sub">[1/2程 换乘] 距换乘站 深大北门 还有 5 站</div>
+          <div class="ps">
+            <div class="track"></div><div class="done" style="width:28%"></div>
+            <div class="pt on" style="left:16.6%"></div><div class="pt" style="left:33.3%"></div><div class="pt" style="left:50%"></div><div class="pt" style="left:66.6%"></div>
+            <div class="bus" style="left:28%">🚌</div>
+          </div>
+          <div class="ps-labels"><span>?（车被锁定时所在站）</span><span>深大北门</span></div>
+          <div class="actions"><span>提前2站提醒(切换)</span><span>结束追踪</span></div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li class="bad">线画到下车站深大北门，你还在科技园等车。</li>
+        <li class="bad">小车可能是一辆已经开过科技园的车。</li>
+        <li class="bad">线的起点是"车被锁定时所在的站"，用户不知道是哪站。</li>
+        <li class="bad">胶囊上写"剩5站"，看不出是等车还是坐车。</li>
+      </ul>
+    </div>
+    <div class="after">
+      <span class="col-label">调整后 · 一程拆成两条线</span>
+      <div class="phone" style="display:flex;flex-direction:column;gap:10px">
+        <div><span class="capsule">🚌 B612 2站</span> <span class="sub">等车</span></div>
+        <div class="notif">
+          <div class="app">BusOnRoad · 第1/2程 · 等车</div>
+          <b>B612 还有 2 站到 科技园</b>
+          <div class="sub">约 4 分钟 · 粤B·58921</div>
+          <div class="ps">
+            <div class="track"></div><div class="done" style="width:58%"></div>
+            <div class="pt on" style="left:25%"></div><div class="pt on" style="left:50%"></div><div class="pt" style="left:75%"></div>
+            <div class="bus" style="left:58%">🚌</div>
+          </div>
+          <div class="ps-labels"><span>大冲</span><span>科技园（上车）</span></div>
+          <div class="actions"><span>我已上车</span><span>提前2站提醒</span><span>结束</span></div>
+        </div>
+
+        <div><span class="capsule">🚌 2站下车</span> <span class="sub">乘车</span></div>
+        <div class="notif">
+          <div class="app">BusOnRoad · 第1/2程 · 乘车</div>
+          <b>还有 2 站在 深大北门 下车</b>
+          <div class="sub">约 5 分钟 · 下车后换乘 M492</div>
+          <div class="ps">
+            <div class="track"></div><div class="done" style="width:55%"></div>
+            <div class="pt on" style="left:25%"></div><div class="pt on" style="left:50%"></div><div class="pt" style="left:75%"></div>
+            <div class="bus" style="left:55%">🚌</div>
+          </div>
+          <div class="ps-labels"><span>科技园</span><span>深大北门（下车）</span></div>
+          <div class="actions"><span>跳到下一程</span><span>结束</span></div>
+        </div>
+
+        <div><span class="capsule">🔁 换乘</span></div>
+        <div class="notif">
+          <div class="app">BusOnRoad · 第2/2程 · 等车</div>
+          <b>M492 还有 4 站到 深大北门</b>
+          <div class="sub">约 8 分钟 · 你已到换乘站</div>
+          <div class="ps">
+            <div class="track"></div><div class="done" style="width:12%"></div>
+            <div class="pt" style="left:20%"></div><div class="pt" style="left:40%"></div><div class="pt" style="left:60%"></div><div class="pt" style="left:80%"></div>
+            <div class="bus" style="left:12%">🚌</div>
+          </div>
+          <div class="ps-labels"><span>白石洲</span><span>深大北门（上车）</span></div>
+          <div class="actions"><span>我已上车</span><span>提前2站提醒</span><span>结束</span></div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li><b>等车</b>：线从车被锁定时的站画到你的上车站。小车就是要来接你的那辆。</li>
+        <li><b>乘车</b>：线从上车站画到下车站。小车是你坐的那辆。圆点就是中间要经过的站。</li>
+        <li>线两头要写站名。现在两头没有字，用户不知道这条线是从哪到哪。</li>
+        <li>胶囊文字要分开："B612 2站"是等车，"2站下车"是乘车。都不超过 7 个字。</li>
+        <li>圆点最多 4 个，这个限制不变。乘车这一段站数一般不多，每站都能画出来。等车这一段太长时，仍然隔几站画一个点。</li>
+        <li>按钮最多 3 个。等车时放"我已上车"，乘车时放"跳到下一程"。</li>
+        <li>小米焦点通知、OPPO 流体云也按这两个阶段改文字。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ================= 清单 ================= -->
+<section id="list">
+  <h2>改动清单</h2>
+  <p class="lead">P0 是必须先做的；P1 是这次一起做的；P2 可以以后再做。</p>
+  <table>
+    <tr><th>优先级</th><th>改什么</th><th>文件</th><th>备注</th></tr>
+    <tr><td class="p0">P0</td><td>多程卡片追踪中显示阶段、"我已上车"按钮、进度条</td><td><code>TransitGroupCard.kt</code> <code>LegTimelineItem.kt</code></td><td>依赖子代理的 <code>LegPhase</code></td></tr>
+    <tr><td class="p0">P0</td><td>通知文案按等车 / 乘车两阶段</td><td><code>LiveProgressNotificationHelper.kt</code></td><td>同上</td></tr>
+    <tr><td class="p0">P0</td><td>站序没对齐时显示"站数待确认"，不显示假数字</td><td><code>TransitGroupCard.kt</code></td><td></td></tr>
+    <tr><td class="p1">P1</td><td>卡片主数字放大；第 2 程改为"预计几点上车"</td><td><code>TransitGroupCard.kt</code></td><td>没有可靠数据就不显示</td></tr>
+    <tr><td class="p1">P1</td><td>4 个小图标收进 ⋮ 菜单（48dp）</td><td><code>TransitGroupCard.kt</code></td><td>用 <code>DropdownMenu</code></td></tr>
+    <tr><td class="p1">P1</td><td>时间轴竖线改成跟内容一样高</td><td><code>TransitGroupCard.kt</code></td><td><code>Modifier.height(IntrinsicSize.Min)</code></td></tr>
+    <tr><td class="p1">P1</td><td>写死颜色换成主题颜色，新增 success / warning</td><td><code>core/designsystem/theme/Color.kt</code> 及使用处</td><td>RoutePlan 13 处，Card 8 处</td></tr>
+    <tr><td class="p1">P1</td><td>去掉按钮里多出来的 ■ ★ ▷ 符号</td><td><code>TransitGroupCard.kt</code> <code>RoutePlanScreen.kt</code></td><td></td></tr>
+    <tr><td class="p1">P1</td><td>规划面板：4 个方案标签 + 左右滑动切换；地图上同时画 4 条线，选中的加粗；分段条；每程一行，用 <code>FlowRow</code> 换行</td><td><code>RoutePlanScreen.kt</code></td><td></td></tr>
+    <tr><td class="p1">P1</td><td>规划页"开始追踪"不再自动加入收藏，只做一次临时追踪</td><td><code>RoutePlanScreen.kt</code> <code>FavoritesGroupViewModel.kt</code></td><td>去掉 <code>addPlannedSchemeToGroups</code> 调用</td></tr>
+    <tr><td class="p1">P1</td><td>点线路胶囊跳到上车站</td><td><code>RoutePlanScreen.kt</code> <code>FavoritesGroupScreen.kt</code></td><td>传 <code>fromStopOrder</code></td></tr>
+    <tr><td class="p2">P2</td><td>地图上把线路名标在线上</td><td><code>RoutePlanScreen.kt</code></td><td>等画线修好后再做</td></tr>
+    <tr><td class="p2">P2</td><td>Toast 换成 Snackbar（9 处）</td><td><code>RoutePlanScreen.kt</code></td><td></td></tr>
+    <tr><td class="p2">P2</td><td>拆分 2153 行的 <code>RoutePlanScreen.kt</code></td><td>同上</td><td>拆出 Sheet / Dialog / MapView</td></tr>
+  </table>
+</section>
+
+<section>
+  <h2>新增主题颜色</h2>
+  <div class="tokens">
+    <div class="tok"><div class="sw" style="background:var(--primary)"></div>primary · 第 1 程</div>
+    <div class="tok"><div class="sw" style="background:var(--leg2)"></div>legSecondary · 第 2 程</div>
+    <div class="tok"><div class="sw" style="background:var(--success)"></div>success · 最快 / 快到了</div>
+    <div class="tok"><div class="sw" style="background:var(--success-c)"></div>successContainer</div>
+    <div class="tok"><div class="sw" style="background:var(--warn)"></div>warning · 信号丢失</div>
+    <div class="tok"><div class="sw" style="background:var(--outline)"></div>walk · 步行虚线</div>
+  </div>
+</section>
+
+</main>
+<script>
+// 4 个演示方案：segs 按顺序，w=步行，b1/b2=第 1/2 程（颜色），min=分钟；path 是地图上的 SVG 路径
+const schemes = [
+  { min: 32, tag: '最快', transfer: 1, walk: 820, cost: 4, dep: '07:42', arr: '08:14',
+    segs: [['w',4,'🚶4′'],['b1',12,'B612 12′'],['w',2,'🚶'],['b2',13,'M492 13′'],['w',1,'🚶']],
+    legs: [['line1','B612',['M375','B796']],['line2','M492',['323']]],
+    paths: [['walk','M40 255 L62 238'],['b1','M62 238 C90 220 100 200 130 190 S170 160 175 140'],['walk','M175 140 L190 132'],['b2','M190 132 C215 120 230 95 255 85 S275 70 280 58'],['walk','M280 58 L295 44']],
+    transferPt: [182,136], labels: [[96,196,'B612','b1'],[222,98,'M492','b2']] },
+  { min: 38, tag: '直达', transfer: 0, walk: 640, cost: 2, dep: '07:45', arr: '08:23',
+    segs: [['w',5,'🚶5′'],['b1',30,'M375 30′'],['w',3,'🚶3′']],
+    legs: [['line1','M375',['B796']]],
+    paths: [['walk','M40 255 L35 230'],['b1','M35 230 C40 170 90 150 140 120 S240 60 285 50'],['walk','M285 50 L295 44']],
+    transferPt: null, labels: [[110,128,'M375','b1']] },
+  { min: 35, tag: '少步行', transfer: 1, walk: 260, cost: 4, dep: '07:43', arr: '08:18',
+    segs: [['w',2,'🚶'],['b1',15,'B796 15′'],['w',1,'🚶'],['b2',16,'323 16′'],['w',1,'🚶']],
+    legs: [['line1','B796',[]],['line2','323',['M492']]],
+    paths: [['walk','M40 255 L52 250'],['b1','M52 250 C110 245 150 230 190 200'],['walk','M190 200 L196 194'],['b2','M196 194 C240 160 250 110 290 50'],['walk','M290 50 L295 44']],
+    transferPt: [193,197], labels: [[118,226,'B796','b1'],[236,140,'323','b2']] },
+  { min: 36, tag: '地铁', transfer: 1, walk: 1100, cost: 5, dep: '07:40', arr: '08:16',
+    segs: [['w',8,'🚶8′'],['b1',18,'地铁1号线 18′'],['w',4,'🚶4′'],['b2',6,'B612 6′']],
+    legs: [['line1','地铁1号线',[]],['line2','B612',[]]],
+    paths: [['walk','M40 255 L70 262'],['b1','M70 262 L150 230 L230 160'],['walk','M230 160 L240 140'],['b2','M240 140 C260 110 280 80 295 44']],
+    transferPt: [235,150], labels: [[150,236,'1号线','b1'],[262,96,'B612','b2']] }
+];
+let cur = 0;
+const colorOf = k => k === 'b1' ? 'var(--primary)' : k === 'b2' ? 'var(--leg2)' : '#73777F';
+
+function drawMap() {
+  const svg = document.getElementById('planSvg');
+  let h = '';
+  // 先画未选中的方案（细灰线），再画选中的方案（粗彩线）
+  schemes.forEach((s, i) => {
+    if (i === cur) return;
+    s.paths.forEach(([k, d]) => { h += `<path d="${d}" stroke="#9AA0A6" stroke-width="3" opacity=".55" fill="none" stroke-linecap="round" ${k==='walk'?'stroke-dasharray="2 5"':''} style="cursor:pointer" onclick="pick(${i})"/>`; });
+  });
+  const s = schemes[cur];
+  s.paths.forEach(([k, d]) => {
+    h += k === 'walk'
+      ? `<path d="${d}" stroke="#73777F" stroke-width="4" stroke-dasharray="2 6" stroke-linecap="round" fill="none"/>`
+      : `<path d="${d}" stroke="${colorOf(k)}" stroke-width="7" stroke-linecap="round" fill="none"/>`;
+  });
+  if (s.transferPt) h += `<circle cx="${s.transferPt[0]}" cy="${s.transferPt[1]}" r="7" fill="#fff" stroke="var(--leg2)" stroke-width="3"/>`;
+  s.labels.forEach(([x, y, t, k]) => {
+    h += `<rect x="${x}" y="${y}" rx="6" width="48" height="18" fill="${colorOf(k)}"/><text x="${x+24}" y="${y+13}" font-size="11" text-anchor="middle" fill="${k==='b1'?'var(--on-primary)':'#fff'}" font-weight="700">${t}</text>`;
+  });
+  h += `<circle cx="40" cy="255" r="8" fill="#146C2E" stroke="#fff" stroke-width="3"/><circle cx="295" cy="44" r="8" fill="#BA1A1A" stroke="#fff" stroke-width="3"/>`;
+  svg.innerHTML = h;
+}
+
+function drawSheet() {
+  document.getElementById('planTabs').innerHTML = schemes.map((s, i) =>
+    `<div class="tab ${i===cur?'on':''}" onclick="pick(${i})"><b>${s.min}′</b><span>${s.transfer===0?'直达':'换'+s.transfer+'次'}</span><span class="tag">${s.tag}</span></div>`).join('');
+  const s = schemes[cur];
+  const legRows = s.legs.map(([cls, main, alts], i) =>
+    `<div class="wrap" style="margin-top:6px"><span class="sub">第 ${i+1} 程</span><span class="chip ${cls}">${main}</span>${alts.map(a=>`<span class="chip">或 ${a}</span>`).join('')}</div>`).join('');
+  document.getElementById('planDetail').innerHTML = `
+    <div class="row between">
+      <div><span class="eta-big" style="font-size:22px">${s.min} 分钟</span> <span class="sub">${s.dep} 出发 · ${s.arr} 到</span></div>
+    </div>
+    <div class="segbar">${s.segs.map(([k,f,t]) => `<div class="${k==='w'?'w':k}" style="flex:${f}">${t}</div>`).join('')}</div>
+    <div class="sub">步行 ${s.walk} 米 · ${s.transfer===0?'不用换乘':'换乘 '+s.transfer+' 次'} · ¥${s.cost}</div>
+    ${legRows}`;
+  document.getElementById('planDots').innerHTML = schemes.map((_, i) => `<i class="${i===cur?'on':''}"></i>`).join('');
+}
+
+function pick(i) { cur = (i + schemes.length) % schemes.length; drawMap(); drawSheet(); }
+
+// 左右滑动详情区切换方案（演示 HorizontalPager 的效果）
+(() => {
+  const el = document.getElementById('planDetail');
+  let x0 = null;
+  el.addEventListener('pointerdown', e => { x0 = e.clientX; });
+  el.addEventListener('pointerup', e => {
+    if (x0 === null) return;
+    const dx = e.clientX - x0; x0 = null;
+    if (Math.abs(dx) > 40) pick(cur + (dx < 0 ? 1 : -1));
+  });
+})();
+pick(0);
+</script>
+</body>
+</html>
