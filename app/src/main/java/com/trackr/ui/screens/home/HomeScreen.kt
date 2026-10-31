@@ -277,7 +277,7 @@ fun HomeScreen(
             onSearchQueryChange = { viewModel.updateCitySearchQuery(it) },
             onSelectProvince = { viewModel.selectProvince(it) },
             onSelectCity = { viewModel.selectCity(it) },
-            onRelocate = { viewModel.refreshLocationAndNearby() },
+            onRelocate = { viewModel.refreshLocationAndNearby(switchCity = true) },
             onDismiss = { viewModel.setCityPickerOpen(false) }
         )
     }

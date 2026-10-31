@@ -258,8 +258,8 @@ class HomeViewModel(
     /**
      * 刷新定位并加载附近站点
      */
-    fun refreshLocationAndNearby() {
-        refresh()
+    fun refreshLocationAndNearby(switchCity: Boolean = false) {
+        refresh(switchCity)
     }
 
     private fun hasLocationPermission(): Boolean {
@@ -404,9 +404,13 @@ class HomeViewModel(
     }
 
     /**
-     * 手动触发整体刷新（带上重新定位、刷新附近公交与收藏线路实时到站）
+     * 整体刷新（重新定位、刷新附近公交与收藏线路实时到站）
+     *
+     * @param switchCity 为 true 时把城市切到定位城市（仅城市弹窗里的「重新定位」使用）。
+     * 启动、授权、下拉刷新等自动场景传 false：只更新坐标，不覆盖用户已选的城市（Issue #6）。
+     * 从未存过城市（首次安装）时，即使传 false 也会切到定位城市。
      */
-    fun refresh() {
+    fun refresh(switchCity: Boolean = false) {
         viewModelScope.launch {
             _uiState.update { it.copy(isRefreshing = true, isLocating = true, locationError = null) }
 
@@ -430,8 +434,8 @@ class HomeViewModel(
                         null
                     }
 
-                    val city = resolvedCity ?: _uiState.value.currentCity
-                    if (resolvedCity != null) {
+                    val shouldSwitchCity = switchCity || !repository.hasSavedCity
+                    if (resolvedCity != null && shouldSwitchCity) {
                         repository.selectCity(resolvedCity)
                         _uiState.update {
                             it.copy(
@@ -446,17 +450,20 @@ class HomeViewModel(
                                 locationError = null
                             )
                         }
+                        Triple(lat, lng, resolvedCity)
                     } else {
+                        // 保留用户已选城市，只记录定位城市供城市弹窗展示「定位: X」
                         _uiState.update {
                             it.copy(
+                                locatedCity = resolvedCity ?: it.locatedCity,
                                 currentLat = lat,
                                 currentLng = lng,
                                 isLocating = false,
                                 locationError = null
                             )
                         }
+                        Triple(lat, lng, repository.selectedCity.value)
                     }
-                    Triple(lat, lng, city)
                 } else {
                     val currentCity = _uiState.value.currentCity
                     val state = _uiState.value
@@ -473,10 +480,22 @@ class HomeViewModel(
                     Triple(lat, lng, currentCity)
                 }
 
-                val nearbyResult = repository.getNearbyStops(targetCity, lat, lng, limit = repository.nearbyStopsCount.value)
+                val limit = repository.nearbyStopsCount.value
+                var stops = repository.getNearbyStops(targetCity, lat, lng, limit = limit).getOrNull().orEmpty()
+
+                // 人不在已选城市（如出差在外）时，GPS 坐标查不到该城市的站点：改用已选城市中心点再查一次
+                if (stops.isEmpty() && gpsLocation != null && !targetCity.matchesCity(_uiState.value.locatedCity)) {
+                    val center = ProvinceCityCatalog.findCityCenterCoordinates(targetCity.cityName)
+                    if (center != null) {
+                        stops = repository.getNearbyStops(targetCity, center.first, center.second, limit = limit)
+                            .getOrNull().orEmpty()
+                        _uiState.update { it.copy(currentLat = center.first, currentLng = center.second) }
+                    }
+                }
+
                 _uiState.update {
                     it.copy(
-                        nearbyStops = nearbyResult.getOrNull().orEmpty(),
+                        nearbyStops = stops,
                         isLoadingNearby = false
                     )
                 }
@@ -533,7 +552,8 @@ class HomeViewModel(
             val state = _uiState.value
             val isLocated = city.matchesCity(state.locatedCity)
             val coords = if (isLocated) {
-                Pair(state.currentLat, state.currentLng)
+                // 优先用真实 GPS 坐标：当前坐标可能已回退为其他城市的中心点
+                repository.userLocation.value ?: Pair(state.currentLat, state.currentLng)
             } else {
                 ProvinceCityCatalog.getCityCenterCoordinates(city.cityName)
             }

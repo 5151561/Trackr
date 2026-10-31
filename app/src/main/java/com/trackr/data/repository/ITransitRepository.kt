@@ -19,6 +19,8 @@ import kotlinx.coroutines.flow.StateFlow
  */
 interface ITransitRepository {
     val selectedCity: StateFlow<TransitCity>
+    /** 用户是否曾经选过/存过城市（首次安装为 false，此时才允许定位自动切换城市） */
+    val hasSavedCity: Boolean
     val engineMode: StateFlow<EngineMode>
     val aggregatedPriority: StateFlow<AggregatedSourcePriority>
     val favorites: StateFlow<List<FavoriteStationLine>>

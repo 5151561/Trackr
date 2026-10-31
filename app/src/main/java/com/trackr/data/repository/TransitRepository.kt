@@ -70,6 +70,8 @@ class TransitRepository(
 
     private val _selectedCity = MutableStateFlow(loadInitialCity())
     override val selectedCity: StateFlow<TransitCity> = _selectedCity.asStateFlow()
+    override val hasSavedCity: Boolean
+        get() = prefs.contains("selected_city_json")
 
     private val _engineMode = MutableStateFlow(loadInitialEngineMode())
     override val engineMode: StateFlow<EngineMode> = _engineMode.asStateFlow()
