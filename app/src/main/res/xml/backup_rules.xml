@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Android 11 及以下自动备份规则：排除存放自定义高德 Key 的 trackr_prefs.xml -->
+<!-- Android 11 及以下自动备份规则：只排除存放自定义高德 Key 的 trackr_amap_keys.xml，其余设置照常备份 -->
 <full-backup-content>
-    <exclude domain="sharedpref" path="trackr_prefs.xml" />
+    <exclude domain="sharedpref" path="trackr_amap_keys.xml" />
 </full-backup-content>

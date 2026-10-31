@@ -298,6 +298,7 @@ class FavoritesGroupViewModelTest {
             transitRepository = fakeTransitRepository,
             amapSdkService = null,
             prefs = sharedPrefs,
+            amapKeyPrefs = sharedPrefs,
             enableAutoRefresh = false
         )
 
@@ -582,6 +583,7 @@ class FavoritesGroupViewModelTest {
             groupRepository = groupRepository,
             transitRepository = fakeTransitRepository,
             prefs = sharedPrefs,
+            amapKeyPrefs = sharedPrefs,
             enableAutoRefresh = false
         )
 
@@ -600,6 +602,7 @@ class FavoritesGroupViewModelTest {
             groupRepository = groupRepository,
             transitRepository = fakeTransitRepository,
             prefs = sharedPrefs,
+            amapKeyPrefs = sharedPrefs,
             enableAutoRefresh = false
         )
 

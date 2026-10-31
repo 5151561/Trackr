@@ -94,6 +94,46 @@ class AmapSdkManagerTest {
     }
 
     @Test
+    fun prefs_movesLegacyKeysOutOfTrackrPrefsOnce() {
+        val legacy = context.getSharedPreferences(AmapKeyStore.LEGACY_PREFS_NAME, Context.MODE_PRIVATE)
+        val keyFile = context.getSharedPreferences(AmapKeyStore.PREFS_NAME, Context.MODE_PRIVATE)
+        keyFile.edit().clear().commit()
+        legacy.edit().clear()
+            .putString(AmapKeyStore.KEY_ANDROID, "legacy_android")
+            .putString(AmapKeyStore.KEY_WEB, "legacy_web")
+            .putString("selected_city_id", "033")
+            .commit()
+
+        assertEquals("legacy_android", AmapKeyStore.readAndroidKey(context))
+        assertEquals("legacy_web", AmapKeyStore.readWebKey(context))
+        // Key 已从普通设置文件移除，其他设置原样保留
+        assertNull(legacy.getString(AmapKeyStore.KEY_ANDROID, null))
+        assertNull(legacy.getString(AmapKeyStore.KEY_WEB, null))
+        assertEquals("033", legacy.getString("selected_city_id", null))
+
+        // 只搬一次：之后旧文件里再出现的值不会覆盖专用文件
+        legacy.edit().putString(AmapKeyStore.KEY_ANDROID, "stale").commit()
+        assertEquals("legacy_android", AmapKeyStore.readAndroidKey(context))
+
+        legacy.edit().clear().commit()
+        keyFile.edit().clear().commit()
+    }
+
+    @Test
+    fun migrateFromLegacy_keepsKeyAlreadyInNewFile() {
+        val legacy = context.getSharedPreferences("migrate_legacy_test", Context.MODE_PRIVATE)
+        val target = context.getSharedPreferences("migrate_target_test", Context.MODE_PRIVATE)
+        legacy.edit().clear().putString(AmapKeyStore.KEY_WEB, "old_web").commit()
+        target.edit().clear().putString(AmapKeyStore.KEY_WEB, "new_web").commit()
+
+        AmapKeyStore.migrateFromLegacy(legacy, target)
+
+        assertEquals("new_web", target.getString(AmapKeyStore.KEY_WEB, null))
+        assertTrue(target.getBoolean(AmapKeyStore.KEY_MIGRATED_FROM_LEGACY, false))
+        assertNull(legacy.getString(AmapKeyStore.KEY_WEB, null))
+    }
+
+    @Test
     fun mapUnavailableReason_isNullWhenKeyAndAbiAvailable() {
         if (AmapSdkManager.isRuntimeAbiSupported()) {
             assertNull(AmapSdkManager.mapUnavailableReason("dummy_key_1234567890abcdef"))

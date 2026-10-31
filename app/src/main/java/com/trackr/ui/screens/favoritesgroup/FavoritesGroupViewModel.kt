@@ -113,7 +113,9 @@ class FavoritesGroupViewModel(
     /** 高德通道替身（测试用）；为 null 时使用 SDK 优先、失败才走 Web 的默认实现 */
     amapGatewayOverride: AmapRouteGateway? = null,
     /** 墙钟（毫秒），用于算路缓存时间桶与对齐缓存过期；测试可替换 */
-    private val wallClockMillis: () -> Long = { System.currentTimeMillis() }
+    private val wallClockMillis: () -> Long = { System.currentTimeMillis() },
+    /** 高德 Key 专用存储（与普通设置分文件，备份时排除）；测试可注入 */
+    private val amapKeyPrefs: SharedPreferences? = runCatching { AmapKeyStore.prefs(TrackrApp.instance) }.getOrNull()
 ) : ViewModel() {
 
     companion object {
@@ -295,11 +297,11 @@ class FavoritesGroupViewModel(
     }
 
     /** 高德 Android 平台 Key（地图渲染 / 搜索 / 定位 SDK），与包名 + SHA-1 绑定；严格分槽，不回落 Web 槽位 */
-    private val _customAmapApiKey = MutableStateFlow(AmapKeyStore.readAndroidKey(prefs))
+    private val _customAmapApiKey = MutableStateFlow(AmapKeyStore.readAndroidKey(amapKeyPrefs))
     val customAmapApiKey: StateFlow<String?> = _customAmapApiKey.asStateFlow()
 
     /** 高德 Web 服务 Key（restapi.amap.com 公交算路 / 输入提示），不绑定包名 */
-    private val _customAmapWebApiKey = MutableStateFlow(AmapKeyStore.readWebKey(prefs))
+    private val _customAmapWebApiKey = MutableStateFlow(AmapKeyStore.readWebKey(amapKeyPrefs))
     val customAmapWebApiKey: StateFlow<String?> = _customAmapWebApiKey.asStateFlow()
 
     /** 当前生效的 Web 服务 Key：判断可用与实际发请求统一用它（用户配置 > BuildConfig） */
@@ -433,7 +435,7 @@ class FavoritesGroupViewModel(
      */
     fun saveCustomAmapApiKey(key: String) {
         val trimmed = key.trim().ifBlank { null }
-        AmapKeyStore.writeAndroidKey(prefs, trimmed)
+        AmapKeyStore.writeAndroidKey(amapKeyPrefs, trimmed)
         _customAmapApiKey.value = trimmed
         runCatching {
             AmapSdkManager.applyApiKey(TrackrApp.instance, trimmed)
@@ -445,7 +447,7 @@ class FavoritesGroupViewModel(
      */
     fun saveCustomAmapWebApiKey(key: String) {
         val trimmed = key.trim().ifBlank { null }
-        AmapKeyStore.writeWebKey(prefs, trimmed)
+        AmapKeyStore.writeWebKey(amapKeyPrefs, trimmed)
         _customAmapWebApiKey.value = trimmed
     }
 
