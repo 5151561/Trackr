@@ -12,11 +12,11 @@ r2 写于 `176144f`。之后用户提交了 16 个修复（`git log --reverse 17
 | `d61cb3f` 文档 | `docs/testing.md` 测试清单与测试类同步 | §5 测试名、第 2 步 |
 | `50dd949` 网络 | HTTP 请求可取消；OkHttp 加 `callTimeout(20s)`；异常信息只带 scheme + host + path；新增 `SingleFlightCache`（同 key 合并 + 短缓存 + LRU） | §2.8、§2.10；第 8 步、R17、R21 |
 | `a8455c3` 仓库 | 线路详情按 key 合并并发请求、缓存 6 秒；协程取消不再包成失败 | §2.5 `RealtimeRepository`、§2.10；第 8 步 |
-| `b4221c6` 数据源 | 车来了：附近站补全缓存 20 秒、其他站台补全 120 秒、空主查询 180 秒、补全并发 4；掌上公交：CMD103 站表 12 小时、CMD105 附近 20 秒、CMD102 搜索降级共享 10 秒、逆地理 30 秒（含 null） | §2.4 站表缓存、§2.10；第 8、9、20 步 |
+| `b4221c6` 数据源 | 车来了：附近站补全缓存 20 秒、其他站台补全 120 秒、空主查询 180 秒、补全并发 4；掌上公交：CMD103 站表 12 小时、CMD105 附近 20 秒、CMD102 搜索降级共享 10 秒、逆地理 30 秒（含 null） | §2.4 站表缓存、§2.10；第 8、9、20、21 步 |
 | `e683286` 详情页 | 线路 / 站点详情轮询随页面 RESUMED 启停；恢复时超过一个周期才补刷；上一轮没完就跳过；选站 / 换站台重置倒计时 | C1、§4.4；第 16、17、20、21 步 |
 | `0353590` 小组件 | `goAsync()` + 7 秒超时；多个实例只请求一次；补掌上公交城市编码；最近车按 `order + segmentProgress` | S1（部分已修）；§2.7；第 26 步 |
-| `8add086` 追踪 | `ArrivalRules`（ETA 只认 1..45 秒、坐标缺失不信插值）、`SingleLegTracker`、手动上车按 A..A+1 最近选车、`UserFix`（带精度和时刻）、会话代际号、失败指数退避、服务内直接切程、提醒类别改 REMINDER 并避免振两次 | A4、A5、A6；§2.6；第 4、7、12、15 步、R2 |
-| `648d59d` 追踪 | 首页「结束追踪」直接停服务并清换乘组；首页定位带精度和时刻喂给换乘引擎 | A1、A8；§2.5 `LocationRepository`；第 3、12 步 |
+| `8add086` 追踪 | `ArrivalRules`（ETA 只认 1..45 秒、坐标缺失不信插值）、`SingleLegTracker`、手动上车按 A..A+1 最近选车、`UserFix`（带精度和时刻）、会话代际号、失败指数退避、服务内直接切程、提醒类别改 REMINDER 并避免振两次 | A4、A5、A6；§2.6；第 4、6、7、12、15 步、R2 |
+| `648d59d` 追踪 | 首页「结束追踪」直接停服务并清换乘组；首页定位带精度和时刻喂给换乘引擎 | A8；§2.5 `LocationRepository`、§2.6；第 3、12、19 步 |
 | `8a3e570` 高德 | Key 严格分 Android / Web 两槽、互不回落；`AmapLruCache`；算路坐标 `String.format(Locale.ROOT, "%.6f,%.6f")` 并 URL 编码；输入提示 `citylimit` + `location`；`cityd`、`nightflag` | §2.5、§2.8、§2.10；第 8、11、24 步、Q18 |
 | `0545e2e` 规划 | 输入提示防抖 300ms + LRU 64；算路可取消 + LRU 16（15 分钟时间桶）；方案对齐并发 4 + 备忘；分组 ETA 刷新防抖 500ms；`FavoritesGroupViewModel` 涨到 1831 行 | A7、A8；§4.2；第 17、24 步、R3 |
 | `301c124` 首页 | `MainActivity` 按「App 前台 + 首页 tab + 首页在栈顶」调 `setPollingActive`，恢复时超过一个周期补刷；定位在 4.5 秒窗口内取最准；收藏真变了才同步快捷方式和小组件；`AmapMapSession` 随 Activity 暂停 / 恢复 | A9、N1、§3.4、§4.4；第 16、17、19、24 步 |
@@ -27,7 +27,8 @@ r2 写于 `176144f`。之后用户提交了 16 个修复（`git log --reverse 17
 - r2 留在正文里的 Hilt、`MockWebServer`、`:app` 写法已改成 Koin、Ktor `MockEngine` 和对应的新模块，删掉 r2 的「名称对照」表。
 - 阶段数改正为 8 个（0、A–G），共 41 步（第 0–40 步）；依赖图补上阶段 G。
 - §6.0 写明仓库没有跑测试的 CI，每步验收靠本地 `./gradlew test`。
-- 新增 §2.9（只属于 Android 的部分）、§2.10（网络与缓存要保留的行为），新增待定 Q16–Q18（§7.2）。
+- 新增 §2.9（只属于 Android 的部分）、§2.10（网络与缓存要保留的行为）；新增 Q16–Q18，用户已按推荐拍板（§7.2）。
+- 按只读审查的 40 条意见改正了行号、常量、测试去处和长辈版命名。
 
 ## r2 修订说明（用户拍板，已并入正文）
 
@@ -88,7 +89,7 @@ r2 写于 `176144f`。之后用户提交了 16 个修复（`git log --reverse 17
 | B5 | 没有 Compose compiler metrics/reports、没有 stability 配置、没有 Baseline Profile / Macrobenchmark 模块 | `app/build.gradle.kts` 全文；`settings.gradle.kts` 只 include 两个模块 | 无法量化重组和启动 | [CP] Foundational prerequisites 第 3 条 |
 | B6 | R8 keep 规则过宽：`-keep class com.trackr.domain.model.** { *; }`、`-keep class com.trackr.ui.navigation.** { *; }`、所有 Service/Receiver 全 keep | `app/proguard-rules.pro` | kotlinx.serialization 自带规则已覆盖，宽 keep 阻止优化 | [R8] Step 1/2 |
 | B7 | `android:usesCleartextTraffic="true"` 全局开启 | `AndroidManifest.xml:48` | 应只对必须 HTTP 的域名放行（network security config） | [IS]（组件与传输最小权限） |
-| B8 | **已做对（72d572c、0a4fdab）**：Manifest 接上 `backup_rules.xml`（Android 11 及以下）和 `data_extraction_rules.xml`（12+ 云备份 / 设备迁移），只排除 `sharedpref/trackr_amap_keys.xml`，收藏和设置照常备份 | `AndroidManifest.xml:41-42`；`res/xml/backup_rules.xml`、`res/xml/data_extraction_rules.xml` | 存储换成 Room / DataStore 后文件路径会变，规则要跟着改（§2.4、第 9 步、R22） | [IS] |
+| B8 | **已做对（8e0c41e 接 Manifest，72d572c 建两份规则文件，0a4fdab 把排除项从 `trackr_prefs.xml` 改成 `trackr_amap_keys.xml`）**：Manifest 接上 `backup_rules.xml`（Android 11 及以下）和 `data_extraction_rules.xml`（12+ 云备份 / 设备迁移），只排除 `sharedpref/trackr_amap_keys.xml`，收藏和设置照常备份 | `AndroidManifest.xml:41-42`；`res/xml/backup_rules.xml`、`res/xml/data_extraction_rules.xml` | 存储换成 Room / DataStore 后文件路径会变，规则要跟着改（§2.4、第 9 步、R22） | [IS] |
 | B9 | 没有跑测试的 CI：`.github/workflows` 只有 `update-branch.yml` | `.github/workflows/` | 每步验收只能靠本地 `./gradlew test`（§6.0） | [TD] |
 
 ### 1.2 架构分层与依赖注入
@@ -98,10 +99,10 @@ r2 写于 `176144f`。之后用户提交了 16 个修复（`git log --reverse 17
 | A1 | `TrackrApp.instance` 全局单例在 UI、Service、Widget 里直接取依赖，共 **36 处**（含 `TrackrApp.kt` 自身 2 处）。`ArrivalAlertManager` 的 2 处已改走 `LiveProgressNotificationHelper.readLiveNotificationEnabled()`（8add086）；`FavoritesGroupViewModel` 多了 `amapKeyPrefs`（0a4fdab） | `TrackrApp.kt:47,90`；`HomeViewModel.kt:90,94-95`；`StopDetailViewModel.kt:50`；`LineDetailViewModel.kt:76`；`LineDetailScreen.kt:101,437,451`；`FavoritesGroupViewModel.kt:103-109,118,316,441,780`；`MoreViewModel.kt:39-46`；`AboutViewModel.kt:40-45`；`MainActivity.kt:229`；`BusStopWidgetProvider.kt:64`；`LiveProgressNotificationHelper.kt:61`；`BusTrackingService.kt:192,263,394,439,465` | 依赖倒置；Composable 直接拿仓库违反 UDF | [AG] 第 1、4 条 |
 | A2 | Composable 里直接读仓库、直接写仓库 | `LineDetailScreen.kt:101,108`（`repository.activeTrackingSession.collectAsStateWithLifecycle()`）、`:451`（`reminderRepository.saveReminder`） | 状态应只来自 ViewModel 的 UiState | [AG] 第 1、2 条 |
 | A3 | `ITransitRepository` 是 99 行的「上帝接口」：城市、引擎、聚合优先级、收藏、追踪会话、定位、搜索历史、乘车码偏好、附近站数、通知开关、实时查询全在一起 | `ITransitRepository.kt:20-99` | 单一职责；Fake 也跟着膨胀（`FakeTransitRepository.kt` 230 行） | [AG] 第 4 条 |
-| A4 | 追踪状态有**三份**：`BusTrackingService.currentSession`（服务内主副本，8add086 起只在主线程读写，写完同步到仓库）、`TransitRepository._activeTrackingSession`、`TransferAutoSwitchManager._activeGroupSession`（`object`）；另有 `TransferAutoSwitchManager.lastUserFix`、`legSwitcher` 两个全局可变量；都不落盘 | `BusTrackingService.kt:69,75,177-201,391-397`；`TransitRepository.kt:105-106,574`；`TransferAutoSwitchManager.kt:33-36,70-81` | 单一数据源；进程被杀后 UI 与通知状态丢失 | [AG] 第 1 条 |
+| A4 | 追踪状态有**三份**：`BusTrackingService.currentSession`（服务内主副本，8add086 起只在主线程读写，写完同步到仓库）、`TransitRepository._activeTrackingSession`、`TransferAutoSwitchManager._activeGroupSession`（`object`）；另有 `TransferAutoSwitchManager.lastUserFix`、`legSwitcher` 两个全局可变量；都不落盘 | `BusTrackingService.kt:69,75,177-201,391-397`；`TransitRepository.kt:105-106,575-576`；`TransferAutoSwitchManager.kt:33-36,70-81` | 单一数据源；进程被杀后 UI 与通知状态丢失 | [AG] 第 1 条 |
 | A5 | 有状态的业务逻辑放在 `object` 里（`TransferAutoSwitchManager`、`ArrivalAlertManager`、`AmapSdkManager`、`AmapKeyStore`、`ReminderScheduler`），测试只能靠 `internal` 钩子。**部分已修（8add086、7617378）**：选车、到站、提醒编排、定位判上车、定位频率已抽成纯函数 `object`（`ArrivalRules`、`SingleLegTracker`、`GroupLegTracker`、`BoardingDetector`、`LocationCadence`），但时间仍直接取 `System.currentTimeMillis()` | `ArrivalAlertManager.kt:206,224`；`TransferAutoSwitchManager.kt:74,81`；`GroupLegTracker.kt:479`；`SingleLegTracker.kt:50`；`BusTrackingService.kt:386` | 可测试性；无法注入时钟 / Fake | [AG] 第 4 条、[TS] Step 4 |
 | A6 | `BusTrackingService` 用 19 个 Intent extra 启动、一次只追一条线。8add086 把参数收进 `TrackingStartParams`，服务存活时换乘引擎经 `legSwitcher` 在服务内直接切程，不再重启服务；extra 数没变。文件 704 行 | `BusTrackingService.kt:35-58`（`TrackingStartParams`）、`:479-497`（extra）、`:592-647`（打包 / 解析） | 启动参数应只带 id，服务从仓库读；v3「一起等」需要多线 | [V3]「一起等」、[V3P] 第 7 步 |
-| A7 | `FavoritesGroupViewModel` **1831 行**（0545e2e 后），同时管：分组、收藏、实时 ETA（防抖 500ms、合成候选对齐缓存）、高德输入提示（防抖 300ms、LRU 64）、路线规划（可取消、LRU 16、方案对齐并发 4）、Key 配置、数据迁移、路线追踪 | `FavoritesGroupViewModel.kt:102-1831`（函数清单见 `:339,437,458,644,1253,1395,1507,1613`） | 单一职责 | [AG] 第 4 条 |
+| A7 | `FavoritesGroupViewModel` **1831 行**（0545e2e 后），同时管：分组、收藏、实时 ETA（防抖 500ms、合成候选对齐缓存）、高德输入提示（防抖 300ms、LRU 64）、路线规划（可取消、LRU 16、方案对齐并发 4）、Key 配置、数据迁移、路线追踪 | `FavoritesGroupViewModel.kt:102-1831`（函数清单见 `:339,436,458,644,1253,1395,1507,1613`） | 单一职责 | [AG] 第 4 条 |
 | A8 | ViewModel 直接用 `SharedPreferences`、`Context`、`LocationManager`，还直接调追踪服务的 `object` | `FavoritesGroupViewModel.kt:109`（prefs）、`:118`（`amapKeyPrefs`）、`:779-811`（`getLastKnownLocation`）、`:1253,1277,1282,1321`（`fun xxx(context: Context)`）；`HomeViewModel.kt:86`（`AndroidViewModel`）、`:299-405`（`fetchGpsLocation`）、`:485,742`（直接调 `TransferAutoSwitchManager.updateUserFix` / `stopGroupTracking`，648d59d） | ViewModel 不应持有 / 接收 Context；定位归 `LocationRepository`，追踪控制归 `TrackingController` | [AG] 第 1 条 |
 | A9 | 桌面快捷方式与小组件刷新由 UI 层驱动，App 不打开就不同步。**部分已修（301c124）**：改成 `LaunchedEffect(Unit)` 里收集 `favorites.drop(1)`，只在收藏真变时刷新，`HomeViewModel` 里的重复触发已删；但仍挂在 `MainActivity` 的组合里 | `MainActivity.kt:228-237` | 副作用应在数据层 / 应用级作用域 | [AG] 第 1 条、[CP] §5 |
 | A10 | 两套设计系统并存：`app/ui/theme/*`、`app/ui/components/common/*` 与 `core/designsystem` 同名文件（`StatePlaceholders`、`DataSourceBadge`、`TrackrBottomSheet`、`RouteRailDrawUtils`、`Theme`） | `app/.../ui/theme/Theme.kt:9-30` 全是 typealias 转发；`app/.../ui/components/rail/RouteRailDrawUtils.kt` 与 `core/.../rail/RouteRailDrawUtils.kt` 各有一份测试 | 重复实现 | [V3P] 第 1、17 步 |
@@ -111,7 +112,7 @@ r2 写于 `176144f`。之后用户提交了 16 个修复（`git log --reverse 17
 | # | 现状 | 证据 | 不符合 | 来源 |
 | --- | --- | --- | --- | --- |
 | P1 | 7 处直接 `getSharedPreferences`（6 个文件里），存 5 个文件：`trackr_prefs`、`trackr_route_groups`、`trackr_scheduled_reminders`、`trackr_amap_keys`（0a4fdab 新增，只放高德 Key）、`trackr_reminder_schedule_state`（8e0c41e 新增，存 `next_trigger_<提醒 id>`）；内容多是 JSON 字符串 | `TransitRepository.kt:77`、`RouteGroupRepository.kt:36`、`ScheduledReminderRepository.kt:33`、`AmapKeyStore.kt:40,43`、`ReminderScheduler.kt:221`、`FavoritesGroupViewModel.kt:109` | SharedPreferences 无事务、`apply()` 的 QueuedWork 会在 `onPause`/服务停止时阻塞主线程 | [ANR] Path A、[AG] 第 5 条 |
-| P2 | 仓库构造函数里**同步读盘 + JSON 解码**，构造发生在 `Application.onCreate`（主线程） | `TrackrApp.kt:74-85` → `TransitRepository.kt:79-103`（`loadInitialCity/Favorites/...`）、`RouteGroupRepository.kt:50-96` | 冷启动主线程 I/O | [ANR] Path A（已证明执行线程=主线程、调用会阻塞） |
+| P2 | 仓库构造函数里**同步读盘 + JSON 解码**，构造发生在 `Application.onCreate`（主线程） | `TrackrApp.kt:74-85` → `TransitRepository.kt:79-103`（`loadInitialCity/Favorites/...`）、`RouteGroupRepository.kt:50-96`；另有 0a4fdab 带进来的同步写盘：`TrackrApp.kt:52` 读高德 Key → `AmapKeyStore.prefs()` 首次访问时搬迁并 `commit()`（`AmapKeyStore.kt:39-66`） | 冷启动主线程 I/O | [ANR] Path A（已证明执行线程=主线程、调用会阻塞） |
 | P3 | 数据迁移逻辑散在 ViewModel 里（`runDataMigrationIfNeeded`、`PREF_KEY_MIGRATION_VERSION`）；高德 Key 的搬迁在 `AmapKeyStore.prefs()` 首次访问时做（0a4fdab） | `FavoritesGroupViewModel.kt:129-130,339-369`；`AmapKeyStore.kt:39-67` | 迁移应属于数据层，一次执行 | [AG] 第 1 条 |
 | P4 | **已做对（148d67c）**：`RouteGroupRepository`、`ScheduledReminderRepository` 的读改写都在一把 `Mutex` 里（删收藏分组同时改两份数据，共用一把锁）；JSON 解析失败先把原文存到 `<key>_corrupt_backup_<时间戳>`，同一 key 只留最新一份，再按空数据继续 | `RouteGroupRepository.kt:42,71,87,276-285`；`ScheduledReminderRepository.kt:39,51,59-67` | 换存储时要保留这两条：Room 写入用事务，迁移要读出并保留这些备份（§2.4、第 9 步） | [AG] 第 1 条 |
 
@@ -123,7 +124,7 @@ r2 写于 `176144f`。之后用户提交了 16 个修复（`git log --reverse 17
 | N2 | **4 条栈共用一个** `rememberSaveableStateHolderNavEntryDecorator` 和一个 ViewModelStore decorator，且 `NavDisplay` 只拿当前栈 → 切 Tab 时另一个栈的 entry 离开组合，其 ViewModel 被清理、可保存状态依赖 decorator 是否仍记得 | `MainActivity.kt:391-395,499-501` | recipe 要求「每个顶层路由各一个 `SaveableStateHolderNavEntryDecorator`」，并用 `rememberDecoratedNavEntries` 合并 | [N3] multiple-backstacks「Important implementation details」 |
 | N3 | `HomeViewModel`、`FavoritesGroupViewModel` 在 Activity 级创建并跨页共享（首页+搜索、收藏+规划） | `MainActivity.kt:214-215,537,578,601,628` | ViewModel 应作用域到 NavEntry；共享状态放仓库 | [N3] passingarguments、[AG] 第 4 条 |
 | N4 | 带参页面手写 `ViewModelProvider.Factory` 和字符串 key | `MainActivity.kt:665-681,693-707` | 用 Koin `parametersOf(key)` 注入 + entry 作用域 | [N3] modular-hilt（同样的思路） |
-| N5 | Deep link：Intent extras 手工解析后塞 `mutableStateOf`，**强制切首页**再压线路页；无 URI、无合成返回栈；外部 App 可以给导出的 `MainActivity` 传任意 extra | `MainActivity.kt:101,112-115,128-152,315-336` | recipe：URI 解析 → `NavKey`，构建合成返回栈；外部输入需校验 | [N3] deeplinks-uriarguments / syntheticbackstack、[IS] |
+| N5 | Deep link：Intent extras 手工解析后塞 `mutableStateOf`，**强制切首页**再压线路页；无 URI、无合成返回栈；外部 App 可以给导出的 `MainActivity` 传任意 extra | `MainActivity.kt:101,112-115,129-156,324-342` | recipe：URI 解析 → `NavKey`，构建合成返回栈；外部输入需校验 | [N3] deeplinks-uriarguments / syntheticbackstack、[IS] |
 | N6 | 有 predictive back 过渡（`predictivePopTransitionSpec`），但子组件仍用旧 `BackHandler` | `MainActivity.kt:530`；`GroupEditDialog.kt:96`；`RoutePlanScreen.kt:269` | Nav3 已内置返回；组件内拦截应迁 `NavigationBackHandler` | [NE] Step 1 第 2、4 条 |
 | N7 | `NavigationFlowTest` 测的是 `mutableListOf<ScreenKey>`，不是真实导航逻辑 | `NavigationFlowTest.kt:13-60` | 导航测试应覆盖返回、deep link、exit-through-home | [TS] Step 10 |
 | N8 | 已做对：`ScreenKey` 是 `@Serializable sealed interface : NavKey`，`rememberNavBackStack` 可跨进程恢复；`dropUnlessResumed` 防连击 | `ScreenKey.kt:7-47`、`NavigationUtils.kt` | 保留 | [N3] basicsaveable |
@@ -133,7 +134,7 @@ r2 写于 `176144f`。之后用户提交了 16 个修复（`git log --reverse 17
 | # | 现状 | 证据 | 不符合 | 来源 |
 | --- | --- | --- | --- | --- |
 | C1 | 线路详情**每秒**改一次 `uiState.refreshCountdownSeconds`，而 `uiState` 在屏幕顶层读取 → 整页（含 922 行的 `ExpressiveRouteRail`）每秒重组。e683286 让轮询在页面不可见时停下，但可见时每秒倒计时还在 | `LineDetailViewModel.kt:53,100-103`；`LineDetailScreen.kt:100,381` | 高频状态应延迟读取（lambda）或下放到叶子；v3 已删倒计时 | [CP] §1 Phase Deferral、[V3]「刷新自动，下拉也能刷」 |
-| C2 | 每次轮询都会产生新的 `BusLineDetail`/`NearbyStop` 实例（含 `List`），强跳过模式下按 `===` 比较必然不等 → 列表项全部重组 | `HomeViewModel.kt` 轮询 → `HomeScreen.kt:232-236`；`TransitModels.kt:223,253` | 应在 ViewModel 里映射成扁平 UI 模型并复用未变化项的实例；**不要**给含集合的模型加 `@Immutable`/换 `ImmutableList` | [CP] §1「Never Add @Stable…to Collection Models」「When to Add…」 |
+| C2 | 每次轮询都会产生新的 `BusLineDetail`/`NearbyStop` 实例（含 `List`），强跳过模式下按 `===` 比较必然不等 → 列表项全部重组 | `HomeViewModel.kt` 轮询 → `HomeScreen.kt:232-236`；`TransitModels.kt:230,260` | 应在 ViewModel 里映射成扁平 UI 模型并复用未变化项的实例；**不要**给含集合的模型加 `@Immutable`/换 `ImmutableList` | [CP] §1「Never Add @Stable…to Collection Models」「When to Add…」 |
 | C3 | Lazy 列表 key/contentType 大多已正确（首页、搜索、站点、城市选择、提醒列表）；**例外**：`RoutePlanScreen.kt:691` `items(activeTips)` 无 key、无 contentType | 见左 | 所有 lazy item 都要 primitive key + contentType | [CP] §3 |
 | C4 | 动画已做对：首页呼吸 `graphicsLayer { alpha = alphaAnim }`、走向条脉冲 `graphicsLayer { scaleX = pulseScale }` | `HomeScreen.kt:354,391`；`ExpressiveRouteRail.kt:430,444-445` | 保留，作为范例 | [CP] §4 |
 | C5 | 超大 Composable 文件：`RoutePlanScreen.kt` 2496 行（含 Canvas 示意图、4 个对话框、地图 AndroidView、方案面板）、`HomeScreen.kt` 1109 行、`SearchScreen.kt` 839 行、`ExpressiveRouteRail.kt` 922 行 | `wc -l` | 难以单独测量、预览和测试；跳过粒度粗 | [CP] §1「Make Composables Cheaper」、[V3P] 第 4 步 |
@@ -160,7 +161,7 @@ r2 写于 `176144f`。之后用户提交了 16 个修复（`git log --reverse 17
 | T2 | `ScreenshotGeneratorTest`（862 行）用 `captureToImage` 生成图片，不是回归比对 | `ScreenshotGeneratorTest.kt:9-11` | 截图测试应有基准图与比对 | [TS] Step 3、8 |
 | T3 | 没有 DI 测试替换：Fake 通过 ViewModel 默认参数传入；Service/Receiver 测试要造真 `TrackrApp` | `ScheduledReminderReceiverTest.kt:7,24`、`BootCompletedReceiverTest.kt:6,20`、`ArrivalAlertManagerTest.kt:6,21` | Koin 测试模块 + Fake 绑定 | [TS] Step 2、4 |
 | T4 | 无导航真实流程测试（N7）、无状态恢复测试 | — | [TS] Step 9「Always verify state restoration」、Step 10 | [TS] |
-| T5 | 16 个修复带来的测试大多是纯 JVM、靠注入时钟控时：`SingleLegTrackerTest`、`BoardingDetectionTest`、`GroupLegTrackerTest`、`ReminderSchedulerTest`、`SingleFlightCacheTest`；另有 Robolectric 的 `TransitProviderCacheTest`、`TransitRepositoryLineDetailCacheTest`、`BootCompletedReceiverTest` 等。共 51 个测试类；`docs/testing.md` 漏了 `TransitProviderCacheTest`、`TransitRepositoryLineDetailCacheTest`、`SingleFlightCacheTest`、`AmapLruCacheTest` 4 个 | `app/src/test/java/com/trackr/**`；[TD] §3 | 纯逻辑测试可直接搬进 `commonTest`；文档要补全 | [TD]、[TS] Step 5 |
+| T5 | 16 个修复带来的测试大多是纯 JVM、靠注入时钟控时：`SingleLegTrackerTest`、`BoardingDetectionTest`、`GroupLegTrackerTest`、`ReminderSchedulerTest`、`SingleFlightCacheTest`；另有 Robolectric 的 `TransitProviderCacheTest`、`TransitRepositoryLineDetailCacheTest`、`BootCompletedReceiverTest` 等。`./gradlew test` 共跑 52 个测试类（`:app` 51 个 + `:core:designsystem` 的 `RouteRailDrawUtilsTest`）；`docs/testing.md` 漏了 `TransitProviderCacheTest`、`TransitRepositoryLineDetailCacheTest`、`SingleFlightCacheTest`、`AmapLruCacheTest` 4 个 | `app/src/test/java/com/trackr/**`；[TD] §3 | 纯逻辑测试可直接搬进 `commonTest`；文档要补全 | [TD]、[TS] Step 5 |
 
 ---
 
@@ -192,7 +193,7 @@ Data 层（:core:data / :core:database / :core:datastore / :core:network  common
 | Screen / Route 分离 | `LineDetailRoute(viewModel)` → `LineDetailScreen(state, onEvent)`。无状态 Screen 是 Compose 测试、截图测试、长辈版共用 ViewModel 的前提 | [AG] 第 2 条、[TS] Step 8–9、[ELD] |
 | commonMain 不碰平台 | `commonMain` 里不出现 `Context`、`Intent`、`R.`、`Toast`、`java.*`、`android.*`。需要系统能力时注入 domain 里的接口，实现放 `androidMain` / `iosMain` | [AG] 第 4 条 |
 | Domain 层只放共用纯逻辑 | 到站文字、追踪状态机、坐标投影、平台能力接口。不为每个仓库调用包一层 UseCase | [AG] 第 1 条 |
-| 时间一律注入 | 墙钟用 `kotlin.time.Clock`（夜班车判断、算路时间桶、提醒、会话时间戳）；缓存过期和定位年龄用单调时钟 `TimeSource`。现在代码里各处的 `nowMillis: () -> Long` 参数（`SingleFlightCache`、`TransitRepository`、两个详情 VM、`HomeViewModel`）就是这个口子，搬家时换成注入 | 8add086、a8455c3、e683286、301c124 都已这样写测试 |
+| 时间一律注入 | 墙钟用 `kotlin.time.Clock`（夜班车判断、算路时间桶、提醒、会话时间戳）；缓存过期和定位年龄用单调时钟 `TimeSource`。现在代码里已有的时钟参数就是这个口子：`nowMillis`（`SingleFlightCache`、`TransitRepository`、`ChelaileTransitProvider`、`MygolbsApiClient`）、`clockMillis`（两个详情 VM）、`elapsedRealtimeMillis`（`HomeViewModel`）、`wallClockMillis`（`FavoritesGroupViewModel`），搬家时换成注入。例外：追踪会话里要写进 DataStore 的时刻（如待确认开始时刻 `boardingCandidateSinceMillis`）用墙钟，进程重建后单调时钟会归零 | 现有写法：a8455c3、b4221c6、e683286、0545e2e、301c124 |
 
 ### 2.2 模块划分（Q1：拆，一步到位）
 
@@ -387,7 +388,7 @@ fun buildDatabase(builder: RoomDatabase.Builder<TrackrDatabase>) = builder
 - 设置和 Key **不用** DataStore 自带的 `SharedPreferencesMigration`：它迁完会删掉旧 key，和「旧 key 不删」冲突。自己写一个 `DataMigration`，只读不删。
 - 旧 key 不删，保留一个发版周期；回退旧版本仍能读到。例外：0a4fdab 已经把 Key 从 `trackr_prefs` 删掉了，回退到 0a4fdab 之前的版本会看不到 Key，这是现状，不再改。
 - 主 JSON 损坏：跳过该项、其他项照迁；原文和已有的 `_corrupt_backup_` 备份都复制到 `legacy_backup/`，旧 SharedPreferences 里的备份 key 也不删。在设置里记一条 `legacyCorruptKeys`，方便以后排查。
-- 首次读取不在主线程（修 P2）。[ANR] Path A
+- 首次读取不在主线程（修 P2），高德 Key 的搬迁也挪到后台。[ANR] Path A
 - 每个旧 key 写一条「读旧 JSON」测试；损坏的 JSON 不崩、备份原样保留。
 - 开关 `USE_NEW_STORE`：关掉时回到旧 SharedPreferences 实现（风险 R1）。
 
@@ -400,14 +401,14 @@ fun buildDatabase(builder: RoomDatabase.Builder<TrackrDatabase>) = builder
 | `RealtimeRepository` | 城市列表、附近、站点、线路、时刻表、搜索；按当前数据源选 Provider；线路详情按 key 合并请求并缓存 6 秒（a8455c3）；协程取消照常抛出，不包成失败结果 | `ITransitRepository` 查询部分 + `TransitProviderCoordinator` |
 | `SearchHistoryRepository` | 搜索历史 | `ITransitRepository` |
 | `ReminderRepository` | 定时提醒（已有接口，换存储） | `IScheduledReminderRepository` |
-| `LocationRepository` | 定位都带精度和时刻（`UserFix`，见 §2.6）：`latest: StateFlow<UserFix?>`；`bestFix(window = 4.5s, good = 100m, maxStale = 10min)`（首页「窗口内取最准」，301c124）；`lastKnown(maxAge = 10min)`（规划页「我的位置」，0545e2e）；`fixes(tier)`（追踪按阶段调频率，7617378）。实现在 `androidMain` / `iosMain`，经 `LocationSource` | `ITransitRepository.userLocation` + `HomeViewModel.fetchGpsLocation` + `FavoritesGroupViewModel.lastKnownWgsLocation` + `ServiceLocationSource`；替代 `HomeViewModel` 直接调 `TransferAutoSwitchManager.updateUserFix`（648d59d） |
+| `LocationRepository` | 定位都带精度和时刻（`UserFix`，见 §2.6）：`latest: StateFlow<UserFix?>`；`bestFix(freshFor = 60s（强制刷新时 10s）, window = 4.5s, good = 100m, maxStale = 10min)`：lastKnown 够新且精度 ≤100 m 就直接用，否则开窗口（首页「窗口内取最准」，301c124）；`lastKnown(maxAge = 10min)`（规划页「我的位置」，0545e2e）；`fixes(tier)`（追踪按阶段调频率，7617378）。实现在 `androidMain` / `iosMain`，经 `LocationSource` | `ITransitRepository.userLocation` + `HomeViewModel.fetchGpsLocation` + `FavoritesGroupViewModel.lastKnownWgsLocation` + `ServiceLocationSource`；替代 `HomeViewModel` 直接调 `TransferAutoSwitchManager.updateUserFix`（648d59d） |
 | `RoutePlanRepository` | 高德 POI 联想（LRU 64）、公交规划（LRU 16，键 = 城市 + 6 位小数坐标 + 15 分钟时间桶）、方案与实时线路对齐（备忘：命中 24 小时 / 没命中 10 分钟，并发 4）；后面是现有的 `AmapRouteGateway` 接口：Android 实现「SDK 优先，SDK 失败才走 Web；SDK 成功但 0 结果不再走 Web」，iOS 实现只走 Web | `FavoritesGroupViewModel.kt:458-1250`（0545e2e 后） |
 | `TrackingRepository` | 追踪会话单一数据源（见 2.6） | A4 |
 
 `ITransitProvider` 边界：
 - 保持现在的形状（`ITransitProvider.kt:16-52`）：一个数据源一个实现，只做「请求 → 领域模型」映射，不持有状态、不知道 UI。
 - D1 后 `TransitProviderCoordinator` 退化为「按 `SettingsRepository.dataSource` 选一个 Provider」，删聚合分支和 `SearchResultAggregator`。[SPEC] §8 D1、[V3P] 第 3 步
-- 一起等多线：`RealtimeRepository.getLineDetails(requests: List<LineDetailRequest>)` 改为：等车阶段只请求 1 次上车站的 `getStopDetail`（已带该站每条线的来车），条数不设上限；站点接口缺某条线时才对那条线单独请求（并发限 4，用户看不到）。车到站、正在用定位确认上了哪辆时怎么请求，见 Q16。Provider 接口不变。[V3]、Q8
+- 一起等多线：`RealtimeRepository.getLineDetails(requests: List<LineDetailRequest>)` 改为：等车阶段只请求 1 次上车站的 `getStopDetail`（已带该站每条线的来车），条数不设上限；站点接口缺某条线时才对那条线单独请求（并发限 4，用户看不到）。车到站、正在用定位确认上了哪辆时，只对此刻在站的车所在的线请求线路接口（Q16）。Provider 接口不变。[V3]、Q8
 - Provider 里的短缓存和并发上限（b4221c6）留在各自 Provider / API 客户端里，不上提到仓库，清单见 §2.10。
 
 高德 Key 两槽怎么算（8a3e570 严格分槽，互不回落）：
@@ -416,7 +417,7 @@ fun buildDatabase(builder: RoomDatabase.Builder<TrackrDatabase>) = builder
 | --- | --- | --- | --- |
 | `androidKey` | 用户填的 Android 槽 > `BuildConfig.AMAP_ANDROID_KEY` | 没有（iOS SDK 的 Key 另开一槽，等 Q15） | 地图渲染、SDK 输入提示、SDK 算路 |
 | `webKey` | 用户填的 Web 槽 > `BuildConfig.AMAP_WEB_KEY` | 同左（构建时注入） | Web 输入提示、Web 算路 |
-| `hasMapKey` | `androidKey` 或 `webKey` 非空（= 现在 `AmapRouteGateway.isConfigured()`） | `webKey` 非空 | 底栏是否显示「路线」页签（D2）；只有 Web Key 时怎么显示见 Q18 |
+| `hasMapKey` | `androidKey` 或 `webKey` 非空（= 现在 `AmapRouteGateway.isConfigured()`） | `webKey` 非空 | 底栏是否显示「路线」页签（D2）；Q18 已定 A：只有 Web Key 也显示（若改 B，则为 `androidKey` 非空） |
 | `canShowMap` | `androidKey` 非空 | 第 38 步之前恒为 false | 路线页是否画地图 |
 
 旧版本单输入框留在 Web 槽的值不搬去 Android 槽（`AmapKeyStore` 注释里的理由：看不出它是哪一类 Key）。
@@ -431,7 +432,7 @@ UI(VM) ──▶ │ session: StateFlow<TrackingSession?>   ← DataStore 持久
                           │ start 时用 sessionId 启动服务（不再传 19 个 extra）
                           ▼
               BusTrackingService（androidApp，by inject()）
-                 轮询 RealtimeRepository + LocationRepository.fixes(tier)
+                 轮询 RealtimeRepository + LocationRepository.fixes(tier) / latest
                    → TrackingEngine.reduce(session, polls, fix, now) → repository.update()（核对代际号）
                  收集 session → 通知 / 实时活动 / 焦点通知 / 流体云 / 震动 / 定位档位
 ```
@@ -440,19 +441,19 @@ UI(VM) ──▶ │ session: StateFlow<TrackingSession?>   ← DataStore 持久
 | --- | --- | --- |
 | 追踪目标 | `sealed interface TrackingTarget { SingleLine(lineKey, stopOrder) ; Route(groupId, startLeg) ; WatchTogether(stopId, lines: List<LineKey>) }`；一起等就是「只有 1 程、无下车站」的临时路线。现在的 `TrackingStartParams`（8add086）拆成 `TrackingTarget` + 会话里的字段 | [V3]「一起等」、[V3P] 第 7 步 |
 | 状态机 | `TrackingEngine`（纯函数，`:core:domain`）：`reduce(session, polls: Map<LineKey, List<LiveBus>>, fix: UserFix?, now) -> session + effects`，effects = 提醒 / 换乘提醒 / 切程 / 结束 / 定位档位。合并现有 6 个对象：`ArrivalRules`（到站口径）、`SingleLegTracker`（单线选车与提醒）、`GroupLegTracker`（两阶段 + 提醒编排）、`BoardingDetector`（定位判上车）、`LocationCadence`（定位档位）、`TransferAutoSwitchManager` 里的纯逻辑（下车站判定、自适应轮询间隔、选候选线、切程） | A4、A5 |
-| 到站口径（保留 8add086） | ETA 只认 1..45 秒，`etaSeconds <= 0` 不算到站；坐标缺失时上游默认 `segmentProgress = 1.0`，不能当已停靠（`LiveBus.hasValidProgress`）；锁定车 `order` 超过目标站直接算到站。通知、焦点通知、小组件都用这一套 | `ArrivalRules.kt` |
+| 到站口径（保留 8add086） | ETA 只认 1..45 秒，`etaSeconds <= 0` 不算到站；坐标缺失时上游默认 `segmentProgress = 1.0`，不能当已停靠（`LiveBus.hasValidProgress`）；锁定车 `order` 超过目标站直接算到站；「已停靠」= 上游到站标志，或（插值可信且 `segmentProgress ≥ 0.98`，`STOPPED_PROGRESS_THRESHOLD`）。常驻通知、焦点通知、两个 Tracker、换乘引擎已用这一套；小组件还没用（剩 0 站就直接写「即将进站」），第 6 步改用 | `ArrivalRules.kt` |
 | 选车（保留 8add086） | 单线：只看没过站的车，优先沿用正在追踪的车，否则取 `order + segmentProgress` 最大的；正在追踪的车消失时保持 2 轮再换；换车时重置提醒标志。分组：上车站到站提醒按轮询前的阶段发，本轮不做下车站临近判断；非最后一程到站只发换乘提醒 | `SingleLegTracker.kt`、`GroupLegTracker.kt` |
-| 上车判定（保留 7617378） | 有新鲜且精确的定位时：车到上车站 A → 人离 A ≤300 m 才进「待确认」；连续 2 次人车同行（人车 ≤ max(80 m, 2×精度) 且人离 A ≥100 m，或人离 A ≥400 m 且车已离开）→ 上车；连续 2 次人还在 A、车已走远 → 没赶上，改等下一班；5 分钟没结论且车已离开 A → 按上车处理。乘车中锁定车离人 >500 m、另一辆同线车离人 ≤80 m，连续 3 次 → 改锁。没有定位时退回「车到 A 即上车」 | `BoardingDetector.kt` |
+| 上车判定（保留 7617378） | 有新鲜且精确的定位时：车到上车站 A → 人离 A ≤300 m 才进「待确认」；连续 2 次人车同行（人车 ≤ max(80 m, 2×精度) 且人离 A ≥100 m，或人离 A ≥400 m 且车已离开 A）→ 上车；连续 2 次「人离 A ≤120 m，且车离 A ≥300 m（没有车辆坐标时按 `order ≥ A+2`）」→ 没赶上，改等下一班；待确认满 5 分钟（墙钟）没结论且车已离开 A → 按上车处理。乘车中：锁定车离人 >500 m 或已从数据里消失，同时另一辆同线、`order` 在 A..下车站之间的车离人 ≤ max(80 m, 2×精度)，连续 3 次 → 改锁；锁定车在数据里但没有坐标时不动。没有定位时退回「车到 A 即上车」。`TrackingEngineTest` 按这些常量写边界用例 | `BoardingDetector.kt:28-40,106-114,150-160` |
 | 「我上车了」和「上了哪辆？」 | 统一成一条规则，单线 / 路线 / 一起等共用：① 有「待确认」的车 → 就是它；② 否则在所有在追的线里，取 `order` 在 A..A+1、离 A 最近的车（8add086 的 `pickBoardedBus`）；③ 同时有 2 辆以上符合、且定位分得清（只有一辆离人 ≤ max(80 m, 2×精度)）→ 直接选那辆，**不弹窗**；④ 定位不可用或分不清 → 写 `boardChoice`，UI 弹「上了哪辆？」；⑤ 一辆都没有 → 先进 ON_BOARD、`lockedBusId = null`，后续轮询按②补锁。一起等没有定位时不自动判上车（多条线会认错），等用户点「我上车了」 | [V3]「两辆同时在站才问」、8add086、7617378 |
 | 多线等车 | `watchedLines: List<WatchedLine>` 按 ETA 排序，第一条为主显示；上车后其他线停止追踪，只追那一辆；上车后若定位显示锁错了，按上一行的改锁规则在同线内纠正 | [V3]「上了哪辆？」 |
-| 定位输入 | `data class UserFix(lat, lng, accuracyMeters: Float?, atMonotonicMillis: Long)`（WGS-84）。上车判定只用 ≤30 秒、精度 ≤50 m 的定位；下车站辅助判定只用 ≤60 秒、精度 ≤50 m、离下车站 <150 m（`USER_FIX_MAX_*`）；停止、切程时清空。年龄用单调时钟算，不受改系统时间影响 | 8add086、7617378 |
+| 定位输入 | `data class UserFix(lat, lng, accuracyMeters: Float?, atMonotonicMillis: Long)`（WGS-84）。上车判定只用 ≤30 秒、精度 ≤50 m 的定位；下车站辅助判定只用 ≤60 秒、精度 ≤50 m、离下车站 <150 m（`USER_FIX_MAX_*`）；停止、切程时清空。年龄用单调时钟算，不受改系统时间影响。坐标系：上车判定用站点和车辆的 WGS-84 坐标（`BusStop.wgsLat/wgsLng`），用户坐标直接比；下车站判定用的 `TransitLeg.toStopLat/Lng` 是 GCJ-02，要先把用户坐标转成 GCJ-02（`TransferAutoSwitchManager.kt:258-266`），合并进引擎时保留这次转换并加一条用例。来源：服务自己的定位，加上 App 在前台时 `LocationRepository.latest`（648d59d 起首页定位也喂给换乘引擎；服务没拿到 `location` 类型时这是唯一来源） | 8add086、7617378 |
 | 定位档位 | `LocationCadence`：单线不开；等车离 A ≤2 站或 ≤3 分钟 10 秒高精度；待确认 5 秒高精度；乘车中 20 秒省电；离下车站 ≤2 站 8 秒高精度。`LocationSource.fixes(tier)` 按档位注册监听，档位变了才重注册 | `LocationCadence.kt`、`ServiceLocationSource.kt` |
 | 轮询节奏（保留 8add086） | 离站 ≤1 站或 ETA ≤180 秒 10 秒；2–4 站或 ≤600 秒 20 秒；更远 45 秒；连续失败 ×2ⁿ 退避、最多 120 秒、成功清零；线路非运营 5 分钟；锁定车信号丢失至少 30 秒 | `TransferAutoSwitchManager.calculateAdaptivePollingInterval` |
 | 过期结果丢弃（保留 8add086） | 会话带代际号 `generation`，开始 / 切程 / 停止都 +1；网络回来先比对，旧的直接丢。服务里只把网络放到 IO，状态与通知在主线程 | `BusTrackingService.kt:63-75,257-261,290-291` |
 | 切程 | 由 `TrackingEngine` 产出「切程」效果，仓库直接改会话，服务继续用同一个前台通知轮询新一程。现在的 `legSwitcher` 回调（服务存活时内部切程、否则发 Intent）随之删掉 | 8add086 |
 | 进程重建 | 会话写 DataStore；Service 改 `START_STICKY`，重建时从仓库读会话继续；若系统不允许重启前台服务，下次打开 App 首页追踪卡显示「追踪已中断 · 继续」。服务正常销毁时把会话置为结束（沿用 8add086 的 `onDestroy`） | S4；风险 R5 |
 | UI 层入口 | `TrackingController` 接口（`start/stop/boarded/next`）注入 ViewModel，实现里调 `ContextCompat.startForegroundService`；ViewModel 不再收 `Context`（A8），也不再直接调 `TransferAutoSwitchManager`（648d59d 首页「结束追踪」现在就是这样调的）。`start` 返回是否成功：后台不允许启动前台服务时（定时提醒的非精确闹钟，8e0c41e）由调用方降级成通知 | [AG] 第 4 条 |
-| 前台服务类型（保留 7617378） | 需要定位的会话（路线；一起等见 Q17）且有精确定位权限时，`startForeground` 同时带 `specialUse` 和 `location` 两种类型；被拒（后台启动、Android 14+ 规则）时退回只用 `specialUse`，这次会话不用定位。Manifest 已声明 `FOREGROUND_SERVICE_LOCATION` | `BusTrackingService.kt:127-170` |
+| 前台服务类型（保留 7617378） | 需要定位的会话（路线、一起等，Q17）且有精确定位权限时，`startForeground` 同时带 `specialUse` 和 `location` 两种类型；被拒（后台启动、Android 14+ 规则）时退回只用 `specialUse`，这次会话不用定位。Manifest 已声明 `FOREGROUND_SERVICE_LOCATION` 权限，`BusTrackingService` 的 `foregroundServiceType` 是 `specialUse` 加 `location`（`AndroidManifest.xml:74`）；第 2 步搬到 `:androidApp` 时两项都保留 | `BusTrackingService.kt:127-170` |
 | 通知 | `LiveProgressNotificationHelper` 改成可注入类，输入 `TrackingSession` + `ArrivalText`；D3：`VISIBILITY_PUBLIC`，关掉锁屏开关时 `VISIBILITY_PRIVATE` + `setPublicVersion`。保留 8add086 的行为：强提醒类别 `CATEGORY_REMINDER`；独立通知发出去了就不再手动振动，没发出去才按「通知」用途振动；换乘提醒先清掉同一站的到站 / 临近通知；实时通知开关读不到时按开启处理（两处共用一个兜底值） | [SPEC] D3、[V3P] 第 5 步 |
 
 ### 2.7 通知与小组件
@@ -479,7 +480,7 @@ UI(VM) ──▶ │ session: StateFlow<TrackingSession?>   ← DataStore 持久
 | 网络 | Ktor `HttpClient` + kotlinx.serialization；`HttpTimeout` 对齐现有超时（总 20 秒、连接 12 秒、读写 15 / 12 秒）；异常和日志只带 scheme + host + path | OkHttp 引擎（沿用现有拦截器思路） | Darwin 引擎 | 要保留的行为见 §2.10 |
 | 加解密（车来了） | `expect fun aesDecrypt / md5`；密钥回退（先微信密钥再 H5 密钥，每把解完都做 JSON 校验，通过才算成功）、信封截取（跳过字符串里的括号）放 common；JSON 校验用 `Json.parseToJsonElement` 并要求是对象或数组；Base64 用 `kotlin.io.encoding.Base64`，解码前去掉空白（现在靠 `android.util.Base64` 兜底换行） | `javax.crypto`、`MessageDigest` | CommonCrypto | 现 `ChelaileCrypto.kt` 用了 `javax.crypto`、`java.util.Base64`、`android.util.Base64`，72d572c 又加了 `org.json.JSONTokener` |
 | 时间 / UUID | `kotlinx-datetime`、`kotlin.uuid.Uuid`；墙钟 `Clock`、单调时钟 `TimeSource` 都注入（§2.1） | — | — | 现有 8 个文件用 `java.time` / `SimpleDateFormat` / `Calendar`（含 8a3e570 的夜班车判断）；`System.nanoTime` / `SystemClock` 散在缓存、详情 VM、首页、换乘引擎 |
-| 并发与缓存工具 | `SingleFlightCache`、LRU 改写成 commonMain：锁用 `Mutex` 或 atomicfu 的 `SynchronizedObject`；LRU 用普通 `LinkedHashMap` 读时删了再插（common 没有 `accessOrder` 构造）；计数用 `kotlin.concurrent.atomics` | — | — | 现在用了 `synchronized`、`@Synchronized`、`@Volatile`、`ConcurrentHashMap`、`AtomicInteger`、`LinkedHashMap(…, true)`，约 20 个文件；清单和替代写法见 §2.10 |
+| 并发与缓存工具 | `SingleFlightCache`、LRU 改写成 commonMain：锁用 `Mutex` 或 atomicfu 的 `SynchronizedObject`；LRU 用普通 `LinkedHashMap` 读时删了再插（common 没有 `accessOrder` 构造）；计数用 `kotlin.concurrent.atomics` | — | — | 现在用了 `synchronized`、`@Synchronized`、`@Volatile`、`ConcurrentHashMap`、`AtomicInteger`、`LinkedHashMap(…, true)`，`app/src/main` 下 14 个文件；清单和替代写法见 §2.10 |
 | 存储 | Room、DataStore | 文件路径 `context.filesDir`；备份规则见 §2.4 | `NSDocumentDirectory`；Key 文件放 Application Support 并排除 iCloud 备份 | |
 | 定位 | `LocationSource` 接口：`fixes(tier): Flow<UserFix>`、`lastKnown(): UserFix?`、`hasPrecisePermission()`；`UserFix` 带精度和单调时刻（§2.6）；`LocationCadence` 的档位放 common | 系统 `LocationManager`（Android 12+ 优先 fused，否则 GPS + 网络；多源同时回调时差的不顶掉好的，沿用 `ServiceLocationSource`）；时刻取 `elapsedRealtimeNanos` | `CLLocationManager`；时刻由 `CLLocation.timestamp` 换算到同一单调时基 | 坐标转换 `CoordTransform` 放 common；上车 / 下车判定只认精确定位，模糊定位精度在公里级 |
 | 地图（路线页） | `expect @Composable fun RouteMap(...)`；算路和输入提示经 `AmapRouteGateway` 接口 | 高德 Android SDK + `AndroidView`；地图会话随 Activity 暂停 / 恢复（301c124）；算路沿用「SDK 优先，失败才走 Web」（0545e2e） | 高德 iOS SDK + `UIKitView`（第 38 步）；算路只走 Web（Ktor） | Key 两槽的规则见 §2.5 |
@@ -503,7 +504,7 @@ UI(VM) ──▶ │ session: StateFlow<TrackingSession?>   ← DataStore 持久
 
 | 代码 | 归属 | 说明 |
 | --- | --- | --- |
-| `GithubUpdateChecker`（多源回退、强制更新判断、下载地址只认 https + 白名单 `github.com` / `objects.githubusercontent.com` / `raw.githubusercontent.com` / `cdn.jsdelivr.net` / `fastly.jsdelivr.net`，72d572c） | `:androidApp`（实现 `:core:domain` 的 `UpdateChecker`） | iOS 走 App Store，不做应用内更新。白名单和多源回退原样保留，`GithubUpdateCheckerTest` 跟着搬；第 8 步换 Ktor 时它一起换，`HttpUrl` 解析改用 Ktor `Url` |
+| `GithubUpdateChecker`（多源回退、强制更新判断、下载地址只认 https + 精确匹配（不含子域名）的白名单 `github.com` / `objects.githubusercontent.com` / `raw.githubusercontent.com` / `cdn.jsdelivr.net` / `fastly.jsdelivr.net`，72d572c） | `:androidApp`（实现 `:core:domain` 的 `UpdateChecker`） | iOS 走 App Store，不做应用内更新。白名单和多源回退原样保留：地址不合规时算这一个源出错，继续试下一个源，`GithubUpdateCheckerTest` 跟着搬；第 8 步换 Ktor 时它一起换，`HttpUrl` 解析改用 Ktor `Url` |
 | `SignatureUtils`（取签名历史里的当前证书算 SHA-1，72d572c） | `:androidApp`（实现 `AppSigningInfo`） | 只在「高德 Key」页显示包名 + SHA-1，帮用户在高德控制台绑定；iOS 实现显示 Bundle ID。`SignatureUtilsTest` 跟着搬 |
 | `AmapSdkManager`、`AmapSdkTransitService`、`AmapMapSession` | `:feature:route` 的 `androidMain` | 高德 Android SDK 封装 |
 | `ServiceLocationSource` | `:androidApp`（实现 `LocationSource`） | 系统定位 |
@@ -527,6 +528,7 @@ UI(VM) ──▶ │ session: StateFlow<TrackingSession?>   ← DataStore 持久
 | 高德输入提示：防抖 300 ms、关键字太短不查、同词不重复查、新词取消旧请求；结果按「城市 + 关键字」LRU 64 | `FavoritesGroupViewModel.observeTipsQuery` + `AmapLruCache`（0545e2e、8a3e570） | 防抖和取消留在 `RoutePlanViewModel`；LRU 进 `RoutePlanRepository`；`AmapLruCache` 用了 `LinkedHashMap(…, true)` + `@Synchronized`，要改写 | `FavoritesGroupViewModelTest.searchTips_*`、`AmapLruCacheTest` |
 | 算路：新请求取消旧请求；LRU 16，key = 城市 + 6 位小数坐标 + 15 分钟时间桶；跨城才传 `cityd`；22:00–05:00 `nightflag=1` | `FavoritesGroupViewModel.planTransitRoute`、`AmapTransitApiClient`（0545e2e、8a3e570） | 时间桶和夜班车用注入的墙钟 + 时区，不再用 `Calendar` | `planTransitRoute_*`、`AmapTransitApiClientTest.nightFlagFor_*` |
 | 算路坐标固定 6 位小数、小数点永远是 `.`，再 URL 编码；输入提示 `citylimit=true` + 当前位置 | `AmapTransitApiClient.formatLngLat`（`String.format(Locale.ROOT, …)`、`URLEncoder`） | commonMain 没有 `String.format`：自己写定点格式化（乘 10⁶ 取整再补零）；编码用 Ktor 的 `URLBuilder.parameters` | `formatLngLat_usesDotDecimalSeparatorRegardlessOfLocale`、`buildTransitIntegratedUrl_*`、`buildInputTipsUrl_limitsToCity` |
+| Android SDK 通道同样保留：输入提示 `cityLimit` + 当前位置，算路 `cityd` + `nightFlag`（默认值现在走 `Calendar`）；`AmapTipItem` 新增的 `adcode` 字段随模型进 `:core:model` | `AmapSdkTransitService`（8a3e570） | 留 `:feature:route` 的 `androidMain`，夜班车默认值改由注入的墙钟算 | `AmapSdkTransitServiceTest` |
 | 区县 adcode 归到地级市（判断是否跨城） | `AmapTransitApiClient.cityAdcodeOf` | 纯函数，直接搬 | `cityAdcodeOf_normalizesDistrictToCity` |
 | 方案与实时线路对齐：只对齐前几个可见方案，按「线路名 + 上下车站」备忘，并发 4；合成候选的对齐结果命中缓存 24 小时、没命中 10 分钟 | `FavoritesGroupViewModel`（0545e2e，`ConcurrentHashMap` + `Semaphore`） | 进 `RoutePlanRepository` / `RouteAlignmentService` | `FavoritesGroupViewModelTest` 相关用例 |
 
@@ -537,7 +539,7 @@ UI(VM) ──▶ │ session: StateFlow<TrackingSession?>   ← DataStore 持久
 | Tab（顶层 NavKey） | 根页 | 子页 | 出现条件 | 来源 |
 | --- | --- | --- | --- | --- |
 | 公交 `ScreenKey.Bus` | 首页（搜索、追踪卡、收藏、附近） | Search、LineDetail、StopDetail、RouteDetail、FavoritesEdit | 总是 | [V3] §2 |
-| 路线 `ScreenKey.RoutePlan` | 地图规划 | LineDetail、RouteDetail | `SettingsRepository.hasMapKey == true`（Android 槽或 Web 槽有一个可用，§2.5；只有 Web Key 时按 Q18） | [SPEC] D2 |
+| 路线 `ScreenKey.RoutePlan` | 地图规划 | LineDetail、RouteDetail | `SettingsRepository.hasMapKey == true`（Android 槽或 Web 槽有一个可用，§2.5；Q18 已定：只有 Web Key 也显示） | [SPEC] D2 |
 | 我的 `ScreenKey.Me` | 设置 | About、ReminderEdit、AmapKey | 总是 | [V3] §4「我的」 |
 
 - 「收藏」Tab 删除，收藏并入公交首页；`ScreenKey.FavoritesGroup` 在过渡期保留，最后一步删除。[V3P] 第 8、17 步
@@ -694,7 +696,7 @@ ResultEffect<SavedFavorite> { vm.onFavoriteSaved(it.id) }
 
 ### 3.6 Deep link
 
-现在 3 个入口（小组件、动态快捷方式、通知）都用 6 个 extra（`MainActivity.kt:124-148`）。统一为 URI，并在一个纯函数里解析：
+现在 3 个入口（小组件、动态快捷方式、通知）都用 6 个 extra（`MainActivity.kt:136-156`）。统一为 URI，并在一个纯函数里解析：
 
 | URI | 解析出的合成返回栈 | 用于 |
 | --- | --- | --- |
@@ -720,9 +722,9 @@ object DeepLinkParser {   // 纯 Kotlin，JVM 单测
 | 规则 | 说明 | 来源 |
 | --- | --- | --- |
 | 合成返回栈 | deep link 进入时把目标 Tab 栈重置为 `[根, 目标]`，按返回回到该 Tab 根页而不是退出 App | [N3] deeplinks-syntheticbackstack |
-| 一次性消费 | 冷启动 `savedInstanceState == null` 才处理 `intent`；`onNewIntent` 总是处理；处理完 `intent.data = null`（保留现有防重放，`MainActivity.kt:108-111,141-147`） | [N3] deeplinks-staticuri |
+| 一次性消费 | 冷启动 `savedInstanceState == null` 才处理 `intent`；`onNewIntent` 总是处理；处理完 `intent.data = null`（保留现有防重放，`MainActivity.kt:112-115,149-155`） | [N3] deeplinks-staticuri |
 | 外部输入校验 | `MainActivity` 是导出的：id 只允许 `[A-Za-z0-9:_-]{1,64}`，未知 host 忽略；不支持把外部 Intent 转发给内部组件 | [IS] |
-| PendingIntent | 全部 `FLAG_IMMUTABLE` + 显式组件（现状已是 IMMUTABLE，`BusStopWidgetProvider.kt:161,173`，保留） | [IS] |
+| PendingIntent | 全部 `FLAG_IMMUTABLE` + 显式组件（现状已是 IMMUTABLE，`BusStopWidgetProvider.kt:176,188`，保留） | [IS] |
 | 两种 UI 模式共用 | 解析器只产出 `DeepLink`，由当前模式的导航器决定怎么落栈（见 §8.4） | [ELD] |
 
 不在 Manifest 注册 `trackr://` 的 `<intent-filter>`（只内部 PendingIntent 用显式 Intent + data），避免对外暴露。若以后要外部 App 打开，再加 filter。[IS]
@@ -732,7 +734,7 @@ object DeepLinkParser {   // 纯 Kotlin，JVM 单测
 | 项 | 方案 | 来源 |
 | --- | --- | --- |
 | 页面级返回 | 交给 `NavDisplay(onBack)` 内置的 predictive back；保留 `predictivePopTransitionSpec` | [NE] Step 1 第 2 条 |
-| 组件内拦截 | `GroupEditDialog.kt:96`（未保存确认）、`RoutePlanScreen.kt:265`（联想下拉）从 `BackHandler` 迁 `NavigationBackHandler`；同一个 `NavigationEventState` 只绑一个 handler，条件分支写在 `onBackCompleted` 里 | [NE] Troubleshooting 4、Checklist |
+| 组件内拦截 | `GroupEditDialog.kt:96`（未保存确认）、`RoutePlanScreen.kt:269`（联想下拉）从 `BackHandler` 迁 `NavigationBackHandler`；同一个 `NavigationEventState` 只绑一个 handler，条件分支写在 `onBackCompleted` 里 | [NE] Troubleshooting 4、Checklist |
 | Manifest | `enableOnBackInvokedCallback="true"` 已设，保留 | [NE] Checklist |
 | 弹层是否用 Scene | **按「是否需要从别处直接打开 / 进程重建后还在」区分**：`SaveFavorite`、`ChooseBoardedBus`（会被通知 deep link 打开）做成 NavKey + `BottomSheetSceneStrategy`；时刻表、城市选择、乘车码平台选择等页内小弹层保持 `ModalBottomSheet` 本地状态。前者需要进栈才能被 deep link 和返回手势统一管理；后者进栈反而增加样板 | [N3] bottomsheet |
 | 弹层返回 | `ModalBottomSheet` / `Dialog` 自带 dispatcher owner，不要再手动 `CompositionLocalProvider` | [NE] Troubleshooting 2 |
@@ -791,7 +793,7 @@ composeCompiler {
 
 | 规则 | 落点 | 来源 |
 | --- | --- | --- |
-| 所有 `items` 都给 primitive `key` + `contentType` | 现状大多已满足；补 `RoutePlanScreen.kt:687`；新页面（路线详情时间轴、编辑收藏、站点选线）按此写 | [CP] §3 |
+| 所有 `items` 都给 primitive `key` + `contentType` | 现状大多已满足；补 `RoutePlanScreen.kt:691`；新页面（路线详情时间轴、编辑收藏、站点选线）按此写 | [CP] §3 |
 | 首页收藏合一列表 | `contentType = { it::class.simpleName }`（`Stop`/`Route` 两种），key 用 `"stop_${id}"`/`"route_${id}"` | [CP] §3 |
 | 小列表不用 Lazy | 路线详情每程候选线（通常不多）、追踪卡里折叠后的一起等列表；站点页选线条数不设上限，超过 8 条改 `LazyColumn`用 `Column` + `forEach` | [CP] §3「Small & Bounded Lists」 |
 | 选择状态 | 站点页勾选用 `Set<String>`（VM 内），item 拿 `isChecked: () -> Boolean` | [CP] §3「Observable Selection」 |
@@ -802,7 +804,7 @@ composeCompiler {
 
 | 手段 | 说明 | 来源 |
 | --- | --- | --- |
-| 删每秒倒计时 | v3 不显示倒计时，`CountdownPollingStrategy` 改 `FixedDelayPollingStrategy`；如果保留「n 秒前更新」，用一个独立 `StateFlow<Long>` 只在显示它的 `Text` 里读。e683286 的「手动刷新 / 选站 / 换站台后重置计时」现在靠 `restartCountdown()`，它只对倒计时策略生效，所以 `FixedDelayPollingStrategy` 要补一个 `restart()`，两个详情 VM 的 `testSelectStop_resetsCountdown` 等用例改成断言下一轮的时刻 | C1、[CP] §1 Phase Deferral、[V3] |
+| 删每秒倒计时 | v3 不显示倒计时，`CountdownPollingStrategy` 改 `FixedDelayPollingStrategy`；如果保留「n 秒前更新」，用一个独立 `StateFlow<Long>` 只在显示它的 `Text` 里读。e683286 的「手动刷新 / 选站 / 换站台后重置计时」现在靠 `restartCountdown()`，它只对倒计时策略生效，所以 `FixedDelayPollingStrategy` 要补一个 `restart()`，`LineDetailViewModelTest.testSelectStop_resetsCountdown` 和 `StopDetailViewModelTest.testSelectStopIndex_changedPlatform_refreshesWithThatPlatform` 改成断言下一轮的时刻 | C1、[CP] §1 Phase Deferral、[V3] |
 | 状态按变化频率拆 | `LineDetailUiState` 拆成 `static`（线路、站表，几乎不变）+ `live`（车辆位置、ETA，每 10s）；走向条只接收 `live.buses`，头部只接收 `static` | [CP] §1、§2 |
 | 车辆位置用延迟读取 | 走向条上车的移动 `Modifier.offset { IntOffset(…progress()…) }`，传 `progress: () -> Float` | [CP] §2「Phase Deferral for Offsets」、§4「Lambda Providers」 |
 | ETA 数字动画 | `AnimatedContent` 只包住大数字 `Text`，不包整卡 | [CP] §4 |
@@ -825,7 +827,7 @@ composeCompiler {
 | --- | --- | --- |
 | 已正确的保留 | 呼吸、脉冲在 `graphicsLayer {}` 里读（C4） | [CP] §4 |
 | 悬浮乘车码按钮伸缩 | 用列表 `LazyListState` 派生 `expanded`（`remember { derivedStateOf { state.lastScrolledBackward || state.firstVisibleItemIndex == 0 } }`），按钮宽度用 `animateContentSize` 或 M3 `ExtendedFloatingActionButton(expanded=)` | [CP] §1 derivedStateOf |
-| 底栏下沉隐藏 | 现有 `NestedScrollConnection` + `graphicsLayer { translationY }` 已是延迟读取，保留（`MainActivity.kt:361-388,416-419`） | [CP] §4 |
+| 底栏下沉隐藏 | 现有 `NestedScrollConnection` + `graphicsLayer { translationY }` 已是延迟读取，保留（`MainActivity.kt:361-388,413-415`） | [CP] §4 |
 | Tab / 页面切换 | 统一放 `TrackrTransitions`，用 `MotionScheme.expressive()` 的 spec | [N3] animations |
 
 ### 4.6 Baseline Profile 与 Macrobenchmark
@@ -842,7 +844,7 @@ composeCompiler {
 
 | 工具 | 用法 | 什么时候 |
 | --- | --- | --- |
-| Compose compiler reports | `./gradlew :androidApp:assembleRelease -PcomposeReports`，看各模块 `build/compose_reports/*-composables.txt` 里 `restartable` 但非 `skippable` 的、`*-classes.txt` 里 `unstable` 的类 | 第 1 步建基线；每个页面步骤结束对比 |
+| Compose compiler reports | `./gradlew :androidApp:assembleRelease -PcomposeReports`，看各模块 `build/compose_reports/*-composables.txt` 里 `restartable` 但非 `skippable` 的、`*-classes.txt` 里 `unstable` 的类 | 第 1 步建基线（那时模块还叫 `:app`，用 `:app:assembleRelease -PcomposeReports`）；每个页面步骤结束对比 |
 | Layout Inspector 重组计数 | Debug 包，线路详情停留 30 秒，记录走向条 / 主卡的重组次数（目标：轮询一次只重组 ETA 相关节点） | 第 20 步前后 |
 | Macrobenchmark | 第 27 步之后每个大改动跑一次，记录 `timeToInitialDisplayMs`、`frameDurationCpuMs P90` | 第 27 步起 |
 | 系统 trace / Perfetto | 只在 benchmark 退化时用 | 按需 |
@@ -885,13 +887,13 @@ val fakeDataModule = module {
 ```
 
 - ViewModel 单测**不用** Koin，直接构造，最快；纯逻辑和 ViewModel 测试放 `commonTest`，Android 和 iOS 都跑。[TS] Step 4
-- `FakeTransitRepository`（`app/src/test/.../FakeTransitRepository.kt`）在仓库拆分（第 8 步）时按新接口拆成多个 Fake，移入 `:core:testing`；旧类保留到所有测试迁完再删，保证 [AG]「数据层测试用 FakeTransitRepository」的约定在过渡期一直成立（AGENTS.md 第 1 条在第 8 步同步改为「用 `:core:testing` 里的 Fake」）。
+- `FakeTransitRepository`（第 2 步后在 `androidApp/src/test/.../FakeTransitRepository.kt`）在仓库拆分（第 8 步）时按新接口拆成多个 Fake，移入 `:core:testing`；旧类保留到所有测试迁完再删，保证 [AG]「数据层测试用 FakeTransitRepository」的约定在过渡期一直成立（AGENTS.md 第 1 条在第 8 步同步改为「用 `:core:testing` 里的 Fake」）。
 - 新增 `FakeClock`（墙钟 + 单调时钟）、`FakeLocationSource`（可推送带精度和时刻的 `UserFix`）、`FakeReminderAlarms`、`FakeAnnouncer`、`FakeTrackingController`（可模拟「后台不允许启动前台服务」）、`FakeTransitCodeLauncher`。
 - Mockk 不引入，除非遇到无法写 Fake 的第三方类（高德 SDK 已有封装接口）。[TS] Step 3
 
 ### 5.3 现有测试迁到哪
 
-测试名与 `docs/testing.md` §3 一致。`docs/testing.md` 还漏了 `TransitProviderCacheTest`、`TransitRepositoryLineDetailCacheTest`、`SingleFlightCacheTest`、`AmapLruCacheTest`，第 2 步改文档时补上。
+测试名与 `docs/testing.md` §3 一致。`docs/testing.md` 漏了 4 个测试类（T5），第 2 步改文档时补上。
 
 | 现有测试 | 迁到 | 步 |
 | --- | --- | --- |
@@ -901,10 +903,10 @@ val fakeDataModule = module {
 | `TransitUnitTest` 里的 `ChelaileCrypto` 用例（双密钥回退、全部密钥都不是 JSON 时抛错、信封里字符串含括号） | 拆出 `ChelaileCryptoTest`，进 `:core:network` 的 `commonTest`；其余算法用例进 `:core:domain` | 7、8 |
 | `BaseTransitApiClientTest`、`SingleFlightCacheTest`、`TransitProviderCacheTest`、`TransitProviderTest`、`TransitRepositoryLineDetailCacheTest`、`TransitProviderCoordinatorTest`、`AmapTransitApiClientTest`、`AmapLruCacheTest` | `:core:network` / `:core:data` 的 `commonTest`，`MockEngine` + 假时钟 | 8 |
 | `AmapSdkManagerTest`（含 Key 不回落、从 `trackr_prefs` 一次性搬迁）、`AmapSdkTransitServiceTest` | Key 部分进 `SettingsRepositoryTest` / `LegacyLibraryMigrationTest`；SDK 部分留 `:feature:route` 的 Android 主机测试 | 9、24 |
-| `RouteGroupRepositoryTest`、`ScheduledReminderRepositoryTest`（并发不丢更新、JSON 损坏备份、计划时刻记录） | 并发用例进新 Room 仓库测试；损坏备份用例进 `LegacyLibraryMigrationTest` | 9 |
+| `RouteGroupRepositoryTest`、`ScheduledReminderRepositoryTest`（并发不丢更新、JSON 损坏备份、计划时刻记录） | 并发用例和 `testScheduleRecordsLastTrigger_andCancelClearsIt`（随 `reminder.lastScheduledTriggerAt`）进新 Room 仓库测试；损坏备份用例进 `LegacyLibraryMigrationTest` | 9 |
 | `ReminderSchedulerTest`、`ScheduledReminderReceiverTest`、`BootCompletedReceiverTest` | 「已错过的一次性提醒」「是否直接开追踪」两段纯逻辑进 common；接收器测试留 `:androidApp` | 4、9、12 |
 | `GithubUpdateCheckerTest`、`SignatureUtilsTest`、`TransitCodeHelperTest` | 留 `:androidApp`（§2.9） | 8 |
-| `LineDetailViewModelTest`、`StopDetailViewModelTest`、`HomeViewModelTest`、`FavoritesGroupViewModelTest`、`MoreViewModelTest`、`AboutViewModelTest` | 随 VM 进各 feature 的 `commonTest`；`FavoritesGroupViewModelTest` 按方法拆成 `RoutePlanViewModelTest`、`RouteDetailViewModelTest`、`FavoritesEditViewModelTest`；`HomeViewModelTest` 的定位窗口用例进 `LocationRepositoryTest` | 17 |
+| `LineDetailViewModelTest`、`StopDetailViewModelTest`、`HomeViewModelTest`、`FavoritesGroupViewModelTest`、`MoreViewModelTest`、`AboutViewModelTest` | 随 VM 进各 feature 的 `commonTest`；`FavoritesGroupViewModelTest` 按方法拆成 `RoutePlanViewModelTest`、`RouteDetailViewModelTest`、`FavoritesEditViewModelTest`；`HomeViewModelTest` 的定位窗口用例进 `LocationRepositoryTest`（第 8 步） | 8、17 |
 | `NavigationKeyTest`、`NavigationFlowTest` | `:core:navigation`；`NavigationFlowTest` 里只测 `mutableListOf` 的用例删掉，换成 `NavigatorTest` | 16 |
 | Compose UI 测试（`ExpressiveRouteRailUiTest`、`StationArrivalContentTest`、`BusFollowContentTest`、`RoutePlanScreenTest` 等）、`ScreenshotGeneratorTest` | 随页面进 feature；阶段 D 每页重写时改成测无状态 Screen | 19–25 |
 | `PollingCoordinatorTest`、`CoordTransformTest` | `:core:ui` / `:core:domain` 的 `commonTest` | 7、20 |
@@ -953,39 +955,39 @@ val fakeDataModule = module {
 
 | 步 | 目标 | 改动 | 依赖 | 验证 | 风险 / 回退 |
 | --- | --- | --- | --- | --- | --- |
-| 0 | 干净的起点 + 基线 | 提交设计与计划文档；记录基线：`./gradlew test` 用时与用例数、`./gradlew :app:assembleRelease` APK 大小、冷启动时间、测试类数（`7617378` 时 51 个） | — | `git status` 干净；基线数字写进附录 | 无 |
+| 0 | 干净的起点 + 基线 | 提交设计与计划文档；记录基线：`./gradlew test` 用时与用例数、`./gradlew :app:assembleRelease` APK 大小、冷启动时间、测试类数（`7617378` 时 52 个：`:app` 51 + `:core:designsystem` 1） | — | `git status` 干净；基线数字写进附录 | 无 |
 
 ### 阶段 A：工具链与工程骨架（无用户可见变化）
 
 | 步 | 目标 | 改动文件 | 依赖 | 验证 | 风险 / 回退 |
 | --- | --- | --- | --- | --- | --- |
-| 1 | 升级工具链 + 诊断（Q12） | AGP 升到当时最新稳定版（9.5 已稳定就到 9.5，可用 test suites 截图）、Kotlin、KSP、Gradle、Compose BOM；版本目录加 CMP、Koin、Ktor、Room、DataStore、`kotlinx-datetime` 条目（暂不应用）；`composeCompiler { stabilityConfigurationFiles; reports(-PcomposeReports) }`；根目录 `compose_stability.conf` | 0 | `./gradlew test`、`./gradlew :app:assembleRelease`；装机冒烟；compose reports 存一份基线 | 新 AGP 默认行为变化 → 按 [AGP] 逐项核对；单独提交，失败 revert |
-| 2 | 约定插件 + 拆出 `:androidApp` | 新增 `build-logic/convention`（`trackr.android.application`、`trackr.kmp.library`：Android KMP 库插件 + `iosArm64` + `iosSimulatorArm64` + 开启 Android 主机测试、`trackr.kmp.compose`、`trackr.kmp.feature`）；`git mv app androidApp`，`applicationId` 不变；更新 `AGENTS.md`、`docs/testing.md` 的命令，`docs/testing.md` 补上漏掉的 4 个测试类（§5.3） | 1 | `./gradlew test` 用例数与基线一致；`./gradlew :androidApp:assembleRelease`；装机覆盖安装旧版，数据还在 | 纯搬家；revert |
-| 3 | Koin 接入 + ViewModel 注入 | `:androidApp` 加 Koin；`di/AppModule.kt` 提供现有实例；`TrackrApp.instance` 暂留；6 个 ViewModel 改构造注入（带参数的用 `parametersOf`）；`MainActivity.kt:214-215,665-707,735` 的手写 Factory 删掉；`HomeViewModel` 不再继承 `AndroidViewModel`：定位（`fetchGpsLocation`）和「结束追踪」（648d59d 直接调 `TransferAutoSwitchManager`）先各包一层可注入的接口，Android 实现暂时转调原代码；`FavoritesGroupViewModel` 的 `prefs`、`amapKeyPrefs`、`lastKnownWgsLocation` 同样先包成注入；`LineDetailScreen.kt:101,108,437,451` 的仓库访问移进 VM | 2 | 6 个 ViewModel 测试（仍直接 new）；新增 `KoinGraphVerifyTest` | 共享 VM 行为不变（第 17 步才拆）；revert |
-| 4 | 平台组件注入，删 `TrackrApp.instance` | Service / Receiver（含 8e0c41e 改过的 `BootCompletedReceiver`）/ 小组件用 `KoinComponent` + `by inject()`；有状态的 `ArrivalAlertManager`、`LiveProgressNotificationHelper`、`TransferAutoSwitchManager`、`ReminderScheduler`（实现 `ReminderAlarms`）、`AmapKeyStore` 从 `object` 改成类（先留同名 `object` 转发，第 12 步删）；纯函数 `object`（`ArrivalRules`、`SingleLegTracker`、`GroupLegTracker`、`BoardingDetector`、`LocationCadence`）不动，第 7 步搬；接收器里每次新建的 `CoroutineScope(Dispatchers.IO)` 换成注入的应用级 scope（S5）；快捷方式 / 小组件同步移到应用级收集器，保留「收藏真变才刷新」（A9） | 3 | `LiveProgressNotificationHelperTest`、`ArrivalAlertManagerTest`、`TransferAutoSwitchManagerTest`、`ScheduledReminderReceiverTest`、`BootCompletedReceiverTest`、`ReminderSchedulerTest`；`grep -rn "TrackrApp.instance" androidApp/src` 无结果 | revert |
-| 5 ∥ | 设计系统改 CMP + v3 Token | `:core:designsystem` 改成 KMP + CMP 模块；v3 蓝 `#1F5FD6` 浅 / 深两套、去掉动态取色；`TrackrColors(go/goContainer/warn/warnContainer/walk)`（旧字段留别名）；Typography 加 `eta` / `item`；`Shape.kt`（8/16/28）、`Dimens.kt`；**API 一次定型为 `TrackrTheme(uiMode: UiMode = Standard)`**；图标与通用文案进 Compose 资源；删 `app/ui/theme/*` 等重复件 | 2 | `./gradlew test`；`:core:designsystem:compileKotlinIosSimulatorArm64`；截图目视对比颜色 | `MaterialExpressiveTheme` 在 CMP 不可用时退回 `MaterialTheme` + 自定义动效（R15）；revert |
+| 1 | 升级工具链 + 诊断（Q12） | AGP 升到当时最新稳定版（9.5 已稳定就到 9.5，可用 test suites 截图）、Kotlin、KSP、Gradle、Compose BOM；版本目录加 CMP、Koin、Ktor、Room、DataStore、`kotlinx-datetime` 条目（暂不应用）；`composeCompiler { stabilityConfigurationFiles; reports(-PcomposeReports) }`；根目录 `compose_stability.conf` | 0 | `./gradlew test`、`./gradlew :app:assembleRelease`；装机冒烟；compose reports 存一份基线 | 新 AGP 默认行为变化（R14）→ 按 [AGP] 逐项核对；单独提交，失败 revert |
+| 2 | 约定插件 + 拆出 `:androidApp` | 新增 `build-logic/convention`（`trackr.android.application`、`trackr.kmp.library`：Android KMP 库插件 + `iosArm64` + `iosSimulatorArm64` + 开启 Android 主机测试、`trackr.kmp.compose`、`trackr.kmp.feature`）；`git mv app androidApp`，`applicationId` 不变；更新 `AGENTS.md`、`docs/testing.md` 的命令，`docs/testing.md` 补上漏掉的 4 个测试类（T5） | 1 | `./gradlew test` 用例数与基线一致；`./gradlew :androidApp:assembleRelease`；装机覆盖安装旧版，数据还在 | 纯搬家（R14）；revert |
+| 3 | Koin 接入 + ViewModel 注入 | `:androidApp` 加 Koin；`di/AppModule.kt` 提供现有实例；`TrackrApp.instance` 暂留；6 个 ViewModel 改构造注入（带参数的用 `parametersOf`）；`MainActivity.kt:214-215,665-707,735` 的手写 Factory 删掉；`HomeViewModel` 不再继承 `AndroidViewModel`：定位（`fetchGpsLocation`）和「结束追踪」（648d59d 直接调 `TransferAutoSwitchManager`）先各包一层可注入的接口，Android 实现暂时转调原代码；`FavoritesGroupViewModel` 的 `prefs`、`amapKeyPrefs`、`lastKnownWgsLocation` 同样先包成注入；`LineDetailScreen.kt:101,108,437,451` 的仓库访问移进 VM | 2 | 6 个 ViewModel 测试（仍直接 new）；新增 `KoinGraphVerifyTest` | 共享 VM 行为不变（第 17 步才拆）；缺绑定（R4）；revert |
+| 4 | 平台组件注入，删 `TrackrApp.instance` | Service / Receiver（含 8e0c41e 改过的 `BootCompletedReceiver`）/ 小组件用 `KoinComponent` + `by inject()`；有状态的 `ArrivalAlertManager`、`LiveProgressNotificationHelper`、`TransferAutoSwitchManager`、`ReminderScheduler`、`AmapKeyStore` 从 `object` 改成类（`ReminderScheduler` 在第 7 步定义 `ReminderAlarms` 后再实现它）（先留同名 `object` 转发，第 12 步删）；纯函数 `object`（`ArrivalRules`、`SingleLegTracker`、`GroupLegTracker`、`BoardingDetector`、`LocationCadence`）不动，第 7 步搬；接收器里每次新建的 `CoroutineScope(Dispatchers.IO)` 换成注入的应用级 scope（S5）；快捷方式 / 小组件同步移到应用级收集器，保留「收藏真变才刷新」（A9） | 3 | `LiveProgressNotificationHelperTest`、`ArrivalAlertManagerTest`、`TransferAutoSwitchManagerTest`、`ScheduledReminderReceiverTest`、`BootCompletedReceiverTest`、`ReminderSchedulerTest`；`grep -rn "TrackrApp.instance" androidApp/src` 无结果 | revert |
+| 5 ∥ | 设计系统改 CMP + v3 Token | `:core:designsystem` 改成 KMP + CMP 模块；v3 蓝 `#1F5FD6` 浅 / 深两套、去掉动态取色；`TrackrColors(go/goContainer/warn/warnContainer/walk)`（旧字段留别名）；Typography 加 `eta` / `item`；`Shape.kt`（8/16/28）、`Dimens.kt`；**API 一次定型为 `TrackrTheme(uiMode: UiMode = Standard)`**；图标与通用文案进 Compose 资源；删 `androidApp/…/ui/theme/*` 等重复件 | 2 | `./gradlew test`；`:core:designsystem:compileKotlinIosSimulatorArm64`；截图目视对比颜色 | `MaterialExpressiveTheme` 在 CMP 不可用时退回 `MaterialTheme` + 自定义动效（R15）；revert |
 | 6 ∥ | 到站文字统一 | `ArrivalText`（8 种状态 → 大字 / 小字 / 色调 / 朗读文本），只用 `kotlinx-datetime`，第 7 步直接搬进 `:core:domain`；「即将进站 / 已到站」的判断调 `ArrivalRules`（ETA 1..45 秒、坐标缺失不信插值，8add086），不再各写一套区间；替换 `BusArrivalBadge`、`StationArrivalContent`、`TransitGroupCardText`、`LiveProgressNotificationHelper`、`BusStopWidgetProvider` 的文案 [V3] | 2 | 新增 `ArrivalTextTest`；改 4 个相关测试的期望文字 | 通知文案变化；revert |
 
 ### 阶段 B：跨平台核心、数据与追踪
 
 | 步 | 目标 | 改动文件 | 依赖 | 验证 | 风险 / 回退 |
 | --- | --- | --- | --- | --- | --- |
-| 7 | 纯逻辑模块（KMP） | 新增 `:core:model`、`:core:domain`、`:core:testing`；搬 `domain/model/*`（含 8add086 / 7617378 加的 `LiveBus.hasValidProgress`、会话里的待确认 / 改锁字段）、`RouteProjectionMath`、`CoordTransform`、`ArrivalText`，以及追踪的 5 个纯函数对象 `ArrivalRules`、`SingleLegTracker`、`GroupLegTracker`、`BoardingDetector`、`LocationCadence`（只改包名和时间来源，逻辑不动；`System.currentTimeMillis()` 换成参数传入的 `now`）；`UserFix` 从 `TransferAutoSwitchManager` 挪进 `:core:model`，时刻改成单调毫秒；`java.time` → `kotlinx-datetime`、`UUID` → `kotlin.uuid.Uuid`；domain 里定义平台能力接口（`TrackingController`、`Announcer`、`TransitCodeLauncher`、`LocationSource`（带精度和时刻，§2.8）、`SpeechInput`、`ReminderAlarms`、`UpdateChecker`、`AppSigningInfo`、`Clock`）；`compose_stability.conf` 写入模型清单 | 4、6 | `./gradlew test`；`GroupLegTrackerTest`、`SingleLegTrackerTest`、`BoardingDetectionTest`、`CoordTransformTest` 搬进 `commonTest` 原样通过；`./gradlew :core:domain:iosSimulatorArm64Test`（需 Xcode） | 搬文件 diff 大但无逻辑变化；R8 规则跟着改包路径；revert |
-| 8 | `:core:network` + `:core:data`，拆上帝接口 | OkHttp → Ktor（Android 用 OkHttp 引擎），逐条保留 §2.10 的行为（可取消、20 秒总超时、异常去 query、取消不算失败、各级短缓存与并发上限、6 位小数坐标与 URL 编码、`cityd` / `nightflag`）；`SingleFlightCache`、`AmapLruCache` 改写成 commonMain，时间注入 `TimeSource` / `Clock`；`ChelaileApiClient`、`MygolbsApiClient`、高德 Web 客户端进 `:core:network`；`ChelaileCrypto` 改 `expect/actual`，保留双密钥 + JSON 校验 + 字符串感知的信封截取，`org.json` 换 kotlinx.serialization；高德 Android SDK 封装留 `androidMain`；`GithubUpdateChecker`、`SignatureUtils` 归 `:androidApp`（§2.9），更新地址白名单原样保留；新增接口 `SettingsRepository`、`FavoritesRepository`、`RealtimeRepository`、`SearchHistoryRepository`、`LocationRepository`、`RoutePlanRepository`（`TransitRepository` 先同时实现它们）；`AmapRouteGateway` 从 VM 文件挪到 `:core:data`；`FakeTransitRepository` 按接口拆到 `:core:testing`；更新 `AGENTS.md` 测试准则 | 7 | Provider 测试改用 Ktor `MockEngine` + 录好的真实响应；§2.10 表里列的测试全部搬进 `commonTest` 并通过（`SingleFlightCacheTest`、`TransitProviderCacheTest`、`TransitRepositoryLineDetailCacheTest`、`BaseTransitApiClientTest`、`AmapTransitApiClientTest`、`AmapLruCacheTest`）；新增 `ChelaileCryptoTest`（从 `TransitUnitTest` 拆出，用已知密文对比）；`GithubUpdateCheckerTest`；`:core:network:iosSimulatorArm64Test` | Ktor 与 OkHttp 在请求头、压缩、超时、异常消息上的差异 → 录制响应逐个对比（R17）；并发工具改写（R21）；revert |
+| 7 | 纯逻辑模块（KMP） | 新增 `:core:model`、`:core:domain`、`:core:testing`；搬 `domain/model/*`（含 8add086 / 7617378 加的 `LiveBus.hasValidProgress`、会话里的待确认 / 改锁字段）、`RouteProjectionMath`、`CoordTransform`、`ArrivalText`，以及追踪的 5 个纯函数对象 `ArrivalRules`、`SingleLegTracker`、`GroupLegTracker`、`BoardingDetector`、`LocationCadence`（逻辑不动；`System.currentTimeMillis()` 换成参数传入的 `now`；只在 JVM 上有的 API 换掉：`GroupLegTracker.kt:475` 的 `Math.round`、`RouteProjectionMath.kt:93-96` 的 `Math.toRadians`、`:110` 的 `String.format(Locale.CHINA…)`，后两处被 `BoardingDetector`、`GroupLegTracker` 间接用到）；`UserFix` 从 `TransferAutoSwitchManager` 挪进 `:core:model`，时刻改成单调毫秒；`java.time` → `kotlinx-datetime`、`UUID` → `kotlin.uuid.Uuid`；domain 里定义平台能力接口（`TrackingController`、`Announcer`、`TransitCodeLauncher`、`LocationSource`（带精度和时刻，§2.8）、`SpeechInput`、`ReminderAlarms`、`UpdateChecker`、`AppSigningInfo`、`Clock`）；`compose_stability.conf` 写入模型清单 | 4、6 | `./gradlew test`；`GroupLegTrackerTest`、`SingleLegTrackerTest`、`BoardingDetectionTest`、`CoordTransformTest` 搬进 `commonTest` 原样通过；`./gradlew :core:domain:iosSimulatorArm64Test`（需 Xcode） | 搬文件 diff 大但无逻辑变化；R8 规则跟着改包路径；revert |
+| 8 | `:core:network` + `:core:data`，拆上帝接口 | OkHttp → Ktor（Android 用 OkHttp 引擎），逐条保留 §2.10 的行为（可取消、20 秒总超时、异常去 query、取消不算失败、各级短缓存与并发上限、6 位小数坐标与 URL 编码、`cityd` / `nightflag`）；`SingleFlightCache`、`AmapLruCache` 改写成 commonMain，时间注入 `TimeSource` / `Clock`；`ChelaileApiClient`、`MygolbsApiClient`、高德 Web 客户端进 `:core:network`；`ChelaileCrypto` 改 `expect/actual`，保留双密钥 + JSON 校验 + 字符串感知的信封截取，`org.json` 换 kotlinx.serialization；高德 Android SDK 封装留 `androidMain`；`GithubUpdateChecker`、`SignatureUtils` 归 `:androidApp`（§2.9），更新地址白名单原样保留；新增接口 `SettingsRepository`、`FavoritesRepository`、`RealtimeRepository`、`SearchHistoryRepository`、`LocationRepository`、`RoutePlanRepository`（`TransitRepository` 先同时实现它们）；`AmapRouteGateway` 从 VM 文件挪到 `:core:data`；`FakeTransitRepository` 按接口拆到 `:core:testing`；更新 `AGENTS.md` 测试准则 | 7 | Provider 测试改用 Ktor `MockEngine` + 录好的真实响应；§2.10 表里列的测试全部搬进 `commonTest` 并通过（`SingleFlightCacheTest`、`TransitProviderCacheTest`、`TransitRepositoryLineDetailCacheTest`、`BaseTransitApiClientTest`、`AmapTransitApiClientTest`、`AmapLruCacheTest`）；新增 `ChelaileCryptoTest`（从 `TransitUnitTest` 拆出，用已知密文对比）；新增 `LocationRepositoryTest`（接 `FakeLocationSource`，迁入 `HomeViewModelTest` 的定位窗口、旧定位超过 10 分钟不用两条）；`GithubUpdateCheckerTest`；`:core:network:iosSimulatorArm64Test` | Ktor 与 OkHttp 在请求头、压缩、超时、异常消息上的差异 → 录制响应逐个对比（R17）；并发工具改写（R21）；revert |
 | 9 | 存储迁移（Q3） | `:core:database`（Room KMP）、`:core:datastore`（`trackr_settings`、`trackr_amap_keys`、`tracking_session` 三个文件）；`LegacyLibraryMigration`（androidMain，覆盖 §2.4 表里 5 个旧文件，含 `trackr_amap_keys` 和 `trackr_reminder_schedule_state`；损坏 JSON 的原文和 `_corrupt_backup_` 备份复制到 `legacy_backup/`）；设置和 Key 用自写的只读 `DataMigration`；各仓库换新实现，多步改动用 Room 事务，提醒「写库 + 排闹钟」保留一把锁（P4）；提醒计划时刻进 `reminder.lastScheduledTriggerAt`；Room `line_stops_cache`（只用来先显示）；`FavoritesGroupViewModel.runDataMigrationIfNeeded` 移进迁移；`hasSavedCity` 改 Flow；`backup_rules.xml` / `data_extraction_rules.xml` 改成 §2.4 的新路径 | 8 | 新增 `LegacyLibraryMigrationTest`（每个旧 key 一条、损坏 JSON 不崩且备份原样保留、旧数据保留、Key 新文件优先于 `trackr_prefs` 里的旧值）、`SettingsMigrationTest`、`BackupRulesTest`、各 DAO 测试（内存库，Android 主机测试 + iOS 模拟器）；`RouteGroupRepositoryTest`、`ScheduledReminderRepositoryTest` 的并发用例在新仓库上通过；装机覆盖安装旧版 APK 后数据还在、高德 Key 还在 | **最高风险之一**（R1、R22）；`USE_NEW_STORE` 开关；旧 key 不删 |
 | 10 ∥ | D1 去聚合 | 删 `AggregatedSourcePriority`、`SearchResultAggregator`、聚合分支；数据源二选一；删搜索页双引擎卡 [SPEC] D1 | 9 | `TransitProviderCoordinatorTest`、`TransitProviderTest`、`MoreViewModelTest`、`SettingsMigrationTest`（旧聚合配置 → 主数据源） | 低；revert |
-| 11 ∥ | D2 没 Key 不显示规划 | `SettingsRepository.hasMapKey` / `canShowMap`（按 §2.5 的两槽规则算，只有 Web Key 时的显示按 Q18）；底栏按 `hasMapKey` 显示页签；删内置示意图和「配置Key」胶囊；Key 对话框移到「更多」，Android 槽和 Web 槽分开两个输入框、各写各的，不回落 [SPEC] D2 | 9 | `RoutePlanScreenTest`、`MoreViewModelTest`、`NavigationFlowTest`（有 / 无 Key、只有 Web Key、只有 Android Key）；`SettingsRepositoryTest`：Android 槽为空时不读 Web 槽 | 低；revert |
-| 12 | 追踪单一数据源 | `:core:data` 的 `TrackingRepository`（会话存 DataStore，带代际号）；`:core:domain` 的 `TrackingEngine`：合并第 7 步搬来的 5 个纯函数对象 + `TransferAutoSwitchManager` 的纯逻辑（下车站判定、自适应轮询间隔与失败退避、选候选线、切程），注入 `Clock`；`BusTrackingService` 只收 `sessionId`，删 19 个 extra 和 `TrackingStartParams` 的 Intent 打包；切程改成引擎效果，删 `legSwitcher`；`ServiceLocationSource` 改成 `LocationSource` 的 Android 实现，按 `LocationCadence` 档位开关；保留「需要定位才带 `location` 前台服务类型、被拒就退回 `specialUse`」；`TrackingController` 的 Android 实现（`start` 返回能否启动，定时提醒的非精确闹钟据此降级为通知，8e0c41e）；通知动作 Receiver 改调仓库；删第 4 步留下的 `object` 转发 | 9 | 新增 `TrackingEngineTest`（commonTest）：迁入 `GroupLegTrackerTest`、`SingleLegTrackerTest`、`BoardingDetectionTest` 全部用例和 `TransferAutoSwitchManagerTest` 的纯逻辑用例，再扩充；`TrackingRepositoryTest`（新实例读回会话、旧代际的结果被丢弃）；`BusTrackingServiceTest`（Robolectric：有 / 无精确定位权限时的前台服务类型、停止时定位关掉）；`ScheduledReminderReceiverTest` 降级用例 | **高风险**（R2、R20）；装机走「开始追踪 → 锁屏 → 到站震动 → 结束」，路线再走一遍「车到上车站 → 上车 → 换乘」，分别在有 / 没有精确定位时各一遍；revert |
+| 11 ∥ | D2 没 Key 不显示规划 | `SettingsRepository.hasMapKey` / `canShowMap`（按 §2.5 的两槽规则算；Q18：只有 Web Key 也显示页签、不画地图）；底栏按 `hasMapKey` 显示页签；删内置示意图和「配置Key」胶囊；Key 对话框移到「更多」，Android 槽和 Web 槽分开两个输入框、各写各的，不回落 [SPEC] D2 | 9 | `RoutePlanScreenTest`、`MoreViewModelTest`、`NavigationFlowTest`（有 / 无 Key、只有 Web Key、只有 Android Key）；`SettingsRepositoryTest`：Android 槽为空时不读 Web 槽（迁入 `FavoritesGroupViewModelTest.customAmapApiKey_doesNotFallBackToLegacyWebSlot`） | 低；revert |
+| 12 | 追踪单一数据源 | `:core:data` 的 `TrackingRepository`（会话存 DataStore，带代际号）；`:core:domain` 的 `TrackingEngine`：合并第 7 步搬来的 5 个纯函数对象 + `TransferAutoSwitchManager` 的纯逻辑（下车站判定、自适应轮询间隔与失败退避、选候选线、切程），注入 `Clock`；`BusTrackingService` 只收 `sessionId`，删 19 个 extra 和 `TrackingStartParams` 的 Intent 打包；切程改成引擎效果，删 `legSwitcher`；`ServiceLocationSource` 改成 `LocationSource` 的 Android 实现，按 `LocationCadence` 档位开关；保留「需要定位才带 `location` 前台服务类型、被拒就退回 `specialUse`」；`TrackingController` 的 Android 实现（`start` 返回能否启动，定时提醒的非精确闹钟据此降级为通知，8e0c41e）；通知动作 Receiver 改调仓库；删第 4 步留下的 `object` 转发 | 9 | 新增 `TrackingEngineTest`（commonTest）：迁入 `GroupLegTrackerTest`、`SingleLegTrackerTest`、`BoardingDetectionTest` 全部用例和 `TransferAutoSwitchManagerTest` 的纯逻辑用例，再扩充；`TrackingRepositoryTest`（新实例读回会话、旧代际的结果被丢弃）；`BusTrackingServiceTest`（Robolectric：有 / 无精确定位权限时的前台服务类型、停止时定位关掉）；`ScheduledReminderReceiverTest` 降级用例（含：降级通知追加提示文案；点「开启实时追踪」仍启动失败时保留通知方便重试，8e0c41e） | **高风险**（R2、R5、R20）；装机走「开始追踪 → 锁屏 → 到站震动 → 结束」，路线再走一遍「车到上车站 → 上车 → 换乘」，分别在有 / 没有精确定位时各一遍；revert |
 | 13 ∥ | D3 锁屏 | 通知 `VISIBILITY_PUBLIC`；关掉开关时 `VISIBILITY_PRIVATE` + `setPublicVersion`；`showOnLockScreen` 默认开 [SPEC] D3 | 9 | `LiveProgressNotificationHelperTest` 加两种可见性 | 低；revert |
 | 14 | 收藏合一（数据） | Room 表 `favorite_item`（类型：车 / 路线；`groupId`、`sortOrder`）；`FavoriteItem` sealed interface；`FavoritesRepository`：`favoriteItems`、`move`、`setGroup`、删分组后变「不分组」；`GroupCategory` 不再给用户选 | 9 | `FavoritesRepositoryTest`（合并排序、改分组、删分组、旧数据迁入后顺序不变） | 中；revert |
-| 15 | 一起等多条线（Q8：不设上限） | `TrackingTarget.WatchTogether`；会话加 `watchedLines`、`boardChoice`；**等车阶段每次轮询只请求 1 次上车站的站点接口**（`getStopDetail` 已带该站每条线的来车），按到站时间排序，条数不影响请求数；数据源的站点接口缺某条线时，才对那条线单独请求（并发数限 4，用户看不到这个限制）；上车按 §2.6「我上车了和上了哪辆？」一条规则：有定位就自动判上车，定位分得清时不弹窗，分不清或没定位才写 `boardChoice`，待确认期间的请求方式按 Q16，是否开定位按 Q17；上车后只追那一辆的线路接口，锁错了按同线改锁规则纠正；路线每程的候选线同理；通知动作「我上车了 / 乘车码 / 结束」 [V3] | 12、14 | `TrackingEngineTest` 新用例：多线取最快、先后变化、只有一辆在站、两辆在站且定位分得清（不弹窗）、两辆在站且定位分不清或没定位（写 `boardChoice`）、手动上车按 A..A+1 最近选车、锁不到时后续补锁、某线无数据、10 条线等车阶段仍只发 1 次请求、只有 1 程无下车站；`BusTrackingServiceTest` 多线轮询 | 中：条数多时追踪卡和通知要折叠显示（R6）；revert |
+| 15 | 一起等多条线（Q8：不设上限） | `TrackingTarget.WatchTogether`；会话加 `watchedLines`、`boardChoice`；**等车阶段每次轮询只请求 1 次上车站的站点接口**（`getStopDetail` 已带该站每条线的来车），按到站时间排序，条数不影响请求数；数据源的站点接口缺某条线时，才对那条线单独请求（并发数限 4，用户看不到这个限制）；上车按 §2.6「我上车了和上了哪辆？」一条规则：有定位就自动判上车，定位分得清时不弹窗，分不清或没定位才写 `boardChoice`，待确认期间只请求在站车所在的线（Q16），一起等也开定位判上车（Q17）；上车后只追那一辆的线路接口，锁错了按同线改锁规则纠正；路线每程的候选线同理；通知动作「我上车了 / 乘车码 / 结束」 [V3] | 12、14 | `TrackingEngineTest` 新用例：多线取最快、先后变化、只有一辆在站、两辆在站且定位分得清（不弹窗）、两辆在站且定位分不清或没定位（写 `boardChoice`）、手动上车按 A..A+1 最近选车、锁不到时后续补锁、某线无数据、10 条线等车阶段仍只发 1 次请求、只有 1 程无下车站；`BusTrackingServiceTest` 多线轮询 | 中：条数多时追踪卡和通知要折叠显示（R6）；revert |
 
 ### 阶段 C：导航与功能模块
 
 | 步 | 目标 | 改动文件 | 依赖 | 验证 | 风险 / 回退 |
 | --- | --- | --- | --- | --- | --- |
-| 16 | `:core:navigation`（CMP 版 Navigation 3） | `ScreenKey` 搬入；`NavigationState`、`Navigator`、`TrackrTransitions`、`TopLevel`（3.3 骨架）；每条栈各自一组 decorator（修 N2）；`SavedStateConfiguration` 注册 `ScreenKey` 的多态序列化（非 Android 平台恢复返回栈必需）；`MainActivity` 改用它（仍 4 页签）；首页轮询开关先保持 `MainActivity` 现在的 `shouldPollHome` 算法，只是 tab 判断改读 `NavigationState`；核实 CMP 版 Nav3 是否给 entry 单独的 `LifecycleOwner`，结论写进 §4.4 [N3] | 7 | 新增 `NavigatorTest`（commonTest）、`NavigationStateRestorationTest`；删只测 `mutableListOf` 的旧用例；`HomeViewModelTest.testSetPollingActive_*` 仍通过 | 中；revert |
-| 17 | `:composeApp` + 功能模块 + 3 页签（Q1） | 新增 `:composeApp`（`TrackrRoot()`、`NavDisplay`、3 页签）；新增 `:feature:bus/search/stop/line/route/favorites/me` 和 `:core:ui`；**ViewModel 搬进各 feature 的 `commonMain`**（此时已不碰 `Context`）；拆 1831 行的 `FavoritesGroupViewModel` → `RoutePlanViewModel`（输入提示防抖 300 ms / 太短不查 / 新词取消旧词、算路取消上一次、「我的位置」定位不到直接报错）、`RouteDetailViewModel` 与 `FavoritesEditViewModel`（分组 ETA 刷新防抖 500 ms、新一轮取消旧一轮），缓存与对齐下沉到 `RoutePlanRepository`（§2.10）；从 `HomeViewModel` 拆出 `SearchViewModel`；详情页和首页的轮询开关按 §4.4 挪进各自 Route（`LifecycleResumeEffect` / `LifecycleStartEffect`），`MainActivity` 的 `shouldPollHome` 删掉；进行中计数 `AtomicInteger` 换 common 写法；**旧 Screen 先放各 feature 的 `androidMain`**，保证功能不断，阶段 D 逐页重写进 `commonMain`；新页面先放空壳；`MainActivity` 只剩 `setContent { TrackrRoot() }` | 16、8、9 | `NavigationKeyTest`、`NavigatorTest`（3 页签）；`FavoritesGroupViewModelTest` 拆成 3 个新测试，0545e2e 加的 `searchTips_*`、`planTransitRoute_*`、`customAmapApiKey_doesNotFallBackToLegacyWebSlot` 全部带过去；新增 `SearchViewModelTest`；`LineDetailViewModelTest`、`StopDetailViewModelTest` 的生命周期用例、`HomeViewModelTest` 的恢复补刷用例；新增 `TrackrAppNavigationTest`：进详情 / 切页签后首页停轮询、回来超过一个周期补刷；`KoinGraphVerifyTest` 覆盖全部模块；各 feature `compileKotlinIosSimulatorArm64` | **高风险**（R3、R18）：先搬方法不改逻辑；旧收藏页保留到第 22 步；revert |
+| 16 | `:core:navigation`（CMP 版 Navigation 3） | `ScreenKey` 搬入；`NavigationState`、`Navigator`、`TrackrTransitions`、`TopLevel`（3.3 骨架）；每条栈各自一组 decorator（修 N2）；`SavedStateConfiguration` 注册 `ScreenKey` 的多态序列化（非 Android 平台恢复返回栈必需）；`MainActivity` 改用它（仍 4 页签）；首页轮询开关先保持 `MainActivity` 现在的 `shouldPollHome` 算法，只是 tab 判断改读 `NavigationState`；核实 CMP 版 Nav3 是否给 entry 单独的 `LifecycleOwner`，结论写进 §4.4 [N3] | 7 | 新增 `NavigatorTest`（commonTest）、`NavigationStateRestorationTest`；删只测 `mutableListOf` 的旧用例；`HomeViewModelTest.testSetPollingActive_*` 仍通过 | 中：旧返回栈恢复不了（R8）；revert |
+| 17 | `:composeApp` + 功能模块 + 3 页签（Q1） | 新增 `:composeApp`（`TrackrRoot()`、`NavDisplay`、3 页签）；新增 `:feature:bus/search/stop/line/route/favorites/me` 和 `:core:ui`；**ViewModel 搬进各 feature 的 `commonMain`**（此时已不碰 `Context`）；拆 1831 行的 `FavoritesGroupViewModel` → `RoutePlanViewModel`（输入提示防抖 300 ms / 太短不查 / 新词取消旧词、算路取消上一次、「我的位置」定位不到直接报错）、`RouteDetailViewModel` 与 `FavoritesEditViewModel`（分组 ETA 刷新防抖 500 ms、新一轮取消旧一轮），缓存与对齐下沉到 `RoutePlanRepository`（§2.10）；从 `HomeViewModel` 拆出 `SearchViewModel`；详情页和首页的轮询开关按 §4.4 挪进各自 Route（`LifecycleResumeEffect` / `LifecycleStartEffect`），`MainActivity` 的 `shouldPollHome` 删掉；进行中计数 `AtomicInteger` 换 common 写法；**旧 Screen 先放各 feature 的 `androidMain`**，保证功能不断，阶段 D 逐页重写进 `commonMain`；新页面先放空壳；`MainActivity` 只剩 `setContent { TrackrRoot() }` | 16、8、9 | `NavigationKeyTest`、`NavigatorTest`（3 页签）；`FavoritesGroupViewModelTest` 拆成 3 个新测试，0545e2e 加的 `searchTips_*`、`planTransitRoute_*` 全部带过去（`customAmapApiKey_doesNotFallBackToLegacyWebSlot` 已在第 11 步进 `SettingsRepositoryTest`）；新增 `SearchViewModelTest`；`LineDetailViewModelTest`、`StopDetailViewModelTest` 的生命周期用例、`HomeViewModelTest` 的恢复补刷用例；新增 `TrackrAppNavigationTest`：进详情 / 切页签后首页停轮询、回来超过一个周期补刷；`KoinGraphVerifyTest` 覆盖全部模块；各 feature `compileKotlinIosSimulatorArm64` | **高风险**（R3、R4、R8、R18）：先搬方法不改逻辑；旧收藏页保留到第 22 步；revert |
 | 18 | Deep link 统一 | `DeepLinkParser`（common，3.6 表）；`MainActivity` 只调解析器；小组件、快捷方式、通知、提醒的 PendingIntent 改发 `trackr://`；旧 action 兼容一个版本；`ResultEventBus` 与 `BottomSheetSceneStrategy` 接入；组件内返回拦截迁 `NavigationBackHandler`；小组件刷新 action 移出导出 filter（S2） [N3]、[NE]、[IS] | 17 | `DeepLinkParserTest`（commonTest）、`NavigatorTest` 合成栈、`TrackrAppNavigationTest`（Robolectric 冷 / 热启动） | 中；revert |
 
 ### 阶段 D：v3 页面（每页一个提交，写进 feature 的 `commonMain`）
@@ -994,12 +996,12 @@ val fakeDataModule = module {
 
 | 步 | 页面 | 主要改动 | 依赖 | 验证 | 风险 / 回退 |
 | --- | --- | --- | --- | --- | --- |
-| 19 ∥ | 公交首页 `:feature:bus` | 标题改城市名；删乘车码卡；`TransitCodeFab`（下滑缩小、上滑展开；`TransitCodeLauncher`）；收藏合一列表 + 分组 chips + 「编辑」；追踪卡支持一起等（条数多时折叠为「还有 N 条」）；附近站固定 6 个；轮询 15 秒、按 §4.4 在 `BusHomeRoute` 里随 STARTED 启停、恢复时超过一个周期补刷；定位走 `LocationRepository.bestFix`（4.5 秒窗口取最准，301c124）；「结束追踪」走 `TrackingController.stop`（同时清路线状态，648d59d） [V3] | 17、14、6、5 | `BusHomeViewModelTest`（含原 `HomeViewModelTest` 的恢复补刷、定位窗口、旧定位超过 10 分钟不用）、`TransitCodeFabTest`、`BusHomeScreenTest` | 中；revert |
+| 19 ∥ | 公交首页 `:feature:bus` | 标题改城市名；删乘车码卡；`TransitCodeFab`（下滑缩小、上滑展开；`TransitCodeLauncher`）；收藏合一列表 + 分组 chips + 「编辑」；追踪卡支持一起等（条数多时折叠为「还有 N 条」）；附近站固定 6 个；轮询 15 秒、按 §4.4 在 `BusHomeRoute` 里随 STARTED 启停、恢复时超过一个周期补刷；定位走 `LocationRepository.bestFix`（4.5 秒窗口取最准，301c124）；「结束追踪」走 `TrackingController.stop`（同时清路线状态，648d59d） [V3] | 17、14、6、5 | `BusHomeViewModelTest`（含原 `HomeViewModelTest` 的恢复补刷；定位窗口用例已在第 8 步进 `LocationRepositoryTest`）、`TransitCodeFabTest`、`BusHomeScreenTest` | 中；revert |
 | 20 ∥ | 线路详情 `:feature:line` | 删底部 5 图标工具栏；顶栏时钟 + ☆；☆ 一点即收藏 + 「换分组」；主卡用 `ArrivalText`；删预警 chips 和每秒倒计时（C1），保留「手动刷新 / 选站后重置计时」和「初次加载没指定站时只补一次请求」（e683286）；轮询 10 秒、随 RESUMED 启停；UiState 拆静态 / 实时（4.4）；走向条只留竖向；站表先读 Room 缓存；底栏 = 主按钮 + 乘车码；下拉刷新 | 17、6 | `LineDetailViewModelTest`（含 e683286 的 `testInitialLoad_*`、`testSelectStop_resetsCountdown`、`testScreenResume_*`）、`StationArrivalContentTest`、`ExpressiveRouteRailUiTest` | 中；revert |
 | 21 ∥ | 站点详情 + 一起等 `:feature:stop` | 站台按方向命名（无方向数据退回「站台 1 / 2」）；删「查看全线」；下拉刷新；选线模式（不限条数，收藏 / 一起等）；一起等进行中视图；「上了哪辆？」弹层（只在定位分不清时出现，§2.6）；换站台立即按新站台刷新并重置计时（e683286）；首次进入时其他站台的补全走 120 秒缓存（b4221c6） [V3] | 17、15 | `StopDetailViewModelTest`（多选、存成 1 程路线、启动一起等、`testSelectStopIndex_changedPlatform_refreshesWithThatPlatform`、生命周期用例）、`ChooseBoardedBusTest` | 中（R7）；revert |
 | 22 | 路线详情 + 编辑收藏 + 收藏弹层 | `:feature:route` 的路线详情、`:feature:favorites` 的编辑页（拖动排序）和收藏弹层（只问名字和分组） [V3] | 17、14、15 | `RouteDetailViewModelTest`、`FavoritesEditViewModelTest`、`SaveFavoriteSheetTest`；首页「编辑」切到新页 | 中；revert |
 | 23 ∥ | 搜索 `:feature:search` | 删推荐词、双引擎卡；每方向一行；输入存 `SavedStateHandle` [V3] | 17 | `SearchViewModelTest`、`SearchScreenTest` | 低；revert |
-| 24 ∥ | 路线规划 `:feature:route` | 拆 2496 行的 `RoutePlanScreen.kt`；地图改 `expect fun RouteMap`，Android 实现放 `androidMain`（高德 SDK + `AndroidView`），保留 301c124 的三处行为：地图会话随 Activity 暂停 / 恢复、城市中心先 WGS-84 转 GCJ-02 再取景、切方案用 `clear(true)` 保留定位蓝点；`canShowMap` 为 false 时不画地图区（iOS 第 38 步之前、或只有 Web Key 时，按 Q18）；输入提示带当前位置并限本城、跨城才传 `cityd`；方案标签固定 3 个；收藏后留在本页显示「去看看」 [V3] | 17、11 | `RoutePlanScreenTest`、`RoutePlanViewModelTest`（含 `planTransitRoute_passesCitydOnlyWhenCrossCity`） | 中：地图生命周期（R11）；revert |
+| 24 ∥ | 路线规划 `:feature:route` | 拆 2496 行的 `RoutePlanScreen.kt`；地图改 `expect fun RouteMap`，Android 实现放 `androidMain`（高德 SDK + `AndroidView`），保留 301c124 的三处行为：地图会话随 Activity 暂停 / 恢复、城市中心先 WGS-84 转 GCJ-02 再取景、切方案用 `clear(true)` 保留定位蓝点；`canShowMap` 为 false 时不画地图区（iOS 第 38 步之前、或只有 Web Key 时，Q18）；输入提示带当前位置并限本城、跨城才传 `cityd`；方案标签固定 3 个；收藏后留在本页显示「去看看」 [V3] | 17、11 | `RoutePlanScreenTest`、`RoutePlanViewModelTest`（含 `planTransitRoute_passesCitydOnlyWhenCrossCity`） | 中：地图生命周期（R11）；revert |
 | 25 ∥ | 我的 `:feature:me` | 按 v3 分组；删调试项；「到站前提醒」全局设置；定时提醒可编辑；锁屏开关；高德 Key（Android 槽、Web 槽两个输入框，旁边显示包名和签名 SHA-1，经 `AppSigningInfo`）；长辈版开关位置预留；提醒设了「到点自动开始追踪」但没开精确闹钟权限时，编辑页提示一句「没开『闹钟和提醒』权限，到点只发通知」并给去设置的按钮（`ReminderAlarms.canScheduleExact`，8e0c41e 留的口子）；关于页的「检查更新」只在 Android 显示（§2.9） [V3] | 17、13 | `MeViewModelTest`、`ReminderEditViewModelTest`（含精确闹钟提示）、`ScheduledReminderRepositoryTest`、`AboutViewModelTest` | 低；revert |
 
 ### 阶段 E：Android 系统集成、性能与收尾
@@ -1016,7 +1018,7 @@ val fakeDataModule = module {
 | 步 | 目标 | 改动文件 | 依赖 | 验证 | 风险 / 回退 |
 | --- | --- | --- | --- | --- | --- |
 | 30 | UiMode + 主题切换 + 字号放大提示 | `SettingsRepository.uiMode`（DataStore）；`TrackrTheme(uiMode)` 加 `Elder` 分支（高对比、大字号、`minTouchTarget = 64.dp`）；`AppShellViewModel`（`:composeApp`）读模式；「我的」加开关；系统字号 ≥ 1.3 倍时提示一次 | 5、9、18、19、20 | `UiModeSettingsTest`、`TrackrThemeTest`、`FontScalePromptTest` | 低；开关即回退 |
-| 31 | 长辈版导航（单栈，Q9） | `:core:navigation` 加 `ElderNavigator`；`TrackrRoot` 按模式选标准 / 长辈；**切换模式时两边都重置到首页**；不支持的 Key（`RoutePlan`、`FavoritesEdit`）落到首页 | 30、18 | `ElderNavigatorTest`、`UiModeSwitchNavigationTest`（任意页切换后栈 = `[Bus]`） | 低；开关回退 |
+| 31 | 长辈版导航（单栈，Q9） | `:core:navigation` 加 `ElderNavigator`；`TrackrRoot` 按模式选标准 / 长辈；**切换模式时两边都重置到首页**；不支持的 Key（`RoutePlan`、`FavoritesEdit`、`ReminderEdit`）落到首页 | 30、18 | `ElderNavigatorTest`、`UiModeSwitchNavigationTest`（任意页切换后栈 = `[Bus]`） | 低；开关回退 |
 | 32 | 长辈版首页、线路页、换站、出示乘车码 | 各 feature 的 `elder/` 包：`ElderBusHomeScreen`、`ElderLineDetailScreen`、`ElderPickStopScreen`；`:core:ui` 的长辈尺寸组件；共用原 ViewModel | 31、19、20 | `ElderBusHomeScreenTest`、`ElderLineDetailScreenTest`（可点元素 ≥ 64dp、无底部页签、无地图入口）；截图：长辈主题 × 字号 1.0/1.5/2.0 | 中；开关回退 |
 | 33 ∥ | 读给我听 | `Announcer` 的 Android 实现（`TextToSpeech`，懒初始化，音频焦点）；`ArrivalText.spoken`；`FakeAnnouncer` | 32 | `LineDetailViewModelTest` 读给我听用例；`AndroidTtsAnnouncerTest`（无 TTS 引擎时降级为提示） | 低；revert |
 | 34 ∥ | 语音搜索 + 常驻消息 + 长辈版搜索 / 站点 / 提醒中 / 车到站 | `SpeechInput` 的 Android 实现（`RecognizerIntent`）；`UserMessageHost`（标准用 Snackbar，长辈用需点「知道了」的常驻提示）；`ElderSearchScreen`、`ElderStopDetailScreen`、到站整屏提醒（App 在前台时） | 32 | `ElderSearchScreenTest`、`UserMessageHostTest` | 低；revert |
@@ -1028,7 +1030,7 @@ val fakeDataModule = module {
 | 35 | iOS 工程跑起来 | 新增 `iosApp/`（Xcode 工程）；`:composeApp` 的 `iosMain` 加 `MainViewController()` 和 Koin 启动；Room / DataStore 的 iOS 文件路径，`trackr_amap_keys` 和 `tracking_session` 设 `isExcludedFromBackup`（对应 Android 的备份排除）；高德 Web Key 构建时注入；`trackr://` 链接交给 `DeepLinkParser` | 29（最早可在 25 后） | 模拟器上看到「公交」首页和真实到站数据；`./gradlew :composeApp:iosSimulatorArm64Test` | 低：不影响 Android；revert |
 | 36 ∥ | iOS 平台能力 | `LocationSource`（`CLLocationManager`，输出带精度和单调时刻的 `UserFix`，按 `LocationCadence` 档位调 `desiredAccuracy` / `distanceFilter`）、`TransitCodeLauncher`（支付宝 / 云闪付 URL Scheme，Info.plist 声明）、`Announcer`（`AVSpeechSynthesizer`）、`SpeechInput`（`SFSpeechRecognizer`）、权限说明文案 | 35 | 各实现的 iOS 测试（用接口 Fake 驱动 VM）；真机试定位与乘车码跳转 | 中：URL Scheme 可能随第三方 App 变化；revert |
 | 37 | iOS 追踪与提醒（Q13） | `TrackingController` 的 iOS 实现：前台轮询 + `TrackingEngine`（同一套到站口径、选车、定位判上车，App 在前台时生效）；快到站发本地通知；定时提醒用 `UNCalendarNotificationTrigger`（按本地时间，改时区自动跟随；到点只发通知，不能自动开追踪；「已错过的一次性提醒」规则共用 common 逻辑）；Live Activity 用 Swift 写（ActivityKit + Widget Extension），由 Kotlin 侧通过接口驱动 | 36 | 模拟器 / 真机：前台追踪到站提醒、锁屏 Live Activity 显示 | **高**（R16）：iOS 不允许 App 在后台一直轮询 |
-| 38 ∥ | iOS 地图（Q15） | `RouteMap` 的 iOS 实现：高德 iOS SDK + `UIKitView`；Key 新开一个 iOS 槽（绑定 Bundle ID）；接入后 `canShowMap` 才为 true。接入前「路线」页签显示与否按 Q15 / Q18 | 35 | 真机看规划结果画线 | 中：SDK 集成方式（CocoaPods / SPM）；revert |
+| 38 ∥ | iOS 地图（Q15） | `RouteMap` 的 iOS 实现：高德 iOS SDK + `UIKitView`；Key 新开一个 iOS 槽（绑定 Bundle ID）；接入后 `canShowMap` 才为 true。接入前出不带地图的路线页（Q15、Q18） | 35 | 真机看规划结果画线 | 中：SDK 集成方式（CocoaPods / SPM）；revert |
 | 39 ∥ | iOS 小组件（可选） | WidgetKit（Swift）；数据库放 App Group 共享目录 | 35 | 桌面小组件显示收藏的车 | 中；可延后 |
 | 40 ∥ | 鸿蒙评估 | 写 `docs/design/harmony_spike.md`：列出可行方案（官方进展、社区 / 厂商的 KMP 与 Compose 移植），各用一个最小 Demo 跑通 `:core:domain` + 一个页面，比较维护成本 | 29 | 文档 + Demo 结论，再决定是否立项 | 只是评估，不改主工程 |
 
@@ -1041,7 +1043,7 @@ val fakeDataModule = module {
 | W3 | 19 ∥ 20 ∥ 21 ∥ 23 ∥ 24 ∥ 25，然后 22 | 各自的 `:feature:*` 模块 | 模块已拆开，冲突只在 `:core:ui`；共享组件由 19 先落 |
 | W4 | 26 ∥ 27 ∥ 28 | 26：`androidApp/widget`；27：`:baselineprofile`；28：字符串资源 | 26 与 27 都改 `androidApp/build.gradle.kts` 不同区块 |
 | W5 | 33 ∥ 34 | 33：TTS；34：语音输入、消息宿主、长辈搜索 / 站点 | — |
-| W6 | 36 ∥ 38 ∥ 39 ∥ 40（35 完成后） | 各自的 `iosMain` / Swift 目标 / 评估目录 | 37 依赖 36 |
+| W6 | 36 ∥ 38 ∥ 39（35 完成后）；40 在 29 后随时可做 | 各自的 `iosMain` / Swift 目标 / 评估目录 | 37 依赖 36 |
 
 ---
 
@@ -1070,7 +1072,7 @@ val fakeDataModule = module {
 | R17 | OkHttp 换 Ktor 后请求细节不同（请求头、压缩、超时、Cookie、异常消息） | 接口偶发失败；Ktor 异常消息带完整 URL，Key 进日志 | Android 用 Ktor 的 OkHttp 引擎；录制真实响应做回归；异常统一包一层只留 scheme + host + path；先对比再切换 | 8 |
 | R18 | 第 17 步一次建 9 个模块，构建时间变长、配置出错 | 开发变慢 | 约定插件统一配置；开 Gradle 配置缓存；本地默认只编 Android，iOS 目标按需编译 | 2、17 |
 | R19 | 鸿蒙没有官方 Kotlin / CMP 支持 | 时间不可控 | 只做评估（第 40 步），不进主线；保持 commonMain 纯净 | 40 |
-| R20 | 前台服务带 `location` 类型的系统限制（后台启动不允许、Android 14+ 要求启动时已有使用期间权限）和用户对定位的顾虑 | 追踪启动失败，或用户关掉定位权限 | 保留 7617378 的退路：被拒就只用 `specialUse`、这次不判上车；只在需要的阶段开定位（`LocationCadence`）；一起等是否开定位按 Q17 | 12、15 |
+| R20 | 前台服务带 `location` 类型的系统限制（后台启动不允许、Android 14+ 要求启动时已有使用期间权限）和用户对定位的顾虑 | 追踪启动失败，或用户关掉定位权限 | 保留 7617378 的退路：被拒就只用 `specialUse`、这次不判上车；只在需要的阶段开定位（`LocationCadence`）；一起等也开定位（Q17） | 12、15 |
 | R21 | 把 `synchronized` / `ConcurrentHashMap` / `AtomicInteger` / 访问顺序 `LinkedHashMap` 改写成 commonMain 时改变语义（死锁、LRU 顺序不对、取消一个等待者连带取消其他人） | 请求重复或卡住 | 先把 `SingleFlightCacheTest`、`AmapLruCacheTest`、`TransitProviderCacheTest` 原样搬进 `commonTest` 并通过，再删旧实现；`Mutex` 内不调挂起的网络请求 | 8 |
 | R22 | 换存储后备份规则没跟上，高德 Key 文件被备份到云端，或收藏数据库被误排除 | Key 泄到别的设备；换机后收藏丢失 | §2.4 备份表；`BackupRulesTest` 断言文件名；第 9 步装机用 `adb shell bmgr backupnow` 检查 | 9 |
 
@@ -1104,15 +1106,15 @@ val fakeDataModule = module {
 | --- | --- | --- | --- |
 | Q13 | iOS 后台追踪 | A 只在前台轮询 + 本地通知；B 加推送服务端，后台用推送更新 Live Activity | **先 A**；B 要服务器和苹果开发者账号 |
 | Q14 | 鸿蒙路线 | A 等官方 / 社区方案成熟；B 现在就选一个移植方案立项 | **A + 第 40 步评估** |
-| Q15 | iOS 地图 | A 接高德 iOS SDK；B iOS 先不显示「路线」页签 | **先 B，再 A** |
+| Q15 | iOS 地图 | A 接高德 iOS SDK；B iOS 先出不带地图的路线页（按 Q18） | **先 B，再 A** |
 
-新增待定（r3，16 个修复带来的）：
+已定（用户 2026-10-31，r3 新增，都按推荐）：
 
-| # | 问题 | 选项 | 推荐 |
+| # | 问题 | 决定 | 落点 |
 | --- | --- | --- | --- |
-| Q16 | 一起等时几条线的车同时到站，正在用定位确认你上了哪辆。站点接口在车开走后就不再给它的位置，要不要短时多请求几条线路接口？ | A 待确认期间，只对「此刻在站的那几辆车」所在的线各请求线路接口（通常 1–2 条，确认后只剩 1 条，最长 5 分钟）；B 只用站点接口，车一开走就看不到它，定位基本判不出，多半要弹「上了哪辆？」 | **A**。等车阶段仍只发 1 次站点请求（Q8 不变），多出来的请求只在上车那几分钟 |
-| Q17 | 一起等也用定位判断上车吗？（要精确定位权限，前台服务带 `location` 类型；只在车离上车站 ≤2 站、待确认、乘车中这几段开） | A 开，和路线一样；B 不开，只靠点「我上车了」，两辆同时在站就弹窗 | **A**。单线追踪不开：它的目标就是候车站，没有「上车」这一步 |
-| Q18 | 只有高德 Web Key、没有 Android Key 时，「路线」页签显示吗？ | A 显示：能搜地点、能算路、方案列表照常，只是不画地图；B 不显示：页签只看 Android Key | **A**。和现在的 `AmapRouteGateway.isConfigured()` 一致；一个 Key 都没有时照旧不显示（D2）。选 A 的话，iOS 接地图前也能用路线规划，Q15 的 B 改成「iOS 先出不带地图的路线页」 |
+| Q16 | 一起等时几条线的车同时到站，正在用定位确认上了哪辆。站点接口在车开走后就不再给它的位置 | **A**：待确认期间只对「此刻在站的那几辆车」所在的线各请求线路接口（通常 1–2 条，确认后只剩 1 条，最长 5 分钟）。等车阶段仍只发 1 次站点请求（Q8 不变） | §2.5、§2.6、第 15 步 |
+| Q17 | 一起等也用定位判断上车吗 | **开**，和路线一样，只在车离上车站 ≤2 站、待确认、乘车中这几段开（要精确定位权限，前台服务带 `location`）。单线追踪不开 | §2.6、第 12、15 步、R20 |
+| Q18 | 只有高德 Web Key、没有 Android Key 时，「路线」页签显示吗 | **显示**：能搜地点、能算路、方案列表照常，只是不画地图；一个 Key 都没有时照旧不显示（D2）。iOS 接地图前也先出不带地图的路线页（Q15 的 B 随之改成这样） | §2.5、§3.1、第 11、24、38 步 |
 
 ---
 
@@ -1127,8 +1129,8 @@ val fakeDataModule = module {
 | 「我的」开关切换；系统字体放大时提示开启 | `SettingsRepository.uiMode` + `FontScalePrompt` | 30 |
 | 同一套数据层和 ViewModel，只换 UI 层 | 共享 `XxxViewModel` 与 `UiState`；分叉在 `XxxScreen` 一层（8.5） | 30–34 |
 | 更大字号、触控 ≥ 64dp、高对比主题 | `TrackrTheme(UiMode.Elder)` | 30 |
-| 简化首页和线路页 | `ElderHomeScreen`、`ElderLineDetailScreen` | 32 |
-| 没有底部 Tab 和地图规划 | `TrackrElderApp` 单栈 | 31 |
+| 简化首页和线路页 | `ElderBusHomeScreen`、`ElderLineDetailScreen` | 32 |
+| 没有底部 Tab 和地图规划 | `TrackrRoot` 里的长辈版单栈 | 31 |
 | 常驻「出示乘车码」大按钮 | `ShowTransitCodeButton`（底部固定，复用 `TransitCodeLauncher`） | 32 |
 | 「读给我听」系统 TTS 朗读到站 | `Announcer` 接口 + `AndroidTtsAnnouncer` + `FakeAnnouncer` | 33 |
 | 搜索支持系统语音输入 | `RecognizerIntent` | 34 |
@@ -1210,7 +1212,7 @@ fun TrackrTheme(uiMode: UiMode = UiMode.Standard, darkTheme: Boolean = isSystemI
 
 ```kotlin
 @Composable
-fun TrackrApp(shell: AppShellState, deepLinks: Flow<DeepLink>) {
+fun TrackrRoot(shell: AppShellState, deepLinks: Flow<DeepLink>) {
     TrackrTheme(uiMode = shell.uiMode) {
         when (shell.uiMode) {
             UiMode.Standard -> {
@@ -1249,7 +1251,7 @@ class ElderNavigator(private val stack: NavBackStack<NavKey>) {
 | --- | --- | --- |
 | ViewModel / UiState | 全部：`BusHomeViewModel`、`LineDetailViewModel`、`StopDetailViewModel`、`SearchViewModel`、`RouteDetailViewModel`、`MeViewModel` | 无。长辈版需要的额外动作（`onReadAloud`）作为普通事件加在共享 VM 上，标准版不调用 |
 | Route（拿 VM、收集 state） | `XxxRoute(viewModel, onOpen)`，多一个参数 `screen: @Composable (UiState, (Event) -> Unit) -> Unit` 或由 entry provider 直接调不同 Screen | — |
-| Screen（页面布局） | `AboutScreen`（只受主题影响） | `ElderHomeScreen`（搜索 + 收藏的车大卡片 + 附近 3 个站，无追踪多线细节、无分组 chips）、`ElderLineDetailScreen`（大字 ETA + 上车站 + 「读给我听」+「追踪这班车」，无走向条，或只显示前后各 2 站的简化竖条）、`ElderStopDetailScreen`、`ElderSearchScreen`（带麦克风）、`ElderMeScreen` |
+| Screen（页面布局） | `AboutScreen`（只受主题影响） | `ElderBusHomeScreen`（搜索 + 收藏的车大卡片 + 附近 3 个站，无追踪多线细节、无分组 chips）、`ElderLineDetailScreen`（大字 ETA + 上车站 + 「读给我听」+「追踪这班车」，无走向条，或只显示前后各 2 站的简化竖条）、`ElderStopDetailScreen`、`ElderSearchScreen`（带麦克风）、`ElderMeScreen` |
 | 叶子组件（`core/designsystem` 或 `ui/components`） | `EtaText`（读 `typography.eta`）、`ArrivalTextView`（8 种状态，用 `ArrivalText`）、`LineBadge`、`StatePlaceholders`、`TransitCodeLauncher` 调用、`ChooseBoardedBus` 弹层内容、`UserMessageHost`（内部按 `LocalUiMode` 选 Snackbar / 常驻） | `ShowTransitCodeButton`（长辈版底部常驻大按钮，标准版用 `TransitCodeFab`） |
 | 导航 | `ScreenKey`、`DeepLinkParser`、`TrackrTransitions` | `Navigator` vs `ElderNavigator`；`standardEntryProvider` vs `elderEntryProvider` |
 | 平台 | 通知、小组件、追踪服务（不分模式） | — |
@@ -1301,8 +1303,8 @@ fun onReadAloud() = viewModelScope.launch {
 | `TrackrThemeTest` | 两种模式下 `typography.eta.fontSize`、`LocalMinimumInteractiveComponentSize` | Compose | 30 |
 | `FontScalePromptTest` | `DeviceConfigurationOverride.FontScale(1.5f)` 下显示提示；点「不用了」后不再显示；1.0 不显示 | Compose | 30 |
 | `ElderNavigatorTest` | 单栈返回到根后返回 false；deep link 落栈；`RoutePlan` 回退到 `Bus` | JVM | 31 |
-| `UiModeSwitchNavigationTest` | 在线路页切模式，新模式栈为 `[Bus, LineDetail]`；在规划页切，落根页 | Robolectric Compose | 31 |
-| `ElderHomeScreenTest` / `ElderLineDetailScreenTest` | 所有可点元素 `assertHeightIsAtLeast(64.dp)`、`assertWidthIsAtLeast(64.dp)`；无 `NavigationBar`；「出示乘车码」始终可见；状态恢复 | Robolectric Compose | 32 |
+| `UiModeSwitchNavigationTest` | 在任意页切模式，新模式栈都是 `[Bus]`（Q9） | Robolectric Compose | 31 |
+| `ElderBusHomeScreenTest` / `ElderLineDetailScreenTest` | 所有可点元素 `assertHeightIsAtLeast(64.dp)`、`assertWidthIsAtLeast(64.dp)`；无 `NavigationBar`；「出示乘车码」始终可见；状态恢复 | Robolectric Compose | 32 |
 | `LineDetailViewModelTest`（新增用例） | `onReadAloud` 调 `FakeAnnouncer`，文本正确；TTS 不可用时加 userMessage | JVM | 33 |
 | `ArrivalTextTest`（新增用例） | 8 种状态的 `spoken` 文本 | JVM | 33 |
 | `AndroidTtsAnnouncerTest` | Robolectric `ShadowTextToSpeech`：初始化成功/失败 | Robolectric | 33 |
@@ -1315,12 +1317,12 @@ fun onReadAloud() = viewModelScope.launch {
 ### 8.8 在执行序列中的位置
 
 长辈版排在**第 30–34 步**（阶段 F）。前置条件：
-- 第 5 步已把 `TrackrTheme(uiMode)` 的 API 定型 → 第 30 步只加 `ElderTokens`。长辈版页面是新写的，不受旧页面里写死字号的影响；共享叶子组件里的写死字号在第 19、20 步改 token。
+- 第 5 步已把 `TrackrTheme(uiMode)` 的 API 定型 → 第 30 步只加 `ElderTokens`。长辈版页面是新写的，不受旧页面里写死字号的影响；共享叶子组件里的写死字号在第 29 步统一清零。
 - 第 9 步 DataStore 就位 → `uiMode` 有地方存。
 - 第 18 步 `DeepLinkParser` 与导航基建 → 两种模式共用。
 - 第 19、20 步首页和线路页已拆成 Route + 无状态 Screen → 长辈版直接复用 VM。
 
-如果要提前交付长辈版，最早可在第 20 步之后启动第 30–32 步（与第 21–29 步并行，文件不冲突：长辈版只新增 `feature/elder/*` 与主题分支），第 33、34 步随后。
+如果要提前交付长辈版，最早可在第 20 步之后启动第 30–32 步（与第 21–29 步并行，文件不冲突：长辈版只新增各 feature 的 `elder/` 包与主题分支），第 33、34 步随后。
 
 ---
 
@@ -1347,7 +1349,7 @@ fun onReadAloud() = viewModelScope.launch {
 
 ```bash
 ./gradlew test                                                     # 全量（AGENTS.md）
-./gradlew testDebugUnitTest --tests "com.trackr.ui.navigation.NavigatorTest"
+./gradlew :core:navigation:allTests                                # Navigator、DeepLinkParser
 ./gradlew :core:domain:allTests                                    # 公共逻辑，Android 主机 + iOS 模拟器
 ./gradlew :composeApp:iosSimulatorArm64Test                        # iOS（需 Xcode）
 ./gradlew :androidApp:assembleRelease -PcomposeReports                   # Compose compiler reports
