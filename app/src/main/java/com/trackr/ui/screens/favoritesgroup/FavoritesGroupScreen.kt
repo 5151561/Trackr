@@ -342,15 +342,17 @@ fun FavoritesGroupScreen(
                         onStartTracking = { viewModel.startGroupTracking(context, group) },
                         onStopTracking = { viewModel.stopGroupTracking(context) },
                         onConfirmBoarded = { viewModel.confirmBoarded(context) },
+                        onSwitchToNextLeg = { viewModel.switchToNextLeg(context) },
                         onReverseClick = { viewModel.createReverseGroup(group) },
                         onSaveTemporary = { viewModel.saveOrConvertTemporaryGroup(group.id) },
                         onEdit = { editingGroup = group },
                         onDelete = { viewModel.deleteGroup(group.id) },
                         onLineClick = { candidate ->
+                            // 线路详情定位到上车站
                             onNavigateToLineDetail(
                                 candidate.cityId,
                                 candidate.lineId,
-                                candidate.toStopOrder,
+                                candidate.boardStopOrderForDetail(),
                                 "",
                                 candidate.source,
                                 candidate.lineName
@@ -438,3 +440,7 @@ fun FavoritesGroupScreen(
         )
     }
 }
+
+/** 跳线路详情时定位的站序：上车站；站序缺失时回落下车站 */
+internal fun CandidateLine.boardStopOrderForDetail(): Int =
+    if (fromStopOrder > 0) fromStopOrder else toStopOrder

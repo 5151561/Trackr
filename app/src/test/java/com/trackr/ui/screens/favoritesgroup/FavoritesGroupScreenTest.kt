@@ -2,12 +2,15 @@ package com.trackr.ui.screens.favoritesgroup
 
 import android.content.Context
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -137,7 +140,12 @@ class FavoritesGroupScreenTest {
         // 1. 验证标题栏及副标题摘要
         composeTestRule.onNodeWithText("我的收藏").assertIsDisplayed()
         composeTestRule.onNodeWithText("已收纳 2 个同达方案与 0 个换乘组合").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("btn_reverse_group_direct_1").assertIsDisplayed()
+        // 标题只写"起点 → 终点"，摘要里站序未对齐（合成 line_ 线路）写"站数待确认"
+        composeTestRule.onNodeWithText("深大北门 → 高新园总站").assertIsDisplayed()
+        composeTestRule.onNodeWithText("直达 · 站数待确认").assertIsDisplayed()
+        // 不常用操作收进 ⋮ 菜单，默认不显示
+        composeTestRule.onNodeWithTag("btn_more_group_direct_1").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("btn_reverse_group_direct_1").assertDoesNotExist()
 
         // 2. 验证纯线路号码小图标胶囊展示 (无冗余“备选”字样)
         composeTestRule.onNodeWithTag("candidate_chip_320").assertIsDisplayed()
@@ -147,18 +155,29 @@ class FavoritesGroupScreenTest {
         val verboseNodes = composeTestRule.onAllNodesWithText("备选", substring = true).fetchSemanticsNodes()
         assertEquals("Spec v2.3 要求彻底消除'备选'字样", 0, verboseNodes.size)
 
-        // 3. 初始详情面板应高亮最快的 320 路
-        composeTestRule.onNodeWithText("320 路").assertExists()
+        // 3. 初始主数字显示最快的 320 路：第 1 程上车站几分钟后到
+        composeTestRule.onNodeWithTag("selected_candidate_name").assertTextEquals("320")
         composeTestRule.onNodeWithText("最快").assertExists()
-        composeTestRule.onNodeWithText("下车站: 高新园总站 (乘 4 站)").assertExists()
+        composeTestRule.onNodeWithText("2 分钟后到 深大北门").assertExists()
+        composeTestRule.onNodeWithText("还有 1 站 · 粤B·58921").assertExists()
+        // 按钮不再重复符号
+        composeTestRule.onNodeWithText("开始追踪").assertExists()
+        composeTestRule.onAllNodesWithText("▷", substring = true).assertCountEquals(0)
 
         // 4. 用户点击 M194 纯号码胶囊切换展示
         composeTestRule.onNodeWithTag("candidate_chip_M194").performClick()
         composeTestRule.waitForIdle()
 
-        // 详情面板无缝切换为 M194 路
-        composeTestRule.onNodeWithText("M194 路").assertExists()
-        composeTestRule.onNodeWithText("下车站: 高新园总站 (乘 5 站)").assertExists()
+        // 主数字无缝切换为 M194 路
+        composeTestRule.onNodeWithTag("selected_candidate_name").assertTextEquals("M194")
+        composeTestRule.onNodeWithText("8 分钟后到 深大北门").assertExists()
+
+        // 5. ⋮ 菜单展开后可见返程 / 编辑 / 删除
+        composeTestRule.onNodeWithTag("btn_more_group_direct_1").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("btn_reverse_group_direct_1").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("btn_edit_group_direct_1").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("btn_delete_group_direct_1").assertIsDisplayed()
     }
 
     @Test
@@ -219,23 +238,28 @@ class FavoritesGroupScreenTest {
         }
         composeTestRule.waitForIdle()
 
-        // 1. 验证标题与换乘统计
-        composeTestRule.onNodeWithText("晨间跨区换乘 (家 ➔ 科技园)").assertIsDisplayed()
-        composeTestRule.onNodeWithText("换乘 1 次 · 步行 170米").assertIsDisplayed()
+        // 1. 验证标题（起点 → 终点）与换乘统计
+        composeTestRule.onNodeWithText("碧海湾站 → 腾讯大厦").assertIsDisplayed()
+        composeTestRule.onNodeWithText("换乘 1 次 · 步行 170 米").assertIsDisplayed()
 
-        // 2. 验证纯程数胶囊与纯线路号码胶囊
-        composeTestRule.onNodeWithText("1程").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("leg_chip_320").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("leg_chip_M375").assertIsDisplayed()
-        composeTestRule.onNodeWithText("2程").assertExists()
+        // 2. 验证时间轴每程上车站、线路胶囊、换乘步行段与终点
+        composeTestRule.onNodeWithTag("timeline_stop_0").assertTextEquals("碧海湾站")
+        composeTestRule.onNodeWithTag("leg_chip_320").assertExists()
+        composeTestRule.onNodeWithTag("leg_chip_M375").assertExists()
+        composeTestRule.onNodeWithText("步行 50 米").assertExists()
+        composeTestRule.onNodeWithTag("timeline_stop_1").assertTextEquals("高新园地铁站")
         composeTestRule.onNodeWithTag("leg_chip_19").assertExists()
+        composeTestRule.onNodeWithTag("timeline_end_stop").assertTextEquals("腾讯大厦")
+        // 合成线路站序未对齐，不显示假站数
+        composeTestRule.onNodeWithTag("leg_ride_note_0").assertTextEquals("站数待确认 · 在 高新园地铁站 下车")
+        composeTestRule.onNodeWithTag("leg_ride_note_1").assertTextEquals("站数待确认")
 
         // 验证绝对没有“备选”字样
         val verboseNodes = composeTestRule.onAllNodesWithText("备选", substring = true).fetchSemanticsNodes()
         assertEquals(0, verboseNodes.size)
 
         // 3. 点击 M375 胶囊切换第 1 程所选线路
-        composeTestRule.onNodeWithTag("leg_chip_M375").performClick()
+        composeTestRule.onNodeWithTag("leg_chip_M375").performScrollTo().performClick()
         composeTestRule.waitForIdle()
 
         val selected = viewModel.selectedLineKeys.value["group_transfer_1_0"]
@@ -282,13 +306,19 @@ class FavoritesGroupScreenTest {
         }
         composeTestRule.waitForIdle()
 
-        // 1. 验证标题、同站换乘摘要及反向按钮
-        composeTestRule.onNodeWithText("万达金街 ➔ 西徐村").assertIsDisplayed()
+        // 1. 验证标题与同站换乘摘要
+        composeTestRule.onNodeWithText("万达金街 → 西徐村").assertIsDisplayed()
         composeTestRule.onNodeWithText("换乘 1 次 · 同站换乘").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("btn_reverse_group_same_station").assertIsDisplayed()
 
-        // 2. 验证中转节点显示 (同站换乘) 而不是 (步行 0米)
-        composeTestRule.onNodeWithText("西社小区 (同站换乘)").assertExists()
+        // 2. 换乘站标"同站换乘"，不显示"步行 0 米"
+        composeTestRule.onNodeWithTag("timeline_stop_1").assertTextEquals("西社小区")
+        composeTestRule.onAllNodesWithText("同站换乘").assertCountEquals(1)
+        composeTestRule.onAllNodesWithText("步行 0 米").assertCountEquals(0)
+
+        // 3. 返程按钮收在 ⋮ 菜单里
+        composeTestRule.onNodeWithTag("btn_more_group_same_station").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("btn_reverse_group_same_station").assertIsDisplayed()
     }
 
     @Test

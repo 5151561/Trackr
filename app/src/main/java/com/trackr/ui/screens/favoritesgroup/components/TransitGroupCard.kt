@@ -2,44 +2,44 @@ package com.trackr.ui.screens.favoritesgroup.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -48,21 +48,27 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import com.trackr.ui.theme.extendedColors
+import androidx.compose.ui.unit.sp
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.CandidateLineRealtimeInfo
-import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.GroupTrackingSessionState
+import com.trackr.domain.model.LegPhase
+import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitGroup
+import com.trackr.ui.theme.extendedColors
 
 /**
- * 路线分组卡片（支持单段多线同达卡片与多段换乘时间轴卡片）
- * 严格遵循 Spec v2.3 规范：绝不展示冗余“备选”文字，采用纯号码小胶囊即时联动
+ * 收藏页路线卡片（单程直达 / 多程换乘）。
+ *
+ * 一张卡只有一个主数字：未追踪 / 等车时是"N 分钟后到 上车站"，乘车时是"N 站后在 下车站 下车"。
+ * 不常用的操作（收藏、返程、编辑、删除）收进右上角 ⋮ 菜单。
  */
 @Composable
 fun TransitGroupCard(
@@ -76,6 +82,7 @@ fun TransitGroupCard(
     onStartTracking: () -> Unit,
     onStopTracking: () -> Unit,
     onConfirmBoarded: () -> Unit = {},
+    onSwitchToNextLeg: () -> Unit = {},
     onReverseClick: () -> Unit = {},
     onSaveTemporary: () -> Unit,
     onEdit: () -> Unit,
@@ -83,650 +90,587 @@ fun TransitGroupCard(
     onLineClick: (CandidateLine) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isTrackingThisGroup = activeSession != null && activeSession.groupId == group.id && !activeSession.isCompleted
-    val currentLegIndex = activeSession?.activeLegIndex ?: 0
-    // 正在等车阶段（WAITING_BOARD）时允许用户手动“我已上车”
-    val isWaitingBoard = isTrackingThisGroup &&
-        activeSession?.trackingSessionState?.legPhase == com.trackr.domain.model.LegPhase.WAITING_BOARD
-
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val trackingBorder = remember(primaryColor) {
-        BorderStroke(2.dp, primaryColor)
+    val tracking = activeSession?.takeIf { it.groupId == group.id && !it.isCompleted }
+    val isTracking = tracking != null
+    val activeLegIndex = tracking?.activeLegIndex?.coerceIn(0, (group.legs.size - 1).coerceAtLeast(0)) ?: 0
+    // 只采用属于当前程的两阶段状态；刚切程时旧状态还没刷新，按"等车 · 连接中"显示
+    val session = tracking?.trackingSessionState?.takeIf {
+        it.legPhase != LegPhase.SINGLE && it.currentLegIndex == tracking.activeLegIndex
     }
+    val phase: LegPhase? = if (isTracking) session?.legPhase ?: LegPhase.WAITING_BOARD else null
+    val isMultiLeg = group.legs.size > 1
+
+    val selectedLines: List<CandidateLine?> = group.legs.mapIndexed { index, leg ->
+        val chosenId = selectedLineKeys["${group.id}_$index"] ?: leg.primaryLine?.lineId
+        leg.candidateLines.find { it.lineId == chosenId } ?: leg.primaryLine
+    }
+    val infoOf: (Int, CandidateLine) -> CandidateLineRealtimeInfo? = { index, line ->
+        candidateRealtimeMap["${group.id}_${index}_${line.lineId}"]
+            ?: candidateRealtimeMap["${line.lineId}_${line.toStopOrder}"]
+    }
+    // 实时数据刷新时顺便刷新"现在"，用于估算预计上车时间
+    val nowMillis = remember(candidateRealtimeMap, session) { System.currentTimeMillis() }
 
     Card(
         modifier = modifier
             .fillMaxWidth()
             .testTag("transit_group_card_${group.id}"),
         shape = RoundedCornerShape(20.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isTrackingThisGroup) {
-                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-            } else {
-                MaterialTheme.colorScheme.surface
-            }
-        ),
-        border = if (isTrackingThisGroup) trackingBorder else BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = if (isTracking) {
+            BorderStroke(2.dp, MaterialTheme.colorScheme.primary)
+        } else {
+            BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f))
+        }
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            if (group.legs.size <= 1) {
-                // =========================================================================
-                // Mode A: 单段多线同达卡片 (group.legs.size == 1)
-                // =========================================================================
-                val leg = group.legs.firstOrNull()
-                if (leg != null) {
-                    // 1. 头部标题与紧凑操作按钮
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text(
-                            text = group.name,
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier
-                                .weight(1f)
-                                .testTag("group_title_${group.id}")
+            CardHeader(
+                group = group,
+                summary = groupSummaryText(group, selectedLines),
+                phaseLabel = if (isTracking) trackingPhaseLabel(activeLegIndex, group.legs.size, phase) else null,
+                onSaveTemporary = onSaveTemporary,
+                onReverseClick = onReverseClick,
+                onEdit = onEdit,
+                onDelete = onDelete
+            )
+
+            if (isTracking) {
+                LegStepper(
+                    fractions = legProgressFractions(group.legs.size, activeLegIndex, phase),
+                    modifier = Modifier.testTag("leg_stepper_${group.id}")
+                )
+            } else {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            }
+
+            val headlineLeg = group.legs.getOrNull(activeLegIndex)
+            val headlineLine = selectedLines.getOrNull(activeLegIndex)
+            val headlineInfo = headlineLine?.let { infoOf(activeLegIndex, it) }
+
+            // 单程：候选线路胶囊放在主数字上方
+            if (!isMultiLeg && headlineLeg != null) {
+                CandidateLineChips(
+                    candidates = headlineLeg.candidateLines,
+                    selectedLineId = headlineLine?.lineId,
+                    selectedColor = MaterialTheme.colorScheme.primary,
+                    realtimeInfoOf = { infoOf(0, it) },
+                    chipTagPrefix = "candidate_chip_",
+                    addButtonTag = "btn_add_candidate_direct",
+                    addDialogTitle = "添加同达线路",
+                    addPlaceholder = "例如：311、M194",
+                    onSelect = { lineId -> onSelectCandidateLine(0, lineId) },
+                    onAdd = { lineName -> onAddCandidateLine(0, lineName) }
+                )
+            }
+
+            if (headlineLeg != null) {
+                val nextLine = selectedLines.getOrNull(activeLegIndex + 1)
+                val headline = buildHeadline(
+                    phase = phase,
+                    session = session,
+                    boardStopName = headlineLeg.fromStopName,
+                    dropStopName = headlineLeg.toStopName,
+                    info = headlineInfo,
+                    fallbackEta = headlineLine?.let { realtimeSummaries["${it.lineId}_${it.toStopOrder}"] },
+                    nextLineName = nextLine?.lineName
+                )
+                HeadlineSection(
+                    groupId = group.id,
+                    legIndex = activeLegIndex,
+                    line = headlineLine,
+                    info = headlineInfo,
+                    phase = phase,
+                    headline = headline,
+                    isSignalLost = phase == LegPhase.ON_BOARD && session?.isSignalLost == true,
+                    actions = {
+                        CardActions(
+                            groupId = group.id,
+                            phase = phase,
+                            isLastLeg = activeLegIndex >= group.legs.lastIndex,
+                            showTrajectory = !isMultiLeg,
+                            onStartTracking = onStartTracking,
+                            onStopTracking = onStopTracking,
+                            onConfirmBoarded = onConfirmBoarded,
+                            onSwitchToNextLeg = onSwitchToNextLeg,
+                            onTrajectoryClick = { headlineLine?.let(onLineClick) }
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (group.isTemporary) {
-                                IconButton(
-                                    onClick = onSaveTemporary,
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .testTag("btn_save_temp_${group.id}")
+                    }
+                )
+            }
+
+            if (isMultiLeg) {
+                val rideStops = selectedLines.map { reliableRideStops(it) }
+                val walks = group.legs.map { it.walkingDistanceMeters }
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    group.legs.forEachIndexed { index, leg ->
+                        if (index > 0 && leg.walkingDistanceMeters > 0) {
+                            TimelineWalkSegment(walkMeters = leg.walkingDistanceMeters)
+                        }
+                        val state = when {
+                            !isTracking -> LegTimelineState.UPCOMING
+                            index < activeLegIndex -> LegTimelineState.DONE
+                            index == activeLegIndex ->
+                                if (phase == LegPhase.ON_BOARD) LegTimelineState.ON_BOARD else LegTimelineState.WAITING
+                            else -> LegTimelineState.UPCOMING
+                        }
+                        val line = selectedLines[index]
+                        val base = rideStopsText(line)
+                        val rideNote = when (state) {
+                            LegTimelineState.DONE -> "$base · 已下车"
+                            LegTimelineState.WAITING -> "$base · 在等车"
+                            LegTimelineState.ON_BOARD -> onBoardRideNote(rideStops[index], session)
+                            LegTimelineState.UPCOMING -> {
+                                val extra = if (index == 0) {
+                                    "在 ${leg.toStopName} 下车"
+                                } else if (
+                                    isTracking && index == activeLegIndex + 1 && session != null &&
+                                    shouldShowNextLegLive(phase, session.stopsRemaining)
                                 ) {
-                                    Icon(imageVector = Icons.Default.BookmarkBorder, contentDescription = "转存", modifier = Modifier.size(18.dp))
-                                }
-                            }
-                            IconButton(
-                                onClick = onReverseClick,
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .testTag("btn_reverse_${group.id}")
-                            ) {
-                                Icon(imageVector = Icons.Default.SwapHoriz, contentDescription = "生成返程", modifier = Modifier.size(18.dp))
-                            }
-                            IconButton(
-                                onClick = onEdit,
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .testTag("btn_edit_${group.id}")
-                            ) {
-                                Icon(imageVector = Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(18.dp))
-                            }
-                            IconButton(
-                                onClick = onDelete,
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .testTag("btn_delete_${group.id}")
-                            ) {
-                                Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "删除", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                    }
-
-                    // 行 2：行程摘要与追踪按钮
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            modifier = Modifier.weight(1f),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh
-                            ) {
-                                Text(
-                                    text = "直达组合",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                )
-                            }
-                            val totalWalk = leg.walkingDistanceMeters
-                            val walkSuffix = if (totalWalk > 0) " · 步行 ${totalWalk}米" else ""
-                            Text(
-                                text = "${leg.fromStopName} ➔ ${leg.toStopName}$walkSuffix",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(20.dp))
-                                .clickable {
-                                    if (isTrackingThisGroup) onStopTracking() else onStartTracking()
-                                }
-                                .testTag("btn_track_${group.id}"),
-                            shape = RoundedCornerShape(20.dp),
-                            color = if (isTrackingThisGroup) {
-                                MaterialTheme.colorScheme.errorContainer
-                            } else {
-                                MaterialTheme.colorScheme.primaryContainer
-                            }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    imageVector = if (isTrackingThisGroup) Icons.Default.Stop else Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    tint = if (isTrackingThisGroup) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = if (isTrackingThisGroup) "■ 结束追踪" else "▷ 开启追踪",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = if (isTrackingThisGroup) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        }
-                        if (isWaitingBoard) {
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Surface(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable { onConfirmBoarded() }
-                                    .testTag("btn_confirm_boarded_${group.id}"),
-                                shape = RoundedCornerShape(20.dp),
-                                color = MaterialTheme.colorScheme.tertiaryContainer
-                            ) {
-                                Text(
-                                    text = "我已上车",
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                                )
-                            }
-                        }
-                    }
-
-                    // 2. 纯线路号码小图标胶囊群 (横向滚动，点击即联动切换，含添加按钮)
-                    val selectedLineId = selectedLineKeys["${group.id}_0"] ?: leg.primaryLine?.lineId
-                    var showAddCandidateDialog by remember { mutableStateOf(false) }
-                    var newCandidateLineName by remember { mutableStateOf("") }
-
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        leg.candidateLines.forEach { candidate ->
-                            val candidateKey = "${group.id}_0_${candidate.lineId}"
-                            val info = candidateRealtimeMap[candidateKey]
-                                ?: candidateRealtimeMap["${candidate.lineId}_${candidate.toStopOrder}"]
-
-                            val isSelected = candidate.lineId == selectedLineId
-                            val shortEta = info?.shortChipEta?.takeIf { it.isNotBlank() }
-
-                            Surface(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(20.dp))
-                                    .clickable { onSelectCandidateLine(0, candidate.lineId) }
-                                    .testTag("candidate_chip_${candidate.lineName}"),
-                                shape = RoundedCornerShape(20.dp),
-                                color = if (isSelected) {
-                                    MaterialTheme.colorScheme.primary
+                                    nextLegLiveText(leg.fromStopName, line?.let { infoOf(index, it) })
                                 } else {
-                                    MaterialTheme.colorScheme.surfaceContainerLow
-                                },
-                                border = if (!isSelected) {
-                                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                                } else null
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Text(
-                                        text = "🚌 ${candidate.lineName}",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                                    )
-                                    if (shortEta != null) {
-                                        Text(
-                                            text = "· $shortEta",
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
-                                            color = if (isSelected) {
-                                                MaterialTheme.colorScheme.primaryContainer
-                                            } else if (info.stopsAway <= 2) {
-                                                MaterialTheme.extendedColors.success
-                                            } else {
-                                                MaterialTheme.extendedColors.warning
-                                            }
-                                        )
+                                    val anchorMinutes = when {
+                                        !isTracking -> selectedLines.firstOrNull()?.let { infoOf(0, it) }?.knownMinutes()
+                                        session == null || session.stopsRemaining < 0 -> null
+                                        else -> etaMinutesOf(session.etaSeconds, session.stopsRemaining)
                                     }
+                                    boardTimeTextForLeg(
+                                        targetLegIndex = index,
+                                        anchorLegIndex = if (isTracking) activeLegIndex else 0,
+                                        anchorIsDropStop = phase == LegPhase.ON_BOARD,
+                                        anchorMinutes = anchorMinutes,
+                                        rideStopsPerLeg = rideStops,
+                                        walkMetersPerLeg = walks,
+                                        nowMillis = nowMillis
+                                    )
                                 }
+                                if (extra != null) "$base · $extra" else base
                             }
                         }
-
-                        // 添加同达线路小按钮
-                        Surface(
-                            modifier = Modifier
-                                .size(28.dp)
-                                .clip(CircleShape)
-                                .clickable { showAddCandidateDialog = true }
-                                .testTag("btn_add_candidate_direct"),
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Add,
-                                    contentDescription = "添加同达线路",
-                                    tint = MaterialTheme.colorScheme.outline,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                    }
-
-                    if (showAddCandidateDialog) {
-                        AlertDialog(
-                            onDismissRequest = {
-                                showAddCandidateDialog = false
-                                newCandidateLineName = ""
-                            },
-                            title = { Text("添加同达线路") },
-                            text = {
-                                OutlinedTextField(
-                                    value = newCandidateLineName,
-                                    onValueChange = { newCandidateLineName = it },
-                                    label = { Text("线路名称") },
-                                    placeholder = { Text("例如：311、M194") },
-                                    singleLine = true,
-                                    modifier = Modifier.fillMaxWidth()
-                                )
-                            },
-                            confirmButton = {
-                                Button(
-                                    onClick = {
-                                        if (newCandidateLineName.isNotBlank()) {
-                                            onAddCandidateLine(0, newCandidateLineName.trim())
-                                            showAddCandidateDialog = false
-                                            newCandidateLineName = ""
-                                        }
-                                    },
-                                    enabled = newCandidateLineName.isNotBlank()
-                                ) {
-                                    Text("添加")
-                                }
-                            },
-                            dismissButton = {
-                                TextButton(onClick = {
-                                    showAddCandidateDialog = false
-                                    newCandidateLineName = ""
-                                }) {
-                                    Text("取消")
-                                }
-                            }
+                        LegTimelineItem(
+                            legIndex = index,
+                            leg = leg,
+                            state = state,
+                            rideNote = rideNote,
+                            selectedLineId = line?.lineId,
+                            realtimeInfoOf = { infoOf(index, it) },
+                            onSelectCandidateLine = { lineId -> onSelectCandidateLine(index, lineId) },
+                            onAddCandidateLine = { lineName -> onAddCandidateLine(index, lineName) },
+                            onLineClick = onLineClick,
+                            walkMetersBefore = leg.walkingDistanceMeters
                         )
                     }
+                    TimelineEndStop(stopName = group.destinationStopName)
+                }
+            }
+        }
+    }
+}
 
-                    // 3. 联动切换的实时信息展示区 (Linked Real-Time Detail Panel)
-                    val selectedCandidate = leg.candidateLines.find { it.lineId == selectedLineId }
-                        ?: leg.candidateLines.firstOrNull()
+/** 乘车中这一程的小字："已坐 2 / 4 站 · 车上" */
+private fun onBoardRideNote(totalStops: Int?, session: TrackingSessionState?): String {
+    if (totalStops == null || session == null || session.boardStopOrder <= 0) return "车上"
+    val ridden = (session.currentBusOrder - session.boardStopOrder).coerceIn(0, totalStops)
+    return "已坐 $ridden / $totalStops 站 · 车上"
+}
 
-                    val candidateKey = if (selectedCandidate != null) "${group.id}_0_${selectedCandidate.lineId}" else ""
-                    val info = candidateRealtimeMap[candidateKey]
-                        ?: (selectedCandidate?.let { candidateRealtimeMap["${it.lineId}_${it.toStopOrder}"] })
+/** 主数字区的内容 */
+private data class Headline(
+    /** 大字数字；为 null 时只显示 [text] */
+    val number: String?,
+    val text: String,
+    val detail: String?,
+    val isSuccess: Boolean = false
+)
 
-                    Surface(
+private fun buildHeadline(
+    phase: LegPhase?,
+    session: TrackingSessionState?,
+    boardStopName: String,
+    dropStopName: String,
+    info: CandidateLineRealtimeInfo?,
+    fallbackEta: String?,
+    nextLineName: String?
+): Headline {
+    val plate = info?.vehiclePlate?.takeIf { it.isNotBlank() }
+    return when (phase) {
+        LegPhase.ON_BOARD -> {
+            val s = session
+            if (s == null || s.stopsRemaining < 0) {
+                Headline(null, s?.statusSummary ?: "正在连接实时公交数据…", null)
+            } else {
+                val drop = s.targetStopName.ifBlank { dropStopName }
+                val minutes = if (s.etaSeconds > 0) etaMinutesOf(s.etaSeconds, s.stopsRemaining) else null
+                val detail = listOfNotNull(
+                    minutes?.let { "约 $it 分钟" },
+                    nextLineName?.let { "下车后换乘 $it" }
+                ).joinToString(" · ").ifEmpty { null }
+                Headline(s.stopsRemaining.toString(), "站后在 $drop 下车", detail, isSuccess = true)
+            }
+        }
+
+        LegPhase.WAITING_BOARD -> {
+            val s = session
+            val board = s?.boardStopName?.ifBlank { null } ?: boardStopName
+            val minutes = s?.takeIf { it.stopsRemaining >= 0 }?.let { etaMinutesOf(it.etaSeconds, it.stopsRemaining) }
+            if (s == null || minutes == null) {
+                Headline(null, s?.statusSummary ?: "正在连接实时公交数据…", null)
+            } else {
+                val detail = listOfNotNull("还有 ${s.stopsRemaining} 站", plate).joinToString(" · ")
+                Headline(minutes.toString(), "分钟后到 $board", detail)
+            }
+        }
+
+        else -> {
+            val minutes = info?.knownMinutes()
+            when {
+                info != null && minutes != null && info.shortChipEta == "已到站" ->
+                    Headline(null, "车已到 $boardStopName", plate)
+                info != null && minutes != null -> {
+                    val detail = listOfNotNull("还有 ${info.stopsAway} 站", plate).joinToString(" · ")
+                    Headline(minutes.toString(), "分钟后到 $boardStopName", detail)
+                }
+                else -> Headline(null, info?.etaText?.ifBlank { null } ?: fallbackEta ?: "查询车辆中…", null)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CardHeader(
+    group: TransitGroup,
+    summary: String,
+    phaseLabel: String?,
+    onSaveTemporary: () -> Unit,
+    onReverseClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.Top
+    ) {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(top = 4.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = groupTitleText(group),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag("group_title_${group.id}")
+            )
+            if (phaseLabel != null) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer
+                ) {
+                    Text(
+                        text = phaseLabel,
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("detail_panel_direct"),
-                        shape = RoundedCornerShape(16.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.Top
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        val lineDisplayName = selectedCandidate?.lineName?.let {
-                                            if (it.endsWith("路") || it.contains("线")) it else "$it 路"
-                                        } ?: "公交线路"
-                                        Text(
-                                            text = lineDisplayName,
-                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Black),
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                            modifier = Modifier.testTag("selected_candidate_name")
-                                        )
-                                        if (info?.isFastest == true) {
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Surface(
-                                                shape = RoundedCornerShape(4.dp),
-                                                color = MaterialTheme.extendedColors.successContainer
-                                            ) {
-                                                Text(
-                                                    text = "最快",
-                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                                    color = MaterialTheme.extendedColors.success,
-                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
-                                                )
-                                            }
-                                        }
-                                    }
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    val dir = info?.directionText?.ifEmpty { null }
-                                        ?: selectedCandidate?.endStopName?.takeIf { it.isNotEmpty() }?.let { "$it 方向" }
-                                        ?: "${leg.toStopName} 方向"
-                                    Text(
-                                        text = "开往 $dir",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-
-                                Column(horizontalAlignment = Alignment.End) {
-                                    val etaText = info?.etaText?.ifEmpty { null }
-                                        ?: (selectedCandidate?.let { realtimeSummaries["${it.lineId}_${it.toStopOrder}"] })
-                                        ?: "查询车辆中…"
-                                    Text(
-                                        text = etaText,
-                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Black),
-                                        color = if (info != null && info.stopsAway <= 2) MaterialTheme.extendedColors.success else MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.testTag("selected_candidate_eta")
-                                    )
-                                    if (!info?.vehiclePlate.isNullOrBlank()) {
-                                        Text(
-                                            text = info.vehiclePlate,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.outline
-                                        )
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-                            HorizontalDivider(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                val stopsCount = (selectedCandidate?.let { it.toStopOrder - it.fromStopOrder } ?: 1).coerceAtLeast(1)
-                                Text(
-                                    text = "下车站: ${leg.toStopName} (乘 $stopsCount 站)",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Row(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .clickable(enabled = selectedCandidate != null) {
-                                            selectedCandidate?.let { onLineClick(it) }
-                                        }
-                                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                                        .testTag("btn_candidate_trajectory"),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "实时轨迹 >",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                        }
-                    }
-
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .testTag("phase_badge_${group.id}")
+                    )
                 }
             } else {
-                // =========================================================================
-                // Mode B: 多段换乘时间轴卡片 (group.legs.size > 1)
-                // =========================================================================
-                // 1. 头部标题与紧凑操作按钮
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = group.name,
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
+                Text(
+                    text = summary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("group_summary_${group.id}")
+                )
+            }
+        }
+        CardMenu(
+            groupId = group.id,
+            isTemporary = group.isTemporary,
+            onSaveTemporary = onSaveTemporary,
+            onReverseClick = onReverseClick,
+            onEdit = onEdit,
+            onDelete = onDelete
+        )
+    }
+}
+
+@Composable
+private fun CardMenu(
+    groupId: String,
+    isTemporary: Boolean,
+    onSaveTemporary: () -> Unit,
+    onReverseClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(
+            onClick = { expanded = true },
+            modifier = Modifier.testTag("btn_more_$groupId")
+        ) {
+            Icon(imageVector = Icons.Default.MoreVert, contentDescription = "更多操作")
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            if (isTemporary) {
+                DropdownMenuItem(
+                    text = { Text("收藏") },
+                    leadingIcon = { Icon(Icons.Default.BookmarkBorder, contentDescription = null) },
+                    onClick = {
+                        expanded = false
+                        onSaveTemporary()
+                    },
+                    modifier = Modifier.testTag("btn_save_temp_$groupId")
+                )
+            }
+            DropdownMenuItem(
+                text = { Text("生成返程") },
+                leadingIcon = { Icon(Icons.Default.SwapHoriz, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onReverseClick()
+                },
+                modifier = Modifier.testTag("btn_reverse_$groupId")
+            )
+            DropdownMenuItem(
+                text = { Text("编辑") },
+                leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onEdit()
+                },
+                modifier = Modifier.testTag("btn_edit_$groupId")
+            )
+            DropdownMenuItem(
+                text = { Text("删除") },
+                leadingIcon = { Icon(Icons.Default.DeleteOutline, contentDescription = null) },
+                onClick = {
+                    expanded = false
+                    onDelete()
+                },
+                modifier = Modifier.testTag("btn_delete_$groupId")
+            )
+        }
+    }
+}
+
+/** 分程进度条：每程一格，按 [fractions] 填充 */
+@Composable
+private fun LegStepper(fractions: List<Float>, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        fractions.forEach { fraction ->
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+                    .background(MaterialTheme.colorScheme.outlineVariant)
+            ) {
+                if (fraction > 0f) {
+                    Box(
                         modifier = Modifier
-                            .weight(1f)
-                            .testTag("group_title_${group.id}")
+                            .fillMaxHeight()
+                            .fillMaxWidth(fraction)
+                            .background(MaterialTheme.colorScheme.primary)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (group.isTemporary) {
-                            IconButton(
-                                onClick = onSaveTemporary,
-                                modifier = Modifier
-                                    .size(32.dp)
-                                    .testTag("btn_save_temp_${group.id}")
-                            ) {
-                                Icon(imageVector = Icons.Default.BookmarkBorder, contentDescription = "转存", modifier = Modifier.size(18.dp))
-                            }
-                        }
-                        IconButton(
-                            onClick = onReverseClick,
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun HeadlineSection(
+    groupId: String,
+    legIndex: Int,
+    line: CandidateLine?,
+    info: CandidateLineRealtimeInfo?,
+    phase: LegPhase?,
+    headline: Headline,
+    isSignalLost: Boolean,
+    actions: @Composable () -> Unit
+) {
+    val accent = if (headline.isSuccess) MaterialTheme.extendedColors.success else MaterialTheme.colorScheme.primary
+    val content: @Composable (Modifier) -> Unit = { contentModifier ->
+        Column(modifier = contentModifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (line != null) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Surface(shape = RoundedCornerShape(6.dp), color = legLineColor(legIndex)) {
+                        Text(
+                            text = line.lineName,
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = if (legIndex == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.surface,
                             modifier = Modifier
-                                .size(32.dp)
-                                .testTag("btn_reverse_${group.id}")
-                        ) {
-                            Icon(imageVector = Icons.Default.SwapHoriz, contentDescription = "生成返程", modifier = Modifier.size(18.dp))
-                        }
-                        IconButton(
-                            onClick = onEdit,
-                            modifier = Modifier
-                                .size(32.dp)
-                                .testTag("btn_edit_${group.id}")
-                        ) {
-                            Icon(imageVector = Icons.Default.Edit, contentDescription = "编辑", modifier = Modifier.size(18.dp))
-                        }
-                        IconButton(
-                            onClick = onDelete,
-                            modifier = Modifier
-                                .size(32.dp)
-                                .testTag("btn_delete_${group.id}")
-                        ) {
-                            Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "删除", modifier = Modifier.size(18.dp))
-                        }
+                                .padding(horizontal = 8.dp, vertical = 2.dp)
+                                .testTag("selected_candidate_name")
+                        )
+                    }
+                    val direction = info?.directionText?.ifBlank { null }
+                        ?: line.endStopName.takeIf { it.isNotBlank() }?.let { "${it}方向" }
+                    if (direction != null) {
+                        Text(
+                            text = "开往 $direction",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
-
-                // 行 2：换乘及步行摘要与追踪按钮
-                val transferCount = group.legs.size - 1
-                val totalWalk = group.legs.sumOf { it.walkingDistanceMeters }
-                val summaryText = if (totalWalk > 0) {
-                    "换乘 $transferCount 次 · 步行 ${totalWalk}米"
-                } else {
-                    "换乘 $transferCount 次 · 同站换乘"
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Text(
-                        text = summaryText,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Surface(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .clickable {
-                                if (isTrackingThisGroup) onStopTracking() else onStartTracking()
-                            }
-                            .testTag("btn_track_${group.id}"),
-                        shape = RoundedCornerShape(20.dp),
-                        color = if (isTrackingThisGroup) {
-                            MaterialTheme.colorScheme.errorContainer
-                        } else {
-                            MaterialTheme.colorScheme.primaryContainer
-                        }
+            }
+            val headlineText = buildAnnotatedString {
+                if (headline.number != null) {
+                    withStyle(SpanStyle(fontSize = 28.sp, fontWeight = FontWeight.Black, color = accent)) {
+                        append(headline.number)
+                    }
+                    append(" ")
+                    withStyle(
+                        SpanStyle(
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = if (isTrackingThisGroup) Icons.Default.Stop else Icons.Default.PlayArrow,
-                                contentDescription = null,
-                                tint = if (isTrackingThisGroup) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (isTrackingThisGroup) "■ 结束追踪" else "▷ 开启追踪",
-                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (isTrackingThisGroup) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                            )
-                        }
+                        append(headline.text)
+                    }
+                } else {
+                    withStyle(SpanStyle(fontSize = 16.sp, fontWeight = FontWeight.Bold, color = accent)) {
+                        append(headline.text)
                     }
                 }
+            }
+            Text(
+                text = headlineText,
+                modifier = Modifier.testTag("eta_headline_$groupId")
+            )
+            if (headline.detail != null) {
+                Text(
+                    text = headline.detail,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.testTag("eta_detail_$groupId")
+                )
+            }
+            if (isSignalLost) {
+                Text(
+                    text = "信号丢失，显示的是上次位置",
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.extendedColors.warning,
+                    modifier = Modifier.testTag("signal_lost_$groupId")
+                )
+            }
+        }
+    }
 
-                // 2. 竖向时间轴走向
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
+    if (phase == null) {
+        // 未追踪：主数字在左，按钮在右
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            content(Modifier.weight(1f))
+            Spacer(modifier = Modifier.width(8.dp))
+            actions()
+        }
+    } else {
+        // 追踪中：按钮放在主数字下面一行
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            content(Modifier.fillMaxWidth())
+            actions()
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CardActions(
+    groupId: String,
+    phase: LegPhase?,
+    isLastLeg: Boolean,
+    showTrajectory: Boolean,
+    onStartTracking: () -> Unit,
+    onStopTracking: () -> Unit,
+    onConfirmBoarded: () -> Unit,
+    onSwitchToNextLeg: () -> Unit,
+    onTrajectoryClick: () -> Unit
+) {
+    if (phase == null) {
+        Column(
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Button(
+                onClick = onStartTracking,
+                modifier = Modifier.testTag("btn_track_$groupId")
+            ) {
+                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("开始追踪")
+            }
+            if (showTrajectory) {
+                OutlinedButton(
+                    onClick = onTrajectoryClick,
+                    modifier = Modifier.testTag("btn_candidate_trajectory")
                 ) {
-                    // 起点
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.extendedColors.success)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = group.legs.firstOrNull()?.fromStopName.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-
-                    // 各行程段
-                    group.legs.forEachIndexed { index, leg ->
-                        val isLegActive = isTrackingThisGroup && currentLegIndex == index
-                        val activeLineId = selectedLineKeys["${group.id}_$index"] ?: leg.primaryLine?.lineId
-                        val activeCandidate = leg.candidateLines.find { it.lineId == activeLineId } ?: leg.primaryLine
-                        val realtimeKey = if (activeCandidate != null) "${activeCandidate.lineId}_${activeCandidate.toStopOrder}" else ""
-                        val legEta = candidateRealtimeMap["${group.id}_${index}_${activeCandidate?.lineId}"]?.etaText
-                            ?: realtimeSummaries[realtimeKey]
-                            ?: "查询中…"
-
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 4.dp)
-                        ) {
-                            // 导轨
-                            Box(
-                                modifier = Modifier
-                                    .width(2.dp)
-                                    .height(if (isLegActive) 92.dp else 84.dp)
-                                    .background(if (isLegActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
-                            )
-                            Spacer(modifier = Modifier.width(14.dp))
-                            LegTimelineItem(
-                                legIndex = index,
-                                totalLegs = group.legs.size,
-                                leg = leg,
-                                isLegActive = isLegActive,
-                                candidateRealtimeMap = candidateRealtimeMap,
-                                selectedLineId = activeLineId,
-                                etaSummary = legEta,
-                                onSelectCandidateLine = { lineId -> onSelectCandidateLine(index, lineId) },
-                                onAddCandidateLine = { lineName -> onAddCandidateLine(index, lineName) },
-                                onLineClick = onLineClick,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-
-                        // 换乘中转节点
-                        if (index < group.legs.size - 1) {
-                            val nextLeg = group.legs.getOrNull(index + 1)
-                            val walkMeters = nextLeg?.walkingDistanceMeters ?: leg.walkingDistanceMeters
-                            val transferLabel = if (walkMeters > 0) {
-                                "${leg.toStopName} (步行 ${walkMeters}米)"
-                            } else {
-                                "${leg.toStopName} (同站换乘)"
-                            }
-                            Row(
-                                modifier = Modifier.padding(start = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.extendedColors.legSecondary)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = transferLabel,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.extendedColors.legSecondary
-                                )
-                            }
-                        }
-                    }
-
-                    // 终点
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(10.dp)
-                                .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.error)
-                        )
-                        Spacer(modifier = Modifier.width(10.dp))
-                        Text(
-                            text = group.legs.lastOrNull()?.toStopName.orEmpty(),
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
+                    Text("看轨迹")
                 }
+            }
+        }
+        return
+    }
+
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (phase == LegPhase.WAITING_BOARD) {
+            FilledTonalButton(
+                onClick = onConfirmBoarded,
+                modifier = Modifier.testTag("btn_confirm_boarded_$groupId")
+            ) {
+                Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("我已上车")
+            }
+        } else if (phase == LegPhase.ON_BOARD && !isLastLeg) {
+            FilledTonalButton(
+                onClick = onSwitchToNextLeg,
+                modifier = Modifier.testTag("btn_next_leg_$groupId")
+            ) {
+                Icon(Icons.Default.SkipNext, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("跳到下一程")
+            }
+        }
+        Button(
+            onClick = onStopTracking,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer
+            ),
+            modifier = Modifier.testTag("btn_track_$groupId")
+        ) {
+            Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("结束")
+        }
+        if (showTrajectory) {
+            OutlinedButton(
+                onClick = onTrajectoryClick,
+                modifier = Modifier.testTag("btn_candidate_trajectory")
+            ) {
+                Text("看轨迹")
             }
         }
     }

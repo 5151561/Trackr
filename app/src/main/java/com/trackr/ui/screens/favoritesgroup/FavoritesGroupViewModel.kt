@@ -957,6 +957,11 @@ class FavoritesGroupViewModel(
         TransferAutoSwitchManager.confirmBoarded(context)
     }
 
+    /** 手动跳到下一程（乘车阶段使用） */
+    fun switchToNextLeg(context: Context) {
+        TransferAutoSwitchManager.switchToNextLeg(context)
+    }
+
     /** 判断候选线路是否为合成/未对齐（合成 id / 非法站序） */
     private fun isSyntheticLine(line: CandidateLine): Boolean =
         line.lineId.startsWith("line_") || line.fromStopOrder <= 0 || line.fromStopOrder >= line.toStopOrder
