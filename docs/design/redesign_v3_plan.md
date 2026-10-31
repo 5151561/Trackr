@@ -105,7 +105,7 @@
 ### 16. 文案
 - 全局删 emoji 与营销语（`⚙️`、`💡`、`🟢`、`🚩`、`⚡`、「一键秒开」「银联优惠直达」）。
 - 按 v3「统一叫法」表替换：路线组 / 同达方案 / 换乘组合 → 路线；定时通勤 → 定时提醒；跟车 → 追踪。
-- 检查：`rg -n '⚙|💡|🟢|🚩|⚡|路线组|同达|换乘组合|定时通勤|跟车' app/src/main` 无结果。
+- 检查：`rg -n '⚙|💡|🟢|🚩|⚡|路线组|同达|换乘组合|定时通勤|跟车' androidApp/src/main` 无结果（第 2 步起 `app/` 改名为 `androidApp/`）。
 
 ### 17. 清理
 - 删旧文件：`FavoritesGroupScreen.kt`、`TransitGroupCard.kt`、`TransitGroupCardText.kt`、`GroupEditDialog.kt`、`ManageFavoriteGroupsBottomSheet.kt`、`BottomFloatingToolbar.kt`、`TransitCodeQuickCard` 等已无引用的组件和对应测试。

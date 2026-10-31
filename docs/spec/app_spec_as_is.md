@@ -1,6 +1,6 @@
 # 追客（BusOnRoad）现状规格说明（As-Is Spec）
 
-> 来源：读 `app/` 与 `core/designsystem/` 源码整理，反映代码**当前实际**行为，不是愿景稿。
+> 来源：读 `app/`（重构第 2 步起改名为 `androidApp/`）与 `core/designsystem/` 源码整理，反映代码**当前实际**行为，不是愿景稿。
 > 用途：作为重新设计的输入。`docs/design/ui_design_spec.md` 与 `docs/spec/transit_group_and_refactor_spec.md` 是早期愿景稿，和现状有出入，以本文为准。
 > 整理时间：2026-10-31，基于提交 `260bf9b`。
 

@@ -16,7 +16,7 @@
 
 ## 2. 内存隔离机制 (FakeTransitRepository)
 
-单元测试不发起真实网络请求，也不依赖本地存储。测试套件通过接口 `ITransitRepository` 注入 `FakeTransitRepository`（位于 `app/src/test/java/com/trackr/data/repository/FakeTransitRepository.kt`）。
+单元测试不发起真实网络请求，也不依赖本地存储。测试套件通过接口 `ITransitRepository` 注入 `FakeTransitRepository`（位于 `androidApp/src/test/java/com/trackr/data/repository/FakeTransitRepository.kt`）。
 
 支持配置以下模拟响应：
 - `supportedCitiesResult`：城市列表
@@ -35,7 +35,9 @@
 
 ## 3. 测试目录与套件清单
 
-测试位于 `app/src/test/java/com/trackr/`，下表按子目录列出全部测试类（辅助类 `FakeTransitRepository`、`FakeScheduledReminderRepository`、`MainDispatcherRule` 不含测试）。
+`./gradlew test` 共跑 52 个测试类：`:androidApp` 51 个，`:core:designsystem` 1 个。
+
+`:androidApp` 的测试位于 `androidApp/src/test/java/com/trackr/`，下表按子目录列出全部测试类（辅助类 `FakeTransitRepository`、`FakeScheduledReminderRepository`、`MainDispatcherRule` 不含测试）。`:core:designsystem` 的 `RouteRailDrawUtilsTest` 位于 `core/designsystem/src/test/java/com/trackr/core/designsystem/rail/`，覆盖走向条绘制工具（Robolectric Compose UI）。
 
 | 目录 | 测试类 | 覆盖范围 | 运行方式 |
 | :--- | :--- | :--- | :--- |
@@ -43,14 +45,18 @@
 |  | `NavigationKeyTest` | Navigation 3 `ScreenKey` 序列化与反序列化 | 本地 JVM |
 | `data/provider` | `TransitProviderCoordinatorTest` | 引擎模式下搜索/站点详情的数据源路由与回退 | 本地 JVM |
 |  | `TransitProviderTest` | 车来了 Provider 多物理站台并发补全、附近站过滤与站点状态映射 | Robolectric (JVM) |
-| `data/remote/amap` | `AmapSdkManagerTest` | 高德 Key 优先级、隐私合规与 Key 注入 | Robolectric (JVM) |
+|  | `TransitProviderCacheTest` | Provider 层省请求：车来了附近站补全短缓存、其他站台只在首次加载补全、空主查询下次跳过；掌上公交 cmd103 缓存只轮询 cmd104、搜索回退结果线路与站点共用、附近站短缓存、反向地理编码空结果短缓存 | Robolectric (JVM) |
+| `data/remote/amap` | `AmapLruCacheTest` | 高德结果 LRU 缓存满时淘汰最久未用的条目 | 本地 JVM |
+|  | `AmapSdkManagerTest` | 高德 Key 优先级、隐私合规与 Key 注入 | Robolectric (JVM) |
 |  | `AmapSdkTransitServiceTest` | 高德 SDK 公交路径转换为方案、无 Key 时的提示 | Robolectric (JVM) |
 |  | `AmapTransitApiClientTest` | 高德 Web API 换乘方案解析 | Robolectric (JVM) |
 | `data/remote/common` | `BaseTransitApiClientTest` | 地铁站名识别、距离计算、车牌清洗与 HTTP/JSON 执行封装 | Robolectric (JVM) |
+|  | `SingleFlightCacheTest` | 同 key 并发只加载一次、取消一个等待者不影响其他、全部取消后下次重新加载、失败不缓存、TTL 内复用与过期、TTL 为 0 只去重、条目数上限、手动失效 | 本地 JVM |
 | `data/remote/update` | `GithubUpdateCheckerTest` | 更新检查多源回退、强制更新判定、下载地址 https 与域名白名单校验 | Robolectric (JVM) |
 | `data/repository` | `CountyLevelCityMatchTest` | 县级市/县城匹配与省份校验 | 本地 JVM |
 |  | `RouteGroupRepositoryTest` | 路线分组与收藏分组增删改排序、并发写入不丢更新、JSON 损坏备份 | Robolectric (JVM) |
 |  | `ScheduledReminderRepositoryTest` | 定时提醒增删改与持久化、并发写入不丢更新、JSON 损坏备份、计划触发时间记录 | Robolectric (JVM) |
+|  | `TransitRepositoryLineDetailCacheTest` | 线路详情同 key 并发只请求一次上游、TTL 内复用与过期重拉、目标站顺序不同算不同 key、失败不缓存、取消的调用方不影响其他等待者 | Robolectric (JVM) |
 | `receiver` | `ScheduledReminderReceiverTest` | 定时提醒触发、自动跟车需精确闹钟、前台服务启动失败降级 | Robolectric (JVM) |
 |  | `BootCompletedReceiverTest` | 开机禁用已错过的一次性提醒、时间变化重新调度、无关广播忽略 | Robolectric (JVM) |
 | `service` | `ArrivalAlertManagerTest` | 到站/临近提醒与实时通知并存时的去重 | Robolectric (JVM) |
@@ -100,14 +106,14 @@
 ### 运行特定 ViewModel 测试
 
 ```bash
-./gradlew testDebugUnitTest --tests "com.trackr.ui.screens.linedetail.LineDetailViewModelTest"
-./gradlew testDebugUnitTest --tests "com.trackr.ui.screens.home.HomeViewModelTest"
+./gradlew :androidApp:testDebugUnitTest --tests "com.trackr.ui.screens.linedetail.LineDetailViewModelTest"
+./gradlew :androidApp:testDebugUnitTest --tests "com.trackr.ui.screens.home.HomeViewModelTest"
 ```
 
 ### 运行 Compose UI 测试
 
 ```bash
-./gradlew testDebugUnitTest --tests "com.trackr.ui.components.ExpressiveRouteRailUiTest"
+./gradlew :androidApp:testDebugUnitTest --tests "com.trackr.ui.components.ExpressiveRouteRailUiTest"
 ```
 
 ### 生成 JaCoCo 代码覆盖率报告
@@ -117,5 +123,5 @@
 ```
 
 报告输出路径：
-- JaCoCo HTML：`app/build/reports/jacoco/jacocoTestReport/html/index.html`
-- 单元测试 HTML：`app/build/reports/tests/testDebugUnitTest/index.html`
+- JaCoCo HTML：`androidApp/build/reports/jacoco/jacocoTestReport/html/index.html`
+- 单元测试 HTML：`androidApp/build/reports/tests/testDebugUnitTest/index.html`

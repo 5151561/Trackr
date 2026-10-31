@@ -63,6 +63,11 @@ turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
 
+# ---- build-logic（约定插件）编译用，compileOnly ----
+android-gradlePlugin = { group = "com.android.tools.build", name = "gradle", version.ref = "agp" }
+kotlin-gradlePlugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlinPlugin" }
+compose-compiler-gradlePlugin = { group = "org.jetbrains.kotlin", name = "compose-compiler-gradle-plugin", version.ref = "kotlinPlugin" }
+
 # ---- 预留：重构计划后续步骤使用，暂不应用 ----
 # Koin（第 3 步起）
 koin-bom = { group = "io.insert-koin", name = "koin-bom", version.ref = "koin" }
@@ -92,7 +97,13 @@ android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-plugin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlinPlugin" }
 kotlin-plugin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlinPlugin" }
-# ---- 预留：重构计划后续步骤使用，暂不应用 ----
+# 约定插件（build-logic/convention），没有版本号
+trackr-android-application = { id = "trackr.android.application" }
+trackr-android-library = { id = "trackr.android.library" }
+trackr-kmp-library = { id = "trackr.kmp.library" }
+trackr-kmp-compose = { id = "trackr.kmp.compose" }
+trackr-kmp-feature = { id = "trackr.kmp.feature" }
+# ---- 预留：KMP / CMP 插件由约定插件应用（第 5 步起），根工程只 apply false 放进类路径 ----
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlinPlugin" }
 android-kotlin-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
 compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }

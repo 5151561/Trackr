@@ -15,7 +15,7 @@ bin/
 gen/
 out/
 build/
-app/build/
+androidApp/build/
 **/build/
 
 # Gradle files

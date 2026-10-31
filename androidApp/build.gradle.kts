@@ -1,8 +1,11 @@
 import java.io.RandomAccessFile
 import java.util.Properties
 
+// 约定插件 trackr.android.application（build-logic/convention）统一配置：
+// compileSdk 37 / minSdk 26 / targetSdk 36、JDK 21 工具链、Java 17 字节码、单元测试（含 Android 资源、2 GB 堆），
+// 以及 Compose 编译器的稳定性配置与 reports（./gradlew :androidApp:compileReleaseKotlin -PcomposeReports --rerun）。
 plugins {
-    alias(libs.plugins.android.application)
+    alias(libs.plugins.trackr.android.application)
     alias(libs.plugins.kotlin.plugin.compose)
     alias(libs.plugins.kotlin.plugin.serialization)
     id("jacoco")
@@ -12,23 +15,6 @@ val localProperties = Properties().apply {
     val localPropertiesFile = rootProject.file("local.properties")
     if (localPropertiesFile.exists()) {
         localPropertiesFile.inputStream().use { load(it) }
-    }
-}
-
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(21))
-    }
-}
-
-// Compose 编译器：稳定性配置 + 按需输出 reports/metrics（重构计划 §4.1、第 1 步；第 2 步挪进约定插件）。
-// 生成报告：./gradlew :app:compileReleaseKotlin -PcomposeReports --rerun
-// （报告目录不算编译任务的输入，编译已是最新时不加 --rerun 不会生成）
-composeCompiler {
-    stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("compose_stability.conf"))
-    if (providers.gradleProperty("composeReports").isPresent) {
-        reportsDestination = layout.buildDirectory.dir("compose_reports")
-        metricsDestination = layout.buildDirectory.dir("compose_metrics")
     }
 }
 
@@ -47,12 +33,9 @@ val amapWebServiceKey = localOrEnv("AMAP_WEB_KEY")
 
 android {
     namespace = "com.trackr"
-    compileSdk = 37
 
     defaultConfig {
         applicationId = "com.github.u5151561.trackr"
-        minSdk = 26
-        targetSdk = 36
         versionCode = 3
         versionName = "0.0.3"
 
@@ -111,22 +94,7 @@ android {
         }
     }
 
-    testOptions {
-        unitTests {
-            isIncludeAndroidResources = true
-            all {
-                it.maxHeapSize = "2048m"
-            }
-        }
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
     buildFeatures {
-        compose = true
         buildConfig = true
     }
 

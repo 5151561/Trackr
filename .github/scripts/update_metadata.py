@@ -17,9 +17,9 @@ def main():
     # 版本名称：如果 tag 为形如 v0.0.3，则去掉前导 v
     version_name = tag.lstrip("v") if tag else "0.0.1"
 
-    # 从 app/build.gradle.kts 中解析 versionCode 与 versionName（若 tag 未指定）
+    # 从 androidApp/build.gradle.kts 中解析 versionCode 与 versionName（若 tag 未指定）
     version_code = 1
-    gradle_path = "app/build.gradle.kts"
+    gradle_path = "androidApp/build.gradle.kts"
     if os.path.exists(gradle_path):
         with open(gradle_path, "r", encoding="utf-8") as f:
             content = f.read()

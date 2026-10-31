@@ -22,4 +22,15 @@
 2. **协程测试**。带轮询的 ViewModel 传入 `enableAutoPolling = false`，避免测试调度器死循环。
 3. **验证命令**
    - 运行全量测试：`./gradlew test`
+   - 运行单个测试类：`./gradlew :androidApp:testDebugUnitTest --tests "com.trackr.ui.screens.home.HomeViewModelTest"`
+   - 打 release 包：`./gradlew :androidApp:assembleRelease`（产物在 `androidApp/build/outputs/apk/release/`）
    - 生成覆盖率报告：`./gradlew jacocoTestReport`
+
+## 工程结构
+
+- `:androidApp`（目录 `androidApp/`）：Android 应用，applicationId `com.github.u5151561.trackr`，包名 `com.trackr`。
+- `:core:designsystem`（目录 `core/designsystem/`）：设计系统。
+- `build-logic/convention`：约定插件，统一 SDK、JDK、单元测试与 Compose 编译器配置。
+  - `trackr.android.application`：`:androidApp` 用。
+  - `trackr.android.library`：`:core:designsystem` 用（第 5 步改成 KMP 后删除）。
+  - `trackr.kmp.library`、`trackr.kmp.compose`、`trackr.kmp.feature`：KMP 模块用（Android + iosArm64 + iosSimulatorArm64），现在还没有模块应用。

@@ -45,6 +45,7 @@ r2 写于 `176144f`。之后用户提交了 16 个修复（`git log --reverse 17
 > 范围：`/Users/changlepan/Projects/busonroad`（现状是 `:app` + `:core:designsystem`，包名 `com.trackr`，applicationId `com.github.u5151561.trackr`）。
 > 依据：`AGENTS.md`、`docs/testing.md`、`docs/spec/app_spec_as_is.md`（§7 问题、§8 决策 D1/D2/D3）、`docs/design/redesign_v3.html`、`docs/design/redesign_v3_plan.md`（上一版 17 步，本文在它基础上重排合并），以及下列 skill。
 > 本文只是计划，不改代码。r3 基于 `7617378`（main，工作区干净）。
+> 路径说明：第 2 步把 `app/` 改名为 `androidApp/`（`:app` → `:androidApp`）。§1 诊断、第 0–1 步和附录 C 基线里的 `app/…`、`:app` 是改名前的写法，现在对应 `androidApp/…`、`:androidApp`。
 > 补充需求「长辈版（适老模式）」见 §8；其设计稿 `docs/design/redesign_v3_elder.html` 已写好，r2 修订时已对照。
 
 ## 来源标记

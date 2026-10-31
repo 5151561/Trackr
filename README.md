@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png" width="76" height="76" alt="Trackr Logo" />
+<img src="androidApp/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png" width="76" height="76" alt="Trackr Logo" />
 
 # Trackr · BusOnRoad
 

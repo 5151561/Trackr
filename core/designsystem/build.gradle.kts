@@ -1,21 +1,15 @@
+// 约定插件 trackr.android.library（build-logic/convention）统一配置：
+// compileSdk 37 / minSdk 26、JDK 21 工具链、Java 17 字节码、单元测试（含 Android 资源、2 GB 堆）、Compose 编译器。
+// 第 5 步改成 trackr.kmp.library + trackr.kmp.compose。
 plugins {
-    alias(libs.plugins.android.library)
+    alias(libs.plugins.trackr.android.library)
     alias(libs.plugins.kotlin.plugin.compose)
-}
-
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(21))
-    }
 }
 
 android {
     namespace = "com.trackr.core.designsystem"
-    compileSdk = 37
 
     defaultConfig {
-        minSdk = 26
-
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles("consumer-rules.pro")
     }
@@ -28,24 +22,6 @@ android {
                 "proguard-rules.pro"
             )
         }
-    }
-
-    testOptions {
-        unitTests {
-            isIncludeAndroidResources = true
-            all {
-                it.maxHeapSize = "2048m"
-            }
-        }
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
-    }
-
-    buildFeatures {
-        compose = true
     }
 }
 

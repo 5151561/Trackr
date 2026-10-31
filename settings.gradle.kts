@@ -1,4 +1,6 @@
 pluginManagement {
+    // 约定插件：trackr.android.application / trackr.android.library / trackr.kmp.library / trackr.kmp.compose / trackr.kmp.feature
+    includeBuild("build-logic")
     repositories {
         google()
         mavenCentral()
@@ -20,5 +22,5 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Trackr"
-include(":app")
+include(":androidApp")
 include(":core:designsystem")
