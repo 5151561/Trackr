@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
@@ -358,14 +357,17 @@ fun LineDetailScreen(
                 // 为底部悬浮工具栏留白（工具栏高度约 56dp + 悬浮间距 16dp + 导航栏高度 + 呼吸空间）
                 Spacer(
                     modifier = Modifier
-                        .navigationBarsPadding()
+                        .padding(bottom = innerPadding.calculateBottomPadding())
                         .height(96.dp)
                 )
             }
 
             // 底部 M3E 悬浮胶囊工具栏 (Floating Pill Toolbar) 浮动于内容之上，背景透明无遮挡
             BottomFloatingToolbar(
-                modifier = Modifier.align(Alignment.BottomCenter),
+                // innerPadding 已被上层 consumeWindowInsets 消费，需显式加回底部导航栏高度
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = innerPadding.calculateBottomPadding()),
                 isFavorite = uiState.isFavorite,
                 flipRotation = { animatedFlipRotation },
                 hasReverseDirection = lineDetail.reverseDirection != null,
