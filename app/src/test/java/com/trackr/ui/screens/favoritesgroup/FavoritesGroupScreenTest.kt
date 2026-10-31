@@ -25,12 +25,14 @@ import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
+import com.trackr.service.TransferAutoSwitchManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -60,6 +62,11 @@ class FavoritesGroupScreenTest {
         fakeTransitRepository = FakeTransitRepository(
             initialCity = TransitCity(cityId = "0755", cityName = "深圳")
         )
+    }
+
+    @After
+    fun tearDown() {
+        TransferAutoSwitchManager.stopGroupTracking(context)
     }
 
     private fun createViewModel(): FavoritesGroupViewModel {
@@ -397,5 +404,44 @@ class FavoritesGroupScreenTest {
         val created = viewModel.favoriteGroups.value.find { it.name == "周末西湖" }
         assertNotNull(created)
         composeTestRule.onNodeWithTag("chip_fav_group_${created!!.id}").assertIsDisplayed()
+    }
+
+    @Test
+    fun temporaryTracking_showsTopCardWithOnlySaveInMenu() {
+        val plannedGroup = TransitGroup(
+            id = "planned_temp",
+            name = "规划方案",
+            legs = listOf(
+                TransitLeg(
+                    legIndex = 0,
+                    fromStopName = "科技园",
+                    toStopName = "深大北门",
+                    candidateLines = listOf(
+                        CandidateLine(cityId = "0755", lineId = "b612", lineName = "B612", fromStopOrder = 5, toStopOrder = 9)
+                    )
+                )
+            )
+        )
+        val viewModel = createViewModel()
+        viewModel.startGroupTracking(context, plannedGroup)
+
+        composeTestRule.setContent {
+            FavoritesGroupScreen(viewModel = viewModel)
+        }
+        composeTestRule.waitForIdle()
+
+        composeTestRule.onNodeWithTag("temporary_tracking_header").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("group_title_planned_temp").assertTextEquals("科技园 → 深大北门")
+        composeTestRule.onNodeWithTag("btn_more_planned_temp").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("btn_save_temp_planned_temp").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("btn_reverse_planned_temp").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("btn_delete_planned_temp").assertDoesNotExist()
+
+        // 收藏后进入已保存列表，临时卡片消失
+        composeTestRule.onNodeWithTag("btn_save_temp_planned_temp").performClick()
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { groupRepository.groups.value.any { it.id == "planned_temp" } }
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("temporary_tracking_header").assertDoesNotExist()
     }
 }

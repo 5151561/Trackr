@@ -8,9 +8,29 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.runtime.snapshotFlow
+import com.trackr.domain.model.CandidateLine
+import com.trackr.domain.model.GroupTrackingSessionState
+import com.trackr.domain.model.LegPhase
+import com.trackr.ui.screens.favoritesgroup.boardStopOrderForDetail
+import com.trackr.ui.screens.favoritesgroup.components.etaMinutesOf
+import com.trackr.ui.screens.favoritesgroup.components.formatClock
+import com.trackr.ui.screens.favoritesgroup.components.legLineColor
+import com.trackr.ui.screens.favoritesgroup.components.reliableRideStops
+import com.trackr.ui.screens.favoritesgroup.components.trackingPhaseLabel
+import java.time.ZoneId
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.isSystemInDarkTheme
@@ -33,7 +53,6 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -51,7 +70,6 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
@@ -196,7 +214,6 @@ fun RoutePlanScreen(
     var selectedDest by remember { mutableStateOf<AmapTipItem?>(null) }
 
     var selectedSchemeIndex by rememberSaveable { mutableIntStateOf(0) }
-    var isSheetExpanded by rememberSaveable { mutableStateOf(false) }
     var showKeyDialog by rememberSaveable { mutableStateOf(false) }
     var showSaveGroupDialog by rememberSaveable { mutableStateOf(false) }
 
@@ -255,7 +272,31 @@ fun RoutePlanScreen(
         }
     }
 
-    val currentScheme = plannedSchemes.getOrNull(selectedSchemeIndex)
+    // 面板顶部最多放 4 个方案；详情区 HorizontalPager 与标签联动
+    val visibleSchemes = remember(plannedSchemes) { plannedSchemes.take(MAX_VISIBLE_SCHEMES) }
+    val schemePagerState = rememberPagerState(initialPage = selectedSchemeIndex) { visibleSchemes.size }
+    LaunchedEffect(schemePagerState) {
+        snapshotFlow { schemePagerState.settledPage }.collect { selectedSchemeIndex = it }
+    }
+    // 新的规划结果回到第一个方案；配置变更（同一份结果）时保持用户当前选择
+    var handledSchemes by remember { mutableStateOf(visibleSchemes) }
+    LaunchedEffect(visibleSchemes) {
+        if (visibleSchemes !== handledSchemes) {
+            handledSchemes = visibleSchemes
+            if (visibleSchemes.isNotEmpty()) schemePagerState.scrollToPage(0)
+        }
+    }
+    val currentScheme = visibleSchemes.getOrNull(selectedSchemeIndex)
+
+    val activeGroupSession by viewModel.activeGroupSession.collectAsStateWithLifecycle()
+    // 追踪对齐失败等一次性提示
+    val trackingMessage by viewModel.trackingMessage.collectAsStateWithLifecycle()
+    LaunchedEffect(trackingMessage) {
+        trackingMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            viewModel.clearTrackingMessage()
+        }
+    }
 
     // 地图可用性判定：
     // - 硬失败（缺 Key / ABI 不支持 / 原生库异常）→ 直接降级为内置矢量示意图；
@@ -302,7 +343,8 @@ fun RoutePlanScreen(
         } else {
             AmapRealVectorMapView(
                 session = mapSession,
-                selectedScheme = currentScheme,
+                schemes = visibleSchemes,
+                selectedIndex = selectedSchemeIndex,
                 customApiKey = customApiKey,
                 darkMode = isDarkTheme,
                 myLocation = myLocationGcj,
@@ -738,7 +780,6 @@ fun RoutePlanScreen(
                         .size(36.dp, 4.dp)
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.outlineVariant)
-                        .clickable { isSheetExpanded = !isSheetExpanded }
                 )
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -794,277 +835,32 @@ fun RoutePlanScreen(
                     }
 
                     currentScheme != null -> {
-                        if (!isSheetExpanded) {
-                            // --- Peek 状态 (简洁信息概览) ---
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    val badge = if (currentScheme.transferCount == 0) "直达多线推荐" else "推荐方案"
-                                    Surface(
-                                        shape = RoundedCornerShape(6.dp),
-                                        color = MaterialTheme.colorScheme.primaryContainer
-                                    ) {
-                                        Text(
-                                            text = badge,
-                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "约 ${currentScheme.durationMinutes} 分钟",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                }
-
-                                if (plannedSchemes.size > 1) {
-                                    Text(
-                                        text = "展开全部方案 (${plannedSchemes.size}) ▾",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(6.dp))
-                                            .clickable { isSheetExpanded = true }
-                                            .padding(4.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(6.dp))
-
-                            Text(
-                                text = "步行 ${currentScheme.walkingMeters}米 · 换乘 ${currentScheme.transferCount} 次 · 预估费用 ¥${currentScheme.costYuan}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            // 线路号码小胶囊群
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                currentScheme.group.legs.forEachIndexed { legIdx, leg ->
-                                    if (legIdx > 0) {
-                                        Text(
-                                            text = "➔",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.outline
-                                        )
-                                    }
-                                    leg.candidateLines.forEach { line ->
-                                        Surface(
-                                            shape = RoundedCornerShape(12.dp),
-                                            color = MaterialTheme.colorScheme.surfaceVariant,
-                                            modifier = Modifier.clickable {
-                                                onNavigateToLineDetail(
-                                                    line.cityId,
-                                                    line.lineId,
-                                                    line.toStopOrder,
-                                                    "",
-                                                    line.source,
-                                                    line.lineName
-                                                )
-                                            }
-                                        ) {
-                                            Row(
-                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.DirectionsBus,
-                                                    contentDescription = null,
-                                                    modifier = Modifier.size(13.dp),
-                                                    tint = MaterialTheme.colorScheme.primary
-                                                )
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text(
-                                                    text = line.lineName,
-                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(14.dp))
-
-                            // 底部双主行动按钮 (存入收藏 & 开启监控)
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = { showSaveGroupDialog = true },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(44.dp)
-                                        .testTag("btn_save_favorite"),
-                                    shape = RoundedCornerShape(22.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Star,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("★ 存入收藏", fontWeight = FontWeight.Bold)
-                                }
-
-                                Button(
-                                    onClick = {
-                                        viewModel.addPlannedSchemeToGroups(currentScheme)
-                                        viewModel.startGroupTracking(context, currentScheme.group)
-                                        Toast.makeText(context, "已加入路线组并开启全程换乘追踪", Toast.LENGTH_SHORT).show()
-                                        onNavigateToFavorites()
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(44.dp)
-                                        .testTag("btn_start_monitor"),
-                                    shape = RoundedCornerShape(22.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary
-                                    )
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.PlayArrow,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("▷ 开启监控", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        } else {
-                            // --- Expanded 状态 (对比全部备选方案列表) ---
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "全部规划方案 (${plannedSchemes.size})",
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        RoutePlanSchemePanel(
+                            schemes = visibleSchemes,
+                            pagerState = schemePagerState,
+                            trackingSession = activeGroupSession,
+                            onSelectScheme = { index ->
+                                scope.launch { schemePagerState.animateScrollToPage(index) }
+                            },
+                            onLineClick = { line ->
+                                // 线路详情定位到上车站
+                                onNavigateToLineDetail(
+                                    line.cityId,
+                                    line.lineId,
+                                    line.boardStopOrderForDetail(),
+                                    "",
+                                    line.source,
+                                    line.lineName
                                 )
-                                Text(
-                                    text = "收起 ▴",
-                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(6.dp))
-                                        .clickable { isSheetExpanded = false }
-                                        .padding(4.dp)
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            LazyColumn(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .heightIn(max = 280.dp),
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                itemsIndexed(plannedSchemes) { index, scheme ->
-                                    val isSelected = (index == selectedSchemeIndex)
-                                    Card(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { selectedSchemeIndex = index }
-                                            .border(
-                                                width = if (isSelected) 2.dp else 1.dp,
-                                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant,
-                                                shape = RoundedCornerShape(14.dp)
-                                            ),
-                                        shape = RoundedCornerShape(14.dp),
-                                        colors = CardDefaults.cardColors(
-                                            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-                                            else MaterialTheme.colorScheme.surface
-                                        )
-                                    ) {
-                                        Column(modifier = Modifier.padding(12.dp)) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                                    Text(
-                                                        text = "方案 ${index + 1}",
-                                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                                                    )
-                                                    Spacer(modifier = Modifier.width(8.dp))
-                                                    Text(
-                                                        text = "约 ${scheme.durationMinutes} 分钟",
-                                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
-                                                    )
-                                                }
-                                                Text(
-                                                    text = "¥${scheme.costYuan}",
-                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                                    color = MaterialTheme.colorScheme.primary
-                                                )
-                                            }
-                                            Spacer(modifier = Modifier.height(4.dp))
-                                            Text(
-                                                text = "步行 ${scheme.walkingMeters}米 · 换乘 ${scheme.transferCount} 次",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.outline
-                                            )
-                                            Spacer(modifier = Modifier.height(6.dp))
-                                            Text(
-                                                text = scheme.title,
-                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = { showSaveGroupDialog = true },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(44.dp),
-                                    shape = RoundedCornerShape(22.dp)
-                                ) {
-                                    Text("★ 存入收藏", fontWeight = FontWeight.Bold)
-                                }
-
-                                Button(
-                                    onClick = {
-                                        viewModel.addPlannedSchemeToGroups(currentScheme)
-                                        viewModel.startGroupTracking(context, currentScheme.group)
-                                        Toast.makeText(context, "已加入路线组并开启全程换乘追踪", Toast.LENGTH_SHORT).show()
-                                        onNavigateToFavorites()
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(44.dp),
-                                    shape = RoundedCornerShape(22.dp)
-                                ) {
-                                    Text("▷ 开启监控", fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
+                            },
+                            onSaveFavorite = { showSaveGroupDialog = true },
+                            onStartTracking = { scheme ->
+                                // 只做一次临时追踪：不加入收藏 / 路线组，留在规划页
+                                viewModel.startGroupTracking(context, scheme.group)
+                            },
+                            onConfirmBoarded = { viewModel.confirmBoarded(context) },
+                            onStopTracking = { viewModel.stopGroupTracking(context) }
+                        )
                     }
 
                     else -> {
@@ -1966,6 +1762,8 @@ fun MapDiagnosticsDialog(
  * 回来时同一实例重新挂上（onResume），所以不会重新初始化、也不会丢相机位置。
  *
  * @param session Activity 级地图会话，负责实例复用与生命周期
+ * @param schemes 当前全部规划方案：选中的画粗彩线，其余画细灰线，方便对比
+ * @param selectedIndex 选中方案下标
  * @param myLocation 当前设备定位，**必须已转换为 GCJ-02**；无方案时用于取景，null 表示暂无定位
  * @param cityCenter 当前城市中心（GCJ-02）；定位不可用时的取景兜底，null 时保持相机不动
  * @param darkMode 是否深色主题，决定地图是否使用夜间样式
@@ -1977,7 +1775,8 @@ fun MapDiagnosticsDialog(
 @Composable
 fun AmapRealVectorMapView(
     session: AmapMapSession,
-    selectedScheme: AmapTransitSchemeResult?,
+    schemes: List<AmapTransitSchemeResult>,
+    selectedIndex: Int,
     customApiKey: String?,
     darkMode: Boolean = false,
     myLocation: LatLng? = null,
@@ -2041,17 +1840,31 @@ fun AmapRealVectorMapView(
     val leg1ColorArgb = MaterialTheme.colorScheme.primary.toArgb()
     val leg2ColorArgb = MaterialTheme.extendedColors.legSecondary.toArgb()
     val walkColorArgb = MaterialTheme.extendedColors.walk.toArgb()
+    val otherSchemeColorArgb = MaterialTheme.colorScheme.outline.copy(alpha = 0.55f).toArgb()
+    val selectedScheme = schemes.getOrNull(selectedIndex)
 
-    // 绘制层：只在「方案变化 / 用户点重置 / 主题色变化」时重绘，不能把 myLocation 作为 key——
-    // 定位每 60 秒刷新一次，否则用户拖动的视角会被反复 fit bounds 拉回去。
-    LaunchedEffect(selectedScheme, aMap, isMapLoaded, recenterTrigger, leg1ColorArgb, leg2ColorArgb, walkColorArgb) {
+    // 绘制层：方案列表 / 选中方案 / 主题色变化时重绘。只画线，不动相机：
+    // 切换方案不重新缩放，用户可以直接对比。
+    LaunchedEffect(schemes, selectedIndex, aMap, isMapLoaded, leg1ColorArgb, leg2ColorArgb, walkColorArgb, otherSchemeColorArgb) {
         if (aMap == null || !isMapLoaded) return@LaunchedEffect
         aMap.clear()
 
+        // 1. 其他方案：细灰半透明线
+        schemes.forEachIndexed { index, scheme ->
+            if (index == selectedIndex) return@forEachIndexed
+            schemePolylines(scheme).forEach { (points, isWalk) ->
+                val opts = PolylineOptions()
+                    .color(otherSchemeColorArgb)
+                    .width(if (isWalk) 6f else 8f)
+                    .setDottedLine(isWalk)
+                points.forEach { opts.add(it) }
+                aMap.addPolyline(opts)
+            }
+        }
+
+        // 2. 选中方案：粗彩线 + 换乘 / 起终点 marker
         if (selectedScheme != null) {
             val legs = selectedScheme.group.legs
-            val boundsBuilder = LatLngBounds.builder()
-            var validPointsCount = 0
 
             // 步行灰色虚线复用的绘制逻辑
             fun drawWalk(points: List<LatLng>) {
@@ -2062,10 +1875,6 @@ fun AmapRealVectorMapView(
                     .setDottedLine(true)
                 points.forEach { opts.add(it) }
                 aMap.addPolyline(opts)
-                points.forEach {
-                    boundsBuilder.include(it)
-                    validPointsCount++
-                }
             }
 
             var prevLegToLatLng: LatLng? = null
@@ -2092,10 +1901,6 @@ fun AmapRealVectorMapView(
                     val opts = PolylineOptions().color(legColor).width(18f)
                     ridePoints.forEach { opts.add(it) }
                     aMap.addPolyline(opts)
-                    ridePoints.forEach {
-                        boundsBuilder.include(it)
-                        validPointsCount++
-                    }
                 } else if (fromLatLng != null && toLatLng != null) {
                     aMap.addPolyline(
                         PolylineOptions()
@@ -2105,21 +1910,15 @@ fun AmapRealVectorMapView(
                     )
                 }
 
-                if (fromLatLng != null) {
-                    boundsBuilder.include(fromLatLng)
-                    validPointsCount++
-                    if (index != 0) {
-                        aMap.addMarker(
-                            MarkerOptions()
-                                .position(fromLatLng)
-                                .title("换乘: ${leg.fromStopName}")
-                        )
-                    }
+                if (fromLatLng != null && index != 0) {
+                    aMap.addMarker(
+                        MarkerOptions()
+                            .position(fromLatLng)
+                            .title("换乘: ${leg.fromStopName}")
+                    )
                 }
 
                 if (toLatLng != null) {
-                    boundsBuilder.include(toLatLng)
-                    validPointsCount++
                     prevLegToLatLng = toLatLng
                 }
             }
@@ -2134,12 +1933,7 @@ fun AmapRealVectorMapView(
             }
 
             // 起点 marker：优先用户选择的出发地 POI，否则回落首段上车站
-            val originLatLng = selectedScheme.originPoint?.let { LatLng(it.lat, it.lng) }
-                ?: legs.firstOrNull()?.takeIf { it.fromStopLat > 0.0 && it.fromStopLng > 0.0 }
-                    ?.let { LatLng(it.fromStopLat, it.fromStopLng) }
-            if (originLatLng != null) {
-                boundsBuilder.include(originLatLng)
-                validPointsCount++
+            schemeOriginLatLng(selectedScheme)?.let { originLatLng ->
                 aMap.addMarker(
                     MarkerOptions()
                         .position(originLatLng)
@@ -2148,44 +1942,37 @@ fun AmapRealVectorMapView(
             }
 
             // 终点 marker：优先用户选择的目的地 POI，否则回落末段下车站
-            val destLatLng = selectedScheme.destinationPoint?.let { LatLng(it.lat, it.lng) }
-                ?: legs.lastOrNull()?.takeIf { it.toStopLat > 0.0 && it.toStopLng > 0.0 }
-                    ?.let { LatLng(it.toStopLat, it.toStopLng) }
-            if (destLatLng != null) {
-                boundsBuilder.include(destLatLng)
-                validPointsCount++
+            schemeDestinationLatLng(selectedScheme)?.let { destLatLng ->
                 aMap.addMarker(
                     MarkerOptions()
                         .position(destLatLng)
                         .title("终点")
                 )
             }
+        }
+    }
 
-            if (validPointsCount > 0) {
-                runCatching {
-                    val bounds = boundsBuilder.build()
-                    aMap.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 180))
-                }.onFailure {
-                    val firstLeg = legs.firstOrNull()
-                    if (firstLeg != null && firstLeg.fromStopLat > 0.0 && firstLeg.fromStopLng > 0.0) {
-                        aMap.animateCamera(
-                            CameraUpdateFactory.newLatLngZoom(
-                                LatLng(firstLeg.fromStopLat, firstLeg.fromStopLng),
-                                14f
-                            )
-                        )
-                    }
-                }
-            }
+    // 取景层（有方案时）：只在方案列表变化 / 用户点重置时 fit bounds 一次，范围覆盖全部方案。
+    // 不能把 myLocation 或选中方案作为 key——否则用户拖动或切换方案时视角会被反复拉回去。
+    LaunchedEffect(schemes, aMap, isMapLoaded, recenterTrigger) {
+        if (aMap == null || !isMapLoaded || schemes.isEmpty()) return@LaunchedEffect
+        val allPoints = schemes.flatMap { schemeBoundsPoints(it) }
+        if (allPoints.isEmpty()) return@LaunchedEffect
+        val boundsBuilder = LatLngBounds.builder()
+        allPoints.forEach { boundsBuilder.include(it) }
+        runCatching {
+            aMap.animateCamera(CameraUpdateFactory.newLatLngBounds(boundsBuilder.build(), 180))
+        }.onFailure {
+            aMap.animateCamera(CameraUpdateFactory.newLatLngZoom(allPoints.first(), 14f))
         }
     }
 
     // 取景层：负责"首次进入 / 点击重置"时的相机位置。
     // 优先级：我的定位 > 当前城市中心 > 不动（绝不硬编码某个城市，否则外地用户会"被搬去"别的地方）。
-    LaunchedEffect(aMap, isMapLoaded, selectedScheme, myLocation, cityCenter, recenterTrigger) {
+    LaunchedEffect(aMap, isMapLoaded, schemes.isNotEmpty(), myLocation, cityCenter, recenterTrigger) {
         if (aMap == null || !isMapLoaded) return@LaunchedEffect
         // 有算路方案时由方案自己 fit bounds，不抢相机
-        if (selectedScheme != null) {
+        if (schemes.isNotEmpty()) {
             session.hasCenteredOnce = true
             session.handledRecenterTrigger = recenterTrigger
             return@LaunchedEffect
@@ -2202,5 +1989,503 @@ fun AmapRealVectorMapView(
         aMap.animateCamera(
             CameraUpdateFactory.newLatLngZoom(target, if (myLocation != null) 15f else 12f)
         )
+    }
+}
+
+/** 方案起点：优先用户选择的出发地 POI，否则回落首段上车站 */
+private fun schemeOriginLatLng(scheme: AmapTransitSchemeResult): LatLng? =
+    scheme.originPoint?.let { LatLng(it.lat, it.lng) }
+        ?: scheme.group.legs.firstOrNull()?.takeIf { it.fromStopLat > 0.0 && it.fromStopLng > 0.0 }
+            ?.let { LatLng(it.fromStopLat, it.fromStopLng) }
+
+/** 方案终点：优先用户选择的目的地 POI，否则回落末段下车站 */
+private fun schemeDestinationLatLng(scheme: AmapTransitSchemeResult): LatLng? =
+    scheme.destinationPoint?.let { LatLng(it.lat, it.lng) }
+        ?: scheme.group.legs.lastOrNull()?.takeIf { it.toStopLat > 0.0 && it.toStopLng > 0.0 }
+            ?.let { LatLng(it.toStopLat, it.toStopLng) }
+
+/**
+ * 方案的折线（点序列 to 是否步行）：乘车优先用 ridePath，没有就用上下车站直线；
+ * 步行用 walkPathBefore / finalWalkPath。用于画未选中方案的细灰线。
+ */
+private fun schemePolylines(scheme: AmapTransitSchemeResult): List<Pair<List<LatLng>, Boolean>> {
+    val result = mutableListOf<Pair<List<LatLng>, Boolean>>()
+    scheme.group.legs.forEach { leg ->
+        val walk = leg.walkPathBefore.map { LatLng(it.lat, it.lng) }
+        if (walk.size >= 2) result += walk to true
+        val ride = leg.ridePath.map { LatLng(it.lat, it.lng) }
+        if (ride.size >= 2) {
+            result += ride to false
+        } else if (leg.fromStopLat > 0.0 && leg.fromStopLng > 0.0 && leg.toStopLat > 0.0 && leg.toStopLng > 0.0) {
+            result += listOf(LatLng(leg.fromStopLat, leg.fromStopLng), LatLng(leg.toStopLat, leg.toStopLng)) to false
+        }
+    }
+    val finalWalk = scheme.finalWalkPath.map { LatLng(it.lat, it.lng) }
+    if (finalWalk.size >= 2) result += finalWalk to true
+    return result
+}
+
+/** 方案里所有用于取景的点（折线 + 站点 + 起终点） */
+private fun schemeBoundsPoints(scheme: AmapTransitSchemeResult): List<LatLng> = buildList {
+    schemePolylines(scheme).forEach { (points, _) -> addAll(points) }
+    scheme.group.legs.forEach { leg ->
+        if (leg.fromStopLat > 0.0 && leg.fromStopLng > 0.0) add(LatLng(leg.fromStopLat, leg.fromStopLng))
+        if (leg.toStopLat > 0.0 && leg.toStopLng > 0.0) add(LatLng(leg.toStopLat, leg.toStopLng))
+    }
+    schemeOriginLatLng(scheme)?.let { add(it) }
+    schemeDestinationLatLng(scheme)?.let { add(it) }
+}
+
+// =====================================================================================
+// 底部方案面板：最多 4 个方案标签 + 可左右滑动的详情 + 收藏 / 开始追踪
+// =====================================================================================
+
+/** 面板顶部最多显示的方案数 */
+internal const val MAX_VISIBLE_SCHEMES = 4
+
+/** 是否地铁线路（按线路名粗略判断） */
+private fun isSubwayLineName(name: String): Boolean = name.contains("地铁") || name.contains("号线")
+
+/**
+ * 方案的特点标签（每个方案最多一个，按 最快 → 直达 / 少换乘 → 少步行 → 地铁 的顺序取第一个符合的）：
+ * - 最快：总时长最短（并列取靠前的方案），且方案多于 1 个
+ * - 直达：不用换乘；少换乘：换乘次数最少且比其他方案少
+ * - 少步行：步行最短（并列取靠前），且比其他方案少
+ * - 地铁：含地铁线路
+ * 都不符合时返回 null（不显示）。
+ */
+internal fun schemeFeatureTag(schemes: List<AmapTransitSchemeResult>, index: Int): String? {
+    val scheme = schemes.getOrNull(index) ?: return null
+    val compare = schemes.size > 1
+    val fastestIndex = schemes.indices.minByOrNull { schemes[it].durationMinutes }
+    val minTransfers = schemes.minOf { it.transferCount }
+    val maxTransfers = schemes.maxOf { it.transferCount }
+    val minWalk = schemes.minOf { it.walkingMeters }
+    val maxWalk = schemes.maxOf { it.walkingMeters }
+    val leastWalkIndex = schemes.indices.minByOrNull { schemes[it].walkingMeters }
+    return when {
+        compare && index == fastestIndex -> "最快"
+        scheme.transferCount == 0 -> "直达"
+        compare && scheme.transferCount == minTransfers && minTransfers < maxTransfers -> "少换乘"
+        compare && index == leastWalkIndex && minWalk < maxWalk -> "少步行"
+        scheme.group.legs.any { leg -> leg.candidateLines.any { isSubwayLineName(it.lineName) } } -> "地铁"
+        else -> null
+    }
+}
+
+/** 标签上的换乘文字："直达" / "换 1 次" */
+internal fun schemeTransferText(scheme: AmapTransitSchemeResult): String =
+    if (scheme.transferCount == 0) "直达" else "换 ${scheme.transferCount} 次"
+
+/** "步行 820 米 · 换乘 1 次 · ¥4.0" */
+internal fun schemeSummaryText(scheme: AmapTransitSchemeResult): String {
+    val transfer = if (scheme.transferCount == 0) "不用换乘" else "换乘 ${scheme.transferCount} 次"
+    val cost = scheme.costYuan.trim().takeIf { it.isNotEmpty() && it != "0" && it != "0.0" }?.let { "¥$it" }
+    return listOfNotNull("步行 ${scheme.walkingMeters} 米", transfer, cost).joinToString(" · ")
+}
+
+/** "07:42 出发 · 08:14 到"（按当前时间估算） */
+internal fun departArriveText(
+    nowMillis: Long,
+    durationMinutes: Int,
+    zoneId: ZoneId = ZoneId.systemDefault()
+): String {
+    val arrive = nowMillis + durationMinutes.coerceAtLeast(0) * 60_000L
+    return "${formatClock(nowMillis, zoneId)} 出发 · ${formatClock(arrive, zoneId)} 到"
+}
+
+/** 分段条的一段 */
+internal data class PlanSegment(
+    val isWalk: Boolean,
+    val legIndex: Int,
+    val weight: Float,
+    val label: String
+)
+
+/**
+ * 分段条：步行 / 每程按时长比例分配。
+ * 方案里没有分段时长，所以步行按 80 米 / 分钟估算，乘车按站数 × 2 分钟；
+ * 站数不可信的程平分剩余时长。乘车段文字只写线路名，步行段不写字。
+ */
+internal fun planSegments(scheme: AmapTransitSchemeResult): List<PlanSegment> {
+    val legs = scheme.group.legs
+    if (legs.isEmpty()) return emptyList()
+    fun walkMinutes(meters: Int): Float = if (meters <= 0) 0f else (meters / 80f).coerceAtLeast(1f)
+
+    val walkBefore = legs.map { it.walkingDistanceMeters.coerceAtLeast(0) }
+    val finalWalk = (scheme.walkingMeters - walkBefore.sum()).coerceAtLeast(0)
+    val totalWalk = walkBefore.sumOf { walkMinutes(it).toDouble() }.toFloat() + walkMinutes(finalWalk)
+    val knownRide = legs.map { leg -> reliableRideStops(leg.primaryLine)?.let { it * 2f } }
+    val unknownCount = knownRide.count { it == null }
+    val rideBudget = (scheme.durationMinutes - totalWalk - knownRide.sumOf { (it ?: 0f).toDouble() }.toFloat())
+        .coerceAtLeast(0f)
+    val fallbackRide = if (unknownCount > 0) (rideBudget / unknownCount).coerceAtLeast(1f) else 0f
+
+    return buildList {
+        legs.forEachIndexed { index, leg ->
+            val walk = walkMinutes(walkBefore[index])
+            if (walk > 0f) add(PlanSegment(isWalk = true, legIndex = index, weight = walk, label = ""))
+            add(
+                PlanSegment(
+                    isWalk = false,
+                    legIndex = index,
+                    weight = (knownRide[index] ?: fallbackRide).coerceAtLeast(1f),
+                    label = leg.primaryLine?.lineName.orEmpty()
+                )
+            )
+        }
+        val last = walkMinutes(finalWalk)
+        if (last > 0f) add(PlanSegment(isWalk = true, legIndex = legs.lastIndex, weight = last, label = ""))
+    }
+}
+
+/**
+ * 规划页追踪状态条文字：
+ * 等车 "第 1/2 程 · 等车 · 4 分钟"；乘车 "第 1/2 程 · 乘车 · 2 站后下车"。
+ */
+internal fun trackingStatusText(session: GroupTrackingSessionState): String {
+    val legSession = session.trackingSessionState?.takeIf {
+        it.legPhase != LegPhase.SINGLE && it.currentLegIndex == session.activeLegIndex
+    }
+    val phase = legSession?.legPhase ?: LegPhase.WAITING_BOARD
+    val label = trackingPhaseLabel(session.activeLegIndex, session.totalLegs, phase)
+    val detail = when {
+        legSession == null || legSession.stopsRemaining < 0 -> null
+        phase == LegPhase.ON_BOARD -> "${legSession.stopsRemaining} 站后下车"
+        else -> etaMinutesOf(legSession.etaSeconds, legSession.stopsRemaining)?.let { "$it 分钟" }
+    }
+    return if (detail != null) "$label · $detail" else label
+}
+
+@Composable
+internal fun RoutePlanSchemePanel(
+    schemes: List<AmapTransitSchemeResult>,
+    pagerState: PagerState,
+    trackingSession: GroupTrackingSessionState?,
+    onSelectScheme: (Int) -> Unit,
+    onLineClick: (CandidateLine) -> Unit,
+    onSaveFavorite: () -> Unit,
+    onStartTracking: (AmapTransitSchemeResult) -> Unit,
+    onConfirmBoarded: () -> Unit,
+    onStopTracking: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val nowMillis = remember(schemes) { System.currentTimeMillis() }
+    Column(modifier = modifier.fillMaxWidth()) {
+        // 1. 方案标签：一直可见，点一下切换
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            schemes.forEachIndexed { index, scheme ->
+                SchemeTab(
+                    scheme = scheme,
+                    featureTag = schemeFeatureTag(schemes, index),
+                    selected = pagerState.currentPage == index,
+                    onClick = { onSelectScheme(index) },
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("scheme_tab_$index")
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // 2. 详情：左右滑动切换，与标签联动
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("scheme_pager"),
+            verticalAlignment = Alignment.Top,
+            pageSpacing = 16.dp
+        ) { page ->
+            schemes.getOrNull(page)?.let { scheme ->
+                SchemeDetail(
+                    page = page,
+                    scheme = scheme,
+                    nowMillis = nowMillis,
+                    onLineClick = onLineClick
+                )
+            }
+        }
+
+        if (schemes.size > 1) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(5.dp, Alignment.CenterHorizontally)
+            ) {
+                schemes.indices.forEach { index ->
+                    val selected = pagerState.currentPage == index
+                    Box(
+                        modifier = Modifier
+                            .height(6.dp)
+                            .width(if (selected) 16.dp else 6.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                            )
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 3. 按钮：收藏 / 开始追踪；正在追踪当前方案时换成追踪状态条
+        val current = schemes.getOrNull(pagerState.currentPage)
+        val isTrackingCurrent = trackingSession != null && !trackingSession.isCompleted &&
+            current != null && trackingSession.groupId == current.group.id
+        if (isTrackingCurrent) {
+            TrackingStatusBar(
+                session = trackingSession,
+                onConfirmBoarded = onConfirmBoarded,
+                onStopTracking = onStopTracking
+            )
+        } else {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                OutlinedButton(
+                    onClick = onSaveFavorite,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(48.dp)
+                        .testTag("btn_save_favorite")
+                ) {
+                    Icon(Icons.Default.BookmarkBorder, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("收藏", fontWeight = FontWeight.Bold)
+                }
+                Button(
+                    onClick = { current?.let(onStartTracking) },
+                    enabled = current != null,
+                    modifier = Modifier
+                        .weight(2f)
+                        .height(48.dp)
+                        .testTag("btn_start_monitor")
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text("开始追踪", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SchemeTab(
+    scheme: AmapTransitSchemeResult,
+    featureTag: String?,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface,
+        border = BorderStroke(
+            1.dp,
+            if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 6.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                text = "${scheme.durationMinutes} 分钟",
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                maxLines = 1
+            )
+            Text(
+                text = schemeTransferText(scheme),
+                style = MaterialTheme.typography.labelSmall,
+                color = contentColor,
+                maxLines = 1
+            )
+            if (featureTag != null) {
+                Text(
+                    text = featureTag,
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                    color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.primary,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SchemeDetail(
+    page: Int,
+    scheme: AmapTransitSchemeResult,
+    nowMillis: Long,
+    onLineClick: (CandidateLine) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "${scheme.durationMinutes} 分钟",
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Black),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.testTag("scheme_duration_$page")
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = departArriveText(nowMillis, scheme.durationMinutes),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+
+        SegmentBar(segments = planSegments(scheme))
+
+        Text(
+            text = schemeSummaryText(scheme),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.testTag("scheme_summary_$page")
+        )
+
+        scheme.group.legs.forEachIndexed { legIndex, leg ->
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                itemVerticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "第 ${legIndex + 1} 程",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                leg.candidateLines.forEachIndexed { lineIndex, line ->
+                    val isMain = lineIndex == 0
+                    Surface(
+                        onClick = { onLineClick(line) },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isMain) legLineColor(legIndex) else MaterialTheme.colorScheme.surfaceContainerHighest,
+                        modifier = Modifier.testTag("scheme_line_chip_${line.lineName}")
+                    ) {
+                        Text(
+                            text = if (isMain) line.lineName else "或 ${line.lineName}",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = when {
+                                !isMain -> MaterialTheme.colorScheme.onSurfaceVariant
+                                legIndex == 0 -> MaterialTheme.colorScheme.onPrimary
+                                else -> MaterialTheme.colorScheme.surface
+                            },
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 分段条：步行灰、第 1 程 primary、第 2 程起 legSecondary，宽度按时长比例 */
+@Composable
+private fun SegmentBar(segments: List<PlanSegment>) {
+    if (segments.isEmpty()) return
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(26.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .testTag("scheme_segment_bar"),
+        horizontalArrangement = Arrangement.spacedBy(2.dp)
+    ) {
+        segments.forEach { segment ->
+            val background = if (segment.isWalk) {
+                MaterialTheme.colorScheme.surfaceContainerHighest
+            } else {
+                legLineColor(segment.legIndex)
+            }
+            Box(
+                modifier = Modifier
+                    .weight(segment.weight)
+                    .fillMaxHeight()
+                    .background(background),
+                contentAlignment = Alignment.Center
+            ) {
+                if (segment.label.isNotEmpty()) {
+                    Text(
+                        text = segment.label,
+                        style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                        color = if (segment.legIndex == 0) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.surface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Clip
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 规划页追踪状态条："第 1/2 程 · 等车 · 4 分钟" + 我已上车 / 结束 */
+@Composable
+private fun TrackingStatusBar(
+    session: GroupTrackingSessionState,
+    onConfirmBoarded: () -> Unit,
+    onStopTracking: () -> Unit
+) {
+    val phase = session.trackingSessionState
+        ?.takeIf { it.legPhase != LegPhase.SINGLE && it.currentLegIndex == session.activeLegIndex }
+        ?.legPhase ?: LegPhase.WAITING_BOARD
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("tracking_status_bar"),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.primaryContainer
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 14.dp, end = 6.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = trackingStatusText(session),
+                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("tracking_status_text")
+            )
+            if (phase == LegPhase.WAITING_BOARD) {
+                FilledTonalButton(
+                    onClick = onConfirmBoarded,
+                    modifier = Modifier.testTag("btn_plan_confirm_boarded")
+                ) {
+                    Text("我已上车")
+                }
+            }
+            Button(
+                onClick = onStopTracking,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                ),
+                modifier = Modifier.testTag("btn_plan_stop_tracking")
+            ) {
+                Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("结束")
+            }
+        }
     }
 }

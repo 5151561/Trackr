@@ -13,6 +13,7 @@ import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
+import com.trackr.service.TransferAutoSwitchManager
 import com.trackr.util.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -22,6 +23,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -50,6 +52,11 @@ class FavoritesGroupViewModelTest {
         fakeTransitRepository = FakeTransitRepository(
             initialCity = TransitCity(cityId = "033", cityName = "杭州")
         )
+    }
+
+    @After
+    fun tearDown() {
+        TransferAutoSwitchManager.stopGroupTracking(context)
     }
 
     private fun createViewModel(): FavoritesGroupViewModel {
@@ -582,5 +589,40 @@ class FavoritesGroupViewModelTest {
 
         assertNull(groupRepository.getGroupById("legacy_commute_2")?.customGroupId)
         assertEquals(3, secondViewModel.groups.value.size)
+    }
+
+    @Test
+    fun startGroupTracking_temporaryScheme_isNotSaved_andShowsAsTemporaryUntilFavorited() = runTest {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        val plannedGroup = TransitGroup(
+            id = "planned_temp",
+            name = "科技园 → 车公庙",
+            legs = listOf(
+                TransitLeg(
+                    legIndex = 0,
+                    fromStopName = "科技园",
+                    toStopName = "深大北门",
+                    candidateLines = listOf(
+                        CandidateLine(cityId = "033", lineId = "b612", lineName = "B612", fromStopOrder = 5, toStopOrder = 9)
+                    )
+                )
+            )
+        )
+
+        viewModel.startGroupTracking(context, plannedGroup)
+        testScheduler.runCurrent()
+
+        // 只做临时追踪：仓库里没有这条路线，收藏页显示为"临时追踪"
+        assertTrue(viewModel.groups.value.none { it.id == "planned_temp" })
+        assertEquals("planned_temp", viewModel.activeGroupSession.value?.groupId)
+        assertEquals("planned_temp", viewModel.temporaryTrackingGroup.value?.id)
+
+        // 点"收藏"后存进仓库，不再算临时
+        viewModel.addPlannedSchemeAsFavorite(group = plannedGroup)
+        testScheduler.advanceUntilIdle()
+        assertTrue(viewModel.groups.value.any { it.id == "planned_temp" })
+        assertNull(viewModel.temporaryTrackingGroup.value)
     }
 }

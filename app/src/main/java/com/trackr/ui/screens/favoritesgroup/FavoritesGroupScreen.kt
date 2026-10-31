@@ -96,6 +96,7 @@ fun FavoritesGroupScreen(
     val realtimeSummaries by viewModel.legRealtimeSummary.collectAsStateWithLifecycle()
     val candidateRealtimeMap by viewModel.candidateRealtimeMap.collectAsStateWithLifecycle()
     val selectedLineKeys by viewModel.selectedLineKeys.collectAsStateWithLifecycle()
+    val temporaryTrackingGroup by viewModel.temporaryTrackingGroup.collectAsStateWithLifecycle()
 
     // 追踪对齐失败等一次性提示
     val trackingMessage by viewModel.trackingMessage.collectAsStateWithLifecycle()
@@ -253,7 +254,46 @@ fun FavoritesGroupScreen(
                 }
             }
 
-            // 2. 路线分组列表或空状态
+            // 2. 正在追踪但未保存的路线（规划页"开始追踪"）：列表最上方的临时卡片
+            temporaryTrackingGroup?.let { tempGroup ->
+                item(key = "temporary_tracking_${tempGroup.id}", contentType = "temporary_tracking") {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = "临时追踪",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.testTag("temporary_tracking_header")
+                        )
+                        TransitGroupCard(
+                            group = tempGroup,
+                            activeSession = activeSession,
+                            realtimeSummaries = realtimeSummaries,
+                            candidateRealtimeMap = candidateRealtimeMap,
+                            selectedLineKeys = selectedLineKeys,
+                            onStartTracking = { viewModel.startGroupTracking(context, tempGroup) },
+                            onStopTracking = { viewModel.stopGroupTracking(context) },
+                            onConfirmBoarded = { viewModel.confirmBoarded(context) },
+                            onSwitchToNextLeg = { viewModel.switchToNextLeg(context) },
+                            onSaveTemporary = { viewModel.addPlannedSchemeAsFavorite(group = tempGroup) },
+                            onEdit = {},
+                            onDelete = {},
+                            onLineClick = { candidate ->
+                                onNavigateToLineDetail(
+                                    candidate.cityId,
+                                    candidate.lineId,
+                                    candidate.boardStopOrderForDetail(),
+                                    "",
+                                    candidate.source,
+                                    candidate.lineName
+                                )
+                            },
+                            isTemporaryTracking = true
+                        )
+                    }
+                }
+            }
+
+            // 3. 路线分组列表或空状态
             if (groups.isEmpty()) {
                 item(key = "empty_groups", contentType = "empty_state") {
                     Card(

@@ -114,6 +114,21 @@ class FavoritesGroupViewModel(
     val activeGroupSession: StateFlow<GroupTrackingSessionState?> =
         TransferAutoSwitchManager.activeGroupSession
 
+    /**
+     * 正在追踪、但不在已保存列表里的路线（如规划页"开始追踪"的临时方案）。
+     * 收藏页在列表最上方显示为"临时追踪"卡片。
+     */
+    val temporaryTrackingGroup: StateFlow<TransitGroup?> = combine(
+        TransferAutoSwitchManager.activeGroupState,
+        TransferAutoSwitchManager.activeGroupSession,
+        groups
+    ) { activeGroup, session, savedGroups ->
+        activeGroup?.takeIf { group ->
+            session != null && !session.isCompleted && session.groupId == group.id &&
+                savedGroups.none { it.id == group.id }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     private val _legRealtimeSummary = MutableStateFlow<Map<String, String>>(emptyMap())
     val legRealtimeSummary: StateFlow<Map<String, String>> = _legRealtimeSummary.asStateFlow()
 
@@ -966,12 +981,16 @@ class FavoritesGroupViewModel(
     private fun isSyntheticLine(line: CandidateLine): Boolean =
         line.lineId.startsWith("line_") || line.fromStopOrder <= 0 || line.fromStopOrder >= line.toStopOrder
 
-    /** 对齐该组内所有合成线路并写回仓库；若无需对齐则原样返回 */
+    /**
+     * 对齐该组内所有合成线路；仅当该组已保存在仓库时才写回（临时追踪的方案只在内存里，不能借此写进收藏）。
+     * 若无需对齐则原样返回。
+     */
     private suspend fun ensureGroupAligned(group: TransitGroup): TransitGroup {
         val needsAlign = group.legs.any { leg -> leg.candidateLines.any { isSyntheticLine(it) } }
         if (!needsAlign) return group
         val aligned = alignTransitGroupWithRealtimeSource(group)
-        if (aligned != group) {
+        val isSaved = groupRepository.groups.value.any { it.id == group.id }
+        if (aligned != group && isSaved) {
             runCatching { groupRepository.updateGroup(aligned) }
         }
         return aligned

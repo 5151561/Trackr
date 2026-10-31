@@ -88,7 +88,8 @@ fun TransitGroupCard(
     onEdit: () -> Unit,
     onDelete: () -> Unit,
     onLineClick: (CandidateLine) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isTemporaryTracking: Boolean = false
 ) {
     val tracking = activeSession?.takeIf { it.groupId == group.id && !it.isCompleted }
     val isTracking = tracking != null
@@ -133,6 +134,7 @@ fun TransitGroupCard(
                 group = group,
                 summary = groupSummaryText(group, selectedLines),
                 phaseLabel = if (isTracking) trackingPhaseLabel(activeLegIndex, group.legs.size, phase) else null,
+                isTemporaryTracking = isTemporaryTracking,
                 onSaveTemporary = onSaveTemporary,
                 onReverseClick = onReverseClick,
                 onEdit = onEdit,
@@ -345,6 +347,7 @@ private fun CardHeader(
     group: TransitGroup,
     summary: String,
     phaseLabel: String?,
+    isTemporaryTracking: Boolean,
     onSaveTemporary: () -> Unit,
     onReverseClick: () -> Unit,
     onEdit: () -> Unit,
@@ -394,6 +397,7 @@ private fun CardHeader(
         CardMenu(
             groupId = group.id,
             isTemporary = group.isTemporary,
+            onlySave = isTemporaryTracking,
             onSaveTemporary = onSaveTemporary,
             onReverseClick = onReverseClick,
             onEdit = onEdit,
@@ -406,6 +410,7 @@ private fun CardHeader(
 private fun CardMenu(
     groupId: String,
     isTemporary: Boolean,
+    onlySave: Boolean,
     onSaveTemporary: () -> Unit,
     onReverseClick: () -> Unit,
     onEdit: () -> Unit,
@@ -420,7 +425,7 @@ private fun CardMenu(
             Icon(imageVector = Icons.Default.MoreVert, contentDescription = "更多操作")
         }
         DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-            if (isTemporary) {
+            if (isTemporary || onlySave) {
                 DropdownMenuItem(
                     text = { Text("收藏") },
                     leadingIcon = { Icon(Icons.Default.BookmarkBorder, contentDescription = null) },
@@ -431,6 +436,8 @@ private fun CardMenu(
                     modifier = Modifier.testTag("btn_save_temp_$groupId")
                 )
             }
+            // 临时追踪（未保存）的卡片只留"收藏"
+            if (onlySave) return@DropdownMenu
             DropdownMenuItem(
                 text = { Text("生成返程") },
                 leadingIcon = { Icon(Icons.Default.SwapHoriz, contentDescription = null) },

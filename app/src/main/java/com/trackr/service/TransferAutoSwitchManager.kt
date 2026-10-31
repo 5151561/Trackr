@@ -30,7 +30,16 @@ object TransferAutoSwitchManager {
     private val _activeGroupSession = MutableStateFlow<GroupTrackingSessionState?>(null)
     val activeGroupSession: StateFlow<GroupTrackingSessionState?> = _activeGroupSession.asStateFlow()
 
-    private var activeGroup: TransitGroup? = null
+    private val _activeGroup = MutableStateFlow<TransitGroup?>(null)
+
+    /** 当前正在追踪的整组路线（只读）；用于收藏页显示"临时追踪"卡片 */
+    val activeGroupState: StateFlow<TransitGroup?> = _activeGroup.asStateFlow()
+
+    private var activeGroup: TransitGroup?
+        get() = _activeGroup.value
+        set(value) {
+            _activeGroup.value = value
+        }
     /** 每程用户选中的候选线路（legIndex -> lineId） */
     private var selectedLineIds: Map<Int, String> = emptyMap()
     private var lastUserLat: Double? = null

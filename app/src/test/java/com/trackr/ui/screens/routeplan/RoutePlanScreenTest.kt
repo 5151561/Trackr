@@ -2,8 +2,13 @@ package com.trackr.ui.screens.routeplan
 
 import android.content.Context
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -15,18 +20,25 @@ import com.trackr.data.repository.FakeTransitRepository
 import com.trackr.data.repository.RouteGroupRepository
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.FavoriteGroup
+import com.trackr.domain.model.GroupTrackingSessionState
+import com.trackr.domain.model.LegPhase
+import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
 import com.trackr.ui.screens.favoritesgroup.FavoritesGroupViewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
@@ -220,5 +232,168 @@ class RoutePlanScreenTest {
 
         composeTestRule.onNodeWithTag("btn_confirm_save_favorite").performClick()
         assertTrue("Confirm save should trigger save callback", savedFavorite)
+    }
+
+    // ---------------- 方案快速切换 ----------------
+
+    private fun scheme(
+        id: String,
+        minutes: Int,
+        transfers: Int,
+        walk: Int,
+        lineNames: List<String>
+    ): AmapTransitSchemeResult {
+        val legs = lineNames.mapIndexed { index, name ->
+            TransitLeg(
+                legIndex = index,
+                fromStopName = "站$index",
+                toStopName = "站${index + 1}",
+                candidateLines = listOf(CandidateLine(cityId = "0755", lineId = "amap_$name", lineName = name)),
+                walkingDistanceMeters = if (index == 0) 0 else 80
+            )
+        }
+        return AmapTransitSchemeResult(
+            title = id,
+            durationMinutes = minutes,
+            walkingMeters = walk,
+            costYuan = "4.0",
+            transferCount = transfers,
+            group = TransitGroup(id = id, name = id, legs = legs)
+        )
+    }
+
+    private val demoSchemes = listOf(
+        scheme("s0", 32, 1, 820, listOf("B612", "M492")),
+        scheme("s1", 38, 0, 640, listOf("M375")),
+        scheme("s2", 35, 1, 260, listOf("B796", "323")),
+        scheme("s3", 36, 1, 1100, listOf("地铁1号线", "B612"))
+    )
+
+    @Test
+    fun schemeFeatureTag_pickOneTagPerScheme() {
+        assertEquals("最快", schemeFeatureTag(demoSchemes, 0))
+        assertEquals("直达", schemeFeatureTag(demoSchemes, 1))
+        assertEquals("少步行", schemeFeatureTag(demoSchemes, 2))
+        assertEquals("地铁", schemeFeatureTag(demoSchemes, 3))
+    }
+
+    @Test
+    fun schemeFeatureTag_tiesGoToFirst_andNoTagWhenNothingStandsOut() {
+        val tie = listOf(
+            scheme("a", 30, 1, 500, listOf("1", "2")),
+            scheme("b", 30, 1, 500, listOf("3", "4"))
+        )
+        assertEquals("最快", schemeFeatureTag(tie, 0))
+        assertNull(schemeFeatureTag(tie, 1))
+        // 只有一个方案时不比较，换乘方案也不是地铁 → 不显示
+        assertNull(schemeFeatureTag(listOf(scheme("c", 30, 1, 500, listOf("1", "2"))), 0))
+        assertEquals("少换乘", schemeFeatureTag(
+            listOf(scheme("d", 30, 2, 500, listOf("1", "2", "3")), scheme("e", 35, 1, 900, listOf("4", "5"))), 1
+        ))
+    }
+
+    @Test
+    fun schemeTexts_summaryTimesAndSegments() {
+        assertEquals("步行 820 米 · 换乘 1 次 · ¥4.0", schemeSummaryText(demoSchemes[0]))
+        assertEquals("步行 640 米 · 不用换乘 · ¥4.0", schemeSummaryText(demoSchemes[1]))
+        assertEquals("直达", schemeTransferText(demoSchemes[1]))
+        assertEquals("换 1 次", schemeTransferText(demoSchemes[0]))
+
+        val zone = ZoneId.of("Asia/Shanghai")
+        val now = LocalDateTime.of(2026, 10, 31, 7, 42).atZone(zone).toInstant().toEpochMilli()
+        assertEquals("07:42 出发 · 08:14 到", departArriveText(now, 32, zone))
+
+        // 步行 240 米：第 2 程前 80 米 + 末段 160 米；站序不可信，两程平分剩余时长
+        val segments = planSegments(scheme("x", 30, 1, 240, listOf("B612", "M492")))
+        assertEquals(listOf(false, true, false, true), segments.map { it.isWalk })
+        assertEquals(listOf("B612", "", "M492", ""), segments.map { it.label })
+        assertEquals(1f, segments[1].weight, 0.01f)
+        assertEquals(2f, segments[3].weight, 0.01f)
+        assertEquals(13.5f, segments[0].weight, 0.01f)
+    }
+
+    private fun trackingSession(groupId: String, phase: LegPhase, stops: Int, eta: Int) = GroupTrackingSessionState(
+        groupId = groupId,
+        activeLegIndex = 0,
+        totalLegs = 2,
+        trackingSessionState = TrackingSessionState(
+            isActive = true,
+            legPhase = phase,
+            stopsRemaining = stops,
+            etaSeconds = eta,
+            currentLegIndex = 0,
+            totalLegs = 2
+        )
+    )
+
+    @Test
+    fun trackingStatusText_byPhase() {
+        assertEquals("第 1/2 程 · 等车 · 4 分钟", trackingStatusText(trackingSession("s0", LegPhase.WAITING_BOARD, 2, 240)))
+        assertEquals("第 1/2 程 · 乘车 · 2 站后下车", trackingStatusText(trackingSession("s0", LegPhase.ON_BOARD, 2, 300)))
+    }
+
+    @Test
+    fun schemePanel_tabsSwitchPager_andStartTrackingUsesSelectedScheme() {
+        var started: AmapTransitSchemeResult? = null
+        var clickedOrder = -1
+        composeTestRule.setContent {
+            val pagerState = rememberPagerState { demoSchemes.size }
+            val scope = rememberCoroutineScope()
+            RoutePlanSchemePanel(
+                schemes = demoSchemes,
+                pagerState = pagerState,
+                trackingSession = null,
+                onSelectScheme = { scope.launch { pagerState.animateScrollToPage(it) } },
+                onLineClick = { clickedOrder = it.fromStopOrder },
+                onSaveFavorite = {},
+                onStartTracking = { started = it },
+                onConfirmBoarded = {},
+                onStopTracking = {}
+            )
+        }
+
+        // 4 个方案标签一直可见，没有"展开全部方案"
+        (0 until 4).forEach { composeTestRule.onNodeWithTag("scheme_tab_$it").assertIsDisplayed() }
+        composeTestRule.onAllNodesWithText("展开全部", substring = true).assertCountEquals(0)
+        composeTestRule.onNodeWithTag("scheme_duration_0").assertTextEquals("32 分钟")
+        composeTestRule.onNodeWithText("收藏").assertIsDisplayed()
+
+        // 点第 3 个标签切到对应详情
+        composeTestRule.onNodeWithTag("scheme_tab_2").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag("scheme_duration_2").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("scheme_summary_2").assertTextEquals("步行 260 米 · 换乘 1 次 · ¥4.0")
+
+        // 胶囊跳详情传上车站
+        composeTestRule.onNodeWithTag("scheme_line_chip_B796").performClick()
+        assertEquals(1, clickedOrder)
+
+        composeTestRule.onNodeWithTag("btn_start_monitor").performClick()
+        assertEquals("s2", started?.group?.id)
+    }
+
+    @Test
+    fun schemePanel_trackingCurrentScheme_showsStatusBarInsteadOfButtons() {
+        var stopped = false
+        composeTestRule.setContent {
+            val pagerState = rememberPagerState { demoSchemes.size }
+            RoutePlanSchemePanel(
+                schemes = demoSchemes,
+                pagerState = pagerState,
+                trackingSession = trackingSession("s0", LegPhase.WAITING_BOARD, 2, 240),
+                onSelectScheme = {},
+                onLineClick = {},
+                onSaveFavorite = {},
+                onStartTracking = {},
+                onConfirmBoarded = {},
+                onStopTracking = { stopped = true }
+            )
+        }
+
+        composeTestRule.onNodeWithTag("tracking_status_text").assertTextEquals("第 1/2 程 · 等车 · 4 分钟")
+        composeTestRule.onNodeWithTag("btn_plan_confirm_boarded").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("btn_start_monitor").assertDoesNotExist()
+        composeTestRule.onNodeWithTag("btn_plan_stop_tracking").performClick()
+        assertTrue(stopped)
     }
 }
