@@ -7,6 +7,11 @@ import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -294,5 +299,67 @@ class RouteGroupRepositoryTest {
         assertNotNull(g2)
         assertNotNull(g1)
         assertTrue(g2!!.sortOrder < g1!!.sortOrder)
+    }
+
+    @Test
+    fun testConcurrentAddGroupsAndFavoriteGroups_doNotLoseUpdates() = runBlocking {
+        // 使用真实多线程调度器制造并发读改写，Mutex 保证每次写入都不丢失
+        val concurrentRepo = RouteGroupRepository(context, Dispatchers.IO)
+        val count = 40
+        coroutineScope {
+            val addGroups = (1..count).map { index ->
+                async(Dispatchers.Default) {
+                    concurrentRepo.addGroup(TransitGroup(id = "concurrent_$index", name = "并发分组$index"))
+                }
+            }
+            val createFavorites = (1..count).map { index ->
+                async(Dispatchers.Default) { concurrentRepo.createFavoriteGroup("收藏$index") }
+            }
+            (addGroups + createFavorites).awaitAll()
+        }
+
+        assertEquals(count, concurrentRepo.groups.value.size)
+        // 2 个默认收藏分组 + 并发创建的分组
+        assertEquals(count + 2, concurrentRepo.favoriteGroups.value.size)
+
+        val reloaded = RouteGroupRepository(context, testDispatcher)
+        assertEquals(count, reloaded.groups.value.size)
+        assertEquals(count + 2, reloaded.favoriteGroups.value.size)
+    }
+
+    @Test
+    fun testCorruptGroupsJson_isBackedUpBeforeOverwrite() = runTest(testDispatcher) {
+        val prefs = context.getSharedPreferences("trackr_route_groups", Context.MODE_PRIVATE)
+        val corrupt = "[{\"id\":\"broken_group\""
+        prefs.edit().putString("groups_list_json", corrupt).commit()
+
+        val corruptRepo = RouteGroupRepository(context, testDispatcher)
+        assertTrue(corruptRepo.groups.value.isEmpty())
+
+        val backupPrefix = "groups_list_json" + RouteGroupRepository.CORRUPT_BACKUP_SUFFIX
+        assertEquals(corrupt, prefs.all.filterKeys { it.startsWith(backupPrefix) }.values.single())
+
+        // 后续写入覆盖主 key，备份仍保留
+        corruptRepo.addGroup(TransitGroup(id = "new_group", name = "新分组"))
+        assertEquals(corrupt, prefs.all.filterKeys { it.startsWith(backupPrefix) }.values.single())
+    }
+
+    @Test
+    fun testCorruptFavoriteGroupsJson_isBackedUpAndKeepsOnlyLatest() {
+        val prefs = context.getSharedPreferences("trackr_route_groups", Context.MODE_PRIVATE)
+        val backupPrefix = "favorite_groups_list_json" + RouteGroupRepository.CORRUPT_BACKUP_SUFFIX
+
+        prefs.edit().putString("favorite_groups_list_json", "broken-1").commit()
+        val first = RouteGroupRepository(context, testDispatcher)
+        // 解析失败后仍回落到默认收藏分组
+        assertEquals(2, first.favoriteGroups.value.size)
+        assertEquals("broken-1", prefs.all.filterKeys { it.startsWith(backupPrefix) }.values.single())
+
+        Thread.sleep(5)
+        prefs.edit().putString("favorite_groups_list_json", "broken-2").commit()
+        RouteGroupRepository(context, testDispatcher)
+        val backups = prefs.all.filterKeys { it.startsWith(backupPrefix) }
+        assertEquals(1, backups.size)
+        assertEquals("broken-2", backups.values.single())
     }
 }
