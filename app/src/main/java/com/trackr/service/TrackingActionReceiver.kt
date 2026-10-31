@@ -12,7 +12,8 @@ class TrackingActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             ACTION_STOP_TRACKING -> {
-                BusTrackingService.stopTracking(context)
+                // 同时清掉换乘组状态，避免停止后收藏页仍显示“追踪中”的换乘组
+                TransferAutoSwitchManager.stopGroupTracking(context)
             }
             ACTION_CYCLE_THRESHOLD -> {
                 BusTrackingService.cycleThreshold(context)

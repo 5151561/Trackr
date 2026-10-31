@@ -1,11 +1,14 @@
 package com.trackr.service
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
+import androidx.core.content.ContextCompat
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.GroupTrackingSessionState
 import com.trackr.domain.model.LegPhase
+import com.trackr.domain.model.LineOperatingState
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
@@ -42,15 +45,70 @@ object TransferAutoSwitchManager {
         }
     /** 每程用户选中的候选线路（legIndex -> lineId） */
     private var selectedLineIds: Map<Int, String> = emptyMap()
-    private var lastUserLat: Double? = null
-    private var lastUserLng: Double? = null
+
+    /** 下车站定位辅助判定：定位最长有效期 */
+    const val USER_FIX_MAX_AGE_NANOS = 60_000_000_000L
+
+    /** 下车站定位辅助判定：定位精度上限（米） */
+    const val USER_FIX_MAX_ACCURACY_METERS = 50f
+
+    /** 下车站定位辅助判定：距下车站小于该距离（米）视为到达 */
+    private const val DROP_STOP_RADIUS_METERS = 150
 
     /**
-     * 更新手机用户当前位置坐标（WGS-84，用于 ON_BOARD 阶段到站双保险空间测距）
+     * 手机定位快照（WGS-84）。
+     * @param accuracyMeters 水平精度（米），未知为 null（未知时不参与判定）
+     * @param elapsedRealtimeNanos 定位时刻（[SystemClock.elapsedRealtimeNanos] 时基，对应 Location.elapsedRealtimeNanos）
      */
+    data class UserFix(
+        val lat: Double,
+        val lng: Double,
+        val accuracyMeters: Float?,
+        val elapsedRealtimeNanos: Long
+    )
+
+    @Volatile
+    private var lastUserFix: UserFix? = null
+
+    /** 当前开机时长时钟，可在测试中替换 */
+    internal var elapsedRealtimeNanosProvider: () -> Long = { SystemClock.elapsedRealtimeNanos() }
+
+    /**
+     * 服务存活时由 [BusTrackingService] 注册：在服务内部直接切换到新一程，
+     * 不再 startForegroundService 绕一圈。返回 false 表示未处理，回落为发 Intent 启动服务。
+     */
+    @Volatile
+    internal var legSwitcher: ((TrackingStartParams) -> Boolean)? = null
+
+    /**
+     * 更新手机用户当前定位（WGS-84，用于 ON_BOARD 阶段到达下车站的辅助测距）。
+     * 只有 age <= 60s 且 accuracy <= 50m 的定位才参与判定。
+     */
+    fun updateUserFix(lat: Double, lng: Double, accuracyMeters: Float?, elapsedRealtimeNanos: Long) {
+        lastUserFix = UserFix(lat, lng, accuracyMeters, elapsedRealtimeNanos)
+    }
+
+    /**
+     * 旧接口：只有经纬度，没有精度和时间，无法判断是否过期。
+     * 保留签名供旧调用方编译通过，但不再参与到站判定。
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun updateUserLocation(lat: Double, lng: Double) {
-        lastUserLat = lat
-        lastUserLng = lng
+        // 不再记录：无精度/时间的坐标可能是几小时前的，会误判到站
+    }
+
+    /** 清空定位快照（停止追踪、切程时调用） */
+    fun clearUserFix() {
+        lastUserFix = null
+    }
+
+    /** 定位是否足够新且足够准，可用于下车站辅助判定 */
+    fun isUserFixUsable(fix: UserFix?, nowElapsedNanos: Long = elapsedRealtimeNanosProvider()): Boolean {
+        if (fix == null) return false
+        val accuracy = fix.accuracyMeters ?: return false
+        if (accuracy <= 0f || accuracy > USER_FIX_MAX_ACCURACY_METERS) return false
+        val age = nowElapsedNanos - fix.elapsedRealtimeNanos
+        return age in 0..USER_FIX_MAX_AGE_NANOS
     }
 
     /**
@@ -72,6 +130,7 @@ object TransferAutoSwitchManager {
 
         activeGroup = group
         this.selectedLineIds = selectedLineIds
+        clearUserFix()
 
         val groupState = GroupTrackingSessionState(
             groupId = group.id,
@@ -108,8 +167,7 @@ object TransferAutoSwitchManager {
         line: CandidateLine,
         legIndex: Int
     ) {
-        BusTrackingService.startTrackingGroupLeg(
-            context = context,
+        val params = BusTrackingService.groupLegParams(
             groupId = group.id,
             groupName = group.name,
             legIndex = legIndex,
@@ -129,53 +187,85 @@ object TransferAutoSwitchManager {
             boardStopOrder = line.fromStopOrder,
             endStopName = line.endStopName
         )
+        // 服务已在运行：内部直接切换会话；否则发 Intent 启动前台服务
+        val handled = legSwitcher?.invoke(params) == true
+        if (!handled) {
+            ContextCompat.startForegroundService(context, params.toIntent(context))
+        }
     }
+
+    /** 失败退避的最长间隔 */
+    const val MAX_FAILURE_BACKOFF_MS = 120_000L
+
+    /** 线路非运营（等待发车 / 停运 / 末班已过 / 无实时）时的轮询间隔 */
+    const val NOT_RUNNING_POLL_INTERVAL_MS = 300_000L
+
+    /** 锁定车辆信号丢失期间的最短轮询间隔 */
+    const val SIGNAL_LOST_MIN_INTERVAL_MS = 30_000L
 
     /**
      * 自适应防刷轮询退避算法：
+     * - 连续失败 n 次：在正常间隔基础上 ×2^n 指数退避，最多 120 秒；成功后（n=0）恢复
+     * - 线路非运营：5 分钟一次
      * - 即将到站（<= 1 站 或 ETA <= 180 秒）：10 秒高效轮询
      * - 中距离（2-4 站 或 ETA <= 600 秒）：20 秒平稳轮询
      * - 远距离（> 4 站 或 暂无实时数据）：45 秒节能防刷轮询
+     * - 锁定车辆信号丢失期间：至少 30 秒
+     *
+     * @param consecutiveFailures 连续刷新失败次数
+     * @param operatingState 最近一次成功刷新拿到的线路运营状态
      */
-    fun calculateAdaptivePollingInterval(session: TrackingSessionState): Long {
+    fun calculateAdaptivePollingInterval(
+        session: TrackingSessionState,
+        consecutiveFailures: Int = 0,
+        operatingState: LineOperatingState = LineOperatingState.RUNNING
+    ): Long {
         val stopsRemaining = session.stopsRemaining
         val etaSeconds = session.etaSeconds
 
-        return when {
+        val base = when {
             stopsRemaining in 0..1 || (etaSeconds in 1..180) -> 10_000L
             stopsRemaining in 2..4 || (etaSeconds in 181..600) -> 20_000L
             else -> 45_000L
         }
+
+        if (consecutiveFailures > 0) {
+            val shift = consecutiveFailures.coerceAtMost(4)
+            return (base shl shift).coerceAtMost(MAX_FAILURE_BACKOFF_MS)
+        }
+        if (operatingState != LineOperatingState.RUNNING) return NOT_RUNNING_POLL_INTERVAL_MS
+        if (session.isSignalLost) return base.coerceAtLeast(SIGNAL_LOST_MIN_INTERVAL_MS)
+        return base
     }
 
     /**
      * ON_BOARD 阶段到达下车站判定（基于阶段 + 锁定车辆）：
-     * 1. 公交到达事件（stopsRemaining == 0 且已停靠/ETA<=45s）
-     * 2. 手机空间定位辅助（距下车站 < 150m）——仅 ON_BOARD 阶段有效
+     * 1. 公交到达事件（stopsRemaining == 0 且已停靠/ETA 在 1..45s）
+     * 2. 手机空间定位辅助（距下车站 < 150m）——仅 ON_BOARD 阶段、且定位 age<=60s、accuracy<=50m 时有效
      *
      * WAITING_BOARD 阶段恒返回 false：等车阶段不能用定位触发切程。
      */
     fun isArrivalSatisfied(
         session: TrackingSessionState,
         leg: TransitLeg?,
-        userLat: Double? = lastUserLat,
-        userLng: Double? = lastUserLng
+        userFix: UserFix? = lastUserFix,
+        nowElapsedNanos: Long = elapsedRealtimeNanosProvider()
     ): Boolean {
         // WAITING_BOARD（或 SINGLE）阶段绝不在此触发下车站到达
         if (session.legPhase == LegPhase.WAITING_BOARD) return false
 
         // 1. 公交车辆自身事件判定（锁定车到下车站）
-        val busCondition = session.stopsRemaining == 0 &&
-                (session.isBusArrivedAtStop || (session.etaSeconds in 0..45))
+        val busCondition = ArrivalRules.isSessionArrived(session)
 
         // 2. 空间测距辅助判定，仅在 ON_BOARD 阶段生效；leg 坐标为 GCJ-02，用户坐标为 WGS-84，需转换对齐
-        val locationCondition = if (session.legPhase == LegPhase.ON_BOARD) {
+        val locationCondition = if (session.legPhase == LegPhase.ON_BOARD && isUserFixUsable(userFix, nowElapsedNanos)) {
+            val fix = requireNotNull(userFix)
             val targetLat = leg?.toStopLat ?: 0.0
             val targetLng = leg?.toStopLng ?: 0.0
-            if (userLat != null && userLng != null && targetLat > 0.0 && targetLng > 0.0) {
-                val (userGcjLat, userGcjLng) = CoordTransform.wgs84ToGcj02(userLat, userLng)
+            if (targetLat > 0.0 && targetLng > 0.0) {
+                val (userGcjLat, userGcjLng) = CoordTransform.wgs84ToGcj02(fix.lat, fix.lng)
                 val dist = RouteProjectionMath.calculateDistanceMeters(userGcjLat, userGcjLng, targetLat, targetLng)
-                dist != null && dist < 150
+                dist != null && dist < DROP_STOP_RADIUS_METERS
             } else false
         } else false
 
@@ -207,7 +297,9 @@ object TransferAutoSwitchManager {
                 val nextLineName = nextLine?.lineName ?: "下一程公交"
 
                 Log.d(TAG, "第 ${currentLegIndex + 1} 程到站，自动切换到第 ${nextLegIndex + 1} 程: $nextLineName")
+                // 非最后一程只发换乘提醒（内部会先取消到站/临近通知）
                 ArrivalAlertManager.triggerTransferAlert(context, currentLeg?.toStopName.orEmpty(), nextLineName)
+                clearUserFix()
 
                 updatedGroupState = currentSession.copy(
                     activeLegIndex = nextLegIndex,
@@ -233,6 +325,7 @@ object TransferAutoSwitchManager {
                     )
                 )
                 _activeGroupSession.value = updatedGroupState
+                clearUserFix()
                 BusTrackingService.stopTracking(context)
             }
         } else {
@@ -285,6 +378,7 @@ object TransferAutoSwitchManager {
                 activeLegIndex = nextIndex,
                 currentLeg = nextLeg
             )
+            clearUserFix()
             if (nextLine != null) {
                 startTrackingLeg(context, group, nextLeg, nextLine, nextIndex)
             }
@@ -292,12 +386,21 @@ object TransferAutoSwitchManager {
     }
 
     /**
-     * 终止换乘追踪会话
+     * 只清空换乘组内存状态，不碰服务（服务自行停止时调用）
      */
-    fun stopGroupTracking(context: Context) {
+    fun clearGroupState() {
         _activeGroupSession.value = null
         activeGroup = null
         selectedLineIds = emptyMap()
+        clearUserFix()
+    }
+
+    /**
+     * 终止换乘追踪会话（同时停止追踪服务）。
+     * 单线路追踪时调用也安全：换乘组状态本来就是空的，只会停止服务。
+     */
+    fun stopGroupTracking(context: Context) {
+        clearGroupState()
         BusTrackingService.stopTracking(context)
     }
 }

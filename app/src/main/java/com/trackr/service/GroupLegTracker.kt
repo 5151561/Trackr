@@ -27,13 +27,159 @@ object GroupLegTracker {
         val reachedDropStop: Boolean = false
     )
 
-    /** 到站判定：stopsRemaining==0 且（已停靠 或 ETA<=45s） */
-    fun isArrivedAtOrder(targetOrder: Int, bus: LiveBus): Boolean {
-        val stopsRemaining = (targetOrder - bus.order).coerceAtLeast(0)
-        if (stopsRemaining != 0) return false
-        val stopped = bus.isArrived || bus.segmentProgress >= 0.98f
-        return stopped || (bus.etaSeconds in 0..45)
+    /** 本轮应发出的提醒类型 */
+    enum class AlertKind {
+        /** 车即将到上车站 A */
+        BOARD_APPROACHING,
+        /** 车已到上车站 A */
+        BOARD_ARRIVED,
+        /** 即将到下车站 B */
+        DROP_APPROACHING,
+        /** 已到下车站 B（仅最后一程；非最后一程由换乘引擎发换乘提醒） */
+        DROP_ARRIVED
     }
+
+    /**
+     * 提醒编排结果。
+     * @param state 写回会话的状态（已更新提醒触发标志）
+     * @param alert 本轮要发的提醒，null 表示不发
+     * @param alertState 发提醒时用的状态（站名、剩余站数已按提醒对象改写）
+     */
+    data class AlertDecision(
+        val state: TrackingSessionState,
+        val alert: AlertKind? = null,
+        val alertState: TrackingSessionState? = null
+    )
+
+    /** 到站判定：统一走 [ArrivalRules.isBusArrivedAtOrder]（ETA 1..45s，不信任无效的站间插值） */
+    fun isArrivedAtOrder(targetOrder: Int, bus: LiveBus): Boolean =
+        ArrivalRules.isBusArrivedAtOrder(targetOrder, bus)
+
+    /**
+     * 手动“我已上车”时选择用户所乘车辆：只考虑 order 在 A..A+1 的车（刚到 A 或刚离开 A），
+     * 取离 A 最近的一辆；距离相同时优先已开过 A 的车（用户点按钮时车多半已出站）。
+     * 找不到时返回 null，由 ON_BOARD 阶段后续轮询按同样规则补锁。
+     */
+    fun pickBoardedBus(boardOrder: Int, buses: List<LiveBus>): LiveBus? {
+        if (boardOrder <= 0) return null
+        return buses
+            .filter { it.order == boardOrder || it.order == boardOrder + 1 }
+            .minWithOrNull(
+                compareBy<LiveBus> { distanceToBoardStop(boardOrder, it) }
+                    .thenByDescending { it.order }
+            )
+    }
+
+    /**
+     * 车辆到上车站 A 的站间距离（单位：站）。
+     * order==A 时车在 (A-1)->A 之间，距离 = 1 - 进度；order==A+1 时车在 A->(A+1) 之间，距离 = 进度。
+     * 插值不可信时按站间中点 0.5 估计。
+     */
+    private fun distanceToBoardStop(boardOrder: Int, bus: LiveBus): Float {
+        val progress = when {
+            bus.isArrived -> 1f
+            bus.hasValidProgress -> bus.segmentProgress.coerceIn(0f, 1f)
+            else -> 0.5f
+        }
+        return if (bus.order == boardOrder) 1f - progress else progress
+    }
+
+    /**
+     * 手动确认“我已上车”：切入 ON_BOARD，按 [pickBoardedBus] 锁车；锁不到时 lockedBusId 为 null，等后续轮询补锁。
+     *
+     * @param buses 最近一次轮询拿到的在途车辆
+     */
+    fun confirmBoarded(session: TrackingSessionState, buses: List<LiveBus>): TrackingSessionState {
+        val boardOrder = session.boardStopOrder
+        val picked = pickBoardedBus(boardOrder, buses)
+        return session.copy(
+            legPhase = LegPhase.ON_BOARD,
+            lockedBusId = picked?.busId,
+            currentBusId = picked?.busId ?: session.currentBusId,
+            currentBusOrder = picked?.order ?: session.currentBusOrder,
+            currentBusProgress = picked?.segmentProgress ?: session.currentBusProgress,
+            stopsRemaining = picked?.let { (session.targetOrder - it.order).coerceAtLeast(0) } ?: session.stopsRemaining,
+            etaSeconds = picked?.etaSeconds ?: session.etaSeconds,
+            // 乘车区间从上车站算起
+            startTrackingOrder = if (boardOrder > 0) boardOrder else session.startTrackingOrder,
+            isBusArrivedAtStop = false,
+            isSignalLost = false,
+            hasTriggeredApproachingAlert = false,
+            hasTriggeredArrivedAlert = false,
+            statusSummary = if (picked != null) {
+                "已手动确认上车，开始追踪下车站 ${session.targetStopName}"
+            } else {
+                "已手动确认上车，正在识别所乘车辆…"
+            },
+            updatedAtMillis = now()
+        )
+    }
+
+    /**
+     * 提醒编排（纯函数）：根据轮询前的阶段决定本轮发什么提醒，并更新触发标志。
+     *
+     * - 轮询前为 WAITING_BOARD 且本轮车到上车站：先发上车站到站提醒，再重置标志进入 ON_BOARD，
+     *   本轮不做下车站临近判定（避免一上车就提示“即将到下车站”）。
+     * - ON_BOARD 到下车站：最后一程发到站提醒；非最后一程不发（换乘引擎会发换乘提醒），只置标志。
+     *
+     * @param previous 本轮轮询前的会话状态
+     * @param update [processPoll] 的结果
+     */
+    fun planAlerts(previous: TrackingSessionState, update: LegUpdate): AlertDecision {
+        var state = update.state
+        when (previous.legPhase) {
+            LegPhase.WAITING_BOARD -> {
+                if (update.reachedBoardStop) {
+                    val shouldAlert = !previous.hasTriggeredArrivedAlert
+                    val alertState = state.copy(
+                        targetStopName = previous.boardStopName,
+                        stopsRemaining = 0,
+                        isBusArrivedAtStop = true
+                    )
+                    // 刚进入 ON_BOARD，重置下车站提醒触发标志
+                    state = state.copy(hasTriggeredApproachingAlert = false, hasTriggeredArrivedAlert = false)
+                    return if (shouldAlert) {
+                        AlertDecision(state, AlertKind.BOARD_ARRIVED, alertState)
+                    } else {
+                        AlertDecision(state)
+                    }
+                }
+                if (state.stopsRemaining in 0..state.alertThresholdStops && !state.hasTriggeredApproachingAlert) {
+                    val alertState = state.copy(targetStopName = previous.boardStopName)
+                    state = state.copy(hasTriggeredApproachingAlert = true)
+                    return AlertDecision(state, AlertKind.BOARD_APPROACHING, alertState)
+                }
+                return AlertDecision(state)
+            }
+
+            LegPhase.ON_BOARD -> {
+                if (update.reachedDropStop) {
+                    if (state.hasTriggeredArrivedAlert) return AlertDecision(state)
+                    state = state.copy(hasTriggeredArrivedAlert = true, hasTriggeredApproachingAlert = true)
+                    if (!isLastLeg(state)) return AlertDecision(state)
+                    return AlertDecision(
+                        state,
+                        AlertKind.DROP_ARRIVED,
+                        state.copy(stopsRemaining = 0, isBusArrivedAtStop = true)
+                    )
+                }
+                if (state.lockedBusId != null && !state.isSignalLost &&
+                    state.stopsRemaining in 0..state.alertThresholdStops &&
+                    !state.hasTriggeredApproachingAlert
+                ) {
+                    state = state.copy(hasTriggeredApproachingAlert = true)
+                    return AlertDecision(state, AlertKind.DROP_APPROACHING, state)
+                }
+                return AlertDecision(state)
+            }
+
+            LegPhase.SINGLE -> Unit
+        }
+        return AlertDecision(state)
+    }
+
+    private fun isLastLeg(state: TrackingSessionState): Boolean =
+        state.currentLegIndex >= state.totalLegs - 1
 
     /**
      * 处理一次分组换乘单程的轮询。
@@ -119,6 +265,19 @@ object GroupLegTracker {
     }
 
     private fun processOnBoard(session: TrackingSessionState, buses: List<LiveBus>): LegUpdate {
+        if (session.lockedBusId == null) {
+            // 手动确认上车时没锁到车：按同样规则（A..A+1 且离 A 最近）补锁
+            val picked = pickBoardedBus(session.boardStopOrder, buses)
+                ?: return LegUpdate(
+                    session.copy(
+                        isSignalLost = false,
+                        statusSummary = "已确认上车，正在识别所乘车辆…",
+                        updatedAtMillis = now()
+                    )
+                )
+            return processOnBoard(session.copy(lockedBusId = picked.busId), buses)
+        }
+
         val lockedId = session.lockedBusId
         val locked = buses.find { it.busId == lockedId }
 

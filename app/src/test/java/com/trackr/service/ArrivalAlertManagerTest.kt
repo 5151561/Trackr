@@ -91,6 +91,40 @@ class ArrivalAlertManagerTest {
         assertEquals(true, text.contains("还有 2 站"))
     }
 
+    @Test
+    fun testStandaloneAlerts_useReminderCategory() {
+        liveEnabled = false
+
+        ArrivalAlertManager.triggerArrivedAlert(app, activeTrackingState(stopsRemaining = 0).copy(isBusArrivedAtStop = true))
+
+        val posted = shadowOf(notificationManager).getNotification(ArrivalAlertManager.NOTIFICATION_ID_ARRIVED)
+        assertNotNull(posted)
+        assertEquals(android.app.Notification.CATEGORY_REMINDER, posted?.category)
+    }
+
+    @Test
+    fun testTransferAlert_cancelsArrivedAndApproachingOfSameStop() {
+        liveEnabled = false
+        ArrivalAlertManager.triggerApproachingAlert(app, activeTrackingState(stopsRemaining = 1))
+        ArrivalAlertManager.triggerArrivedAlert(app, activeTrackingState(stopsRemaining = 0).copy(isBusArrivedAtStop = true))
+
+        ArrivalAlertManager.triggerTransferAlert(app, "珞雄路雄楚大道", "M492")
+
+        assertNull(shadowOf(notificationManager).getNotification(ArrivalAlertManager.NOTIFICATION_ID_ARRIVED))
+        assertNull(shadowOf(notificationManager).getNotification(ArrivalAlertManager.NOTIFICATION_ID_APPROACHING))
+        assertNotNull(shadowOf(notificationManager).getNotification(ArrivalAlertManager.NOTIFICATION_ID_TRANSFER))
+    }
+
+    @Test
+    fun testLiveNotificationFallback_isSameForBothHelpers() {
+        ArrivalAlertManager.resetLiveNotificationEnabledProvider()
+        LiveProgressNotificationHelper.resetLiveNotificationEnabledProvider()
+        assertEquals(
+            LiveProgressNotificationHelper.liveNotificationEnabledProvider(),
+            ArrivalAlertManager.liveNotificationEnabledProvider()
+        )
+    }
+
     private fun activeTrackingState(stopsRemaining: Int) = TrackingSessionState(
         isActive = true,
         lineName = "788",

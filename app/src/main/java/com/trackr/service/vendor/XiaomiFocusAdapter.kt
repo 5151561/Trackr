@@ -10,6 +10,7 @@ import androidx.core.app.NotificationCompat
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.LegPhase
 import com.trackr.domain.model.TrackingSessionState
+import com.trackr.service.ArrivalRules
 import com.trackr.service.LiveProgressNotificationHelper
 import org.json.JSONObject
 
@@ -97,7 +98,7 @@ object XiaomiFocusAdapter {
      * 构建紧凑的 param_v2 JSON 结构，并严格限制在 3072 字节以内
      */
     fun buildJsonPayload(state: TrackingSessionState, nextLineName: String? = null): String {
-        val isArrived = state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45)
+        val isArrived = ArrivalRules.isSessionArrived(state)
 
         val capsuleText: String
         val title: String

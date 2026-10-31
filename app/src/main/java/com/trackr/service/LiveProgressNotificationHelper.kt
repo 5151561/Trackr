@@ -42,17 +42,24 @@ object LiveProgressNotificationHelper {
     /**
      * 是否开启常驻实时通知，以可注入 provider 的形式提供，
      * 避免直接耦合 TrackrApp 全局单例，同时保证单例未初始化时安全降级。
-     * 兜底值为 true：读取失败时保持既有的实时活动参数注入行为，避免静默丢失流体云/胶囊能力。
+     * 兜底值见 [readLiveNotificationEnabled]。
      */
-    internal var liveNotificationEnabledProvider: () -> Boolean = {
-        runCatching { TrackrApp.instance.repository.isLiveNotificationEnabled.value }.getOrDefault(true)
-    }
+    internal var liveNotificationEnabledProvider: () -> Boolean = { readLiveNotificationEnabled() }
 
     internal fun resetLiveNotificationEnabledProvider() {
-        liveNotificationEnabledProvider = {
-            runCatching { TrackrApp.instance.repository.isLiveNotificationEnabled.value }.getOrDefault(true)
-        }
+        liveNotificationEnabledProvider = { readLiveNotificationEnabled() }
     }
+
+    /** 读取失败时的兜底值，与设置项默认值（开启）一致；常驻通知和强提醒共用 */
+    internal const val LIVE_NOTIFICATION_ENABLED_FALLBACK = true
+
+    /**
+     * 读取“实时通知”开关；单例未初始化等读取失败时返回 [LIVE_NOTIFICATION_ENABLED_FALLBACK]。
+     * 常驻通知与 [ArrivalAlertManager] 共用此函数，保证两处兜底值一致。
+     */
+    internal fun readLiveNotificationEnabled(): Boolean =
+        runCatching { TrackrApp.instance.repository.isLiveNotificationEnabled.value }
+            .getOrDefault(LIVE_NOTIFICATION_ENABLED_FALLBACK)
 
     /**
      * 确保常驻低干扰渠道创建
@@ -111,7 +118,7 @@ object LiveProgressNotificationHelper {
      */
     fun calculateCurrentProgress(
         state: TrackingSessionState,
-        isArrived: Boolean = state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45)
+        isArrived: Boolean = ArrivalRules.isSessionArrived(state)
     ): Int {
         val (startOrder, endOrder) = progressRangeOf(state)
         val (hops, maxProgress) = calculateSpanAndMaxProgress(startOrder, endOrder)
@@ -240,7 +247,7 @@ object LiveProgressNotificationHelper {
     data class NotificationAction(val label: String, val intentAction: String, val requestCode: Int)
 
     internal fun isArrivedState(state: TrackingSessionState): Boolean =
-        state.stopsRemaining == 0 && (state.isBusArrivedAtStop || state.etaSeconds in 0..45)
+        ArrivalRules.isSessionArrived(state)
 
     private fun isLastLeg(state: TrackingSessionState): Boolean =
         state.currentLegIndex >= state.totalLegs - 1

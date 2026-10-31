@@ -193,6 +193,13 @@ data class LiveBus(
         get() = sanitizePlateOrFleetNo(plateOrFleetNo).ifBlank {
             if (isArrived) "已到站车辆" else "在途车辆"
         }
+
+    /**
+     * [segmentProgress] 是否可信：上游已到站，或车辆坐标有效。
+     * 车辆坐标缺失时上游投影默认返回 1.0，只能用于 UI 展示，不能作为到站判定依据。
+     */
+    val hasValidProgress: Boolean
+        get() = isArrived || (wgsLat != 0.0 && wgsLng != 0.0)
 }
 
 /**
@@ -399,5 +406,7 @@ data class TrackingSessionState(
     /** 已上车后锁定的车辆 busId */
     val lockedBusId: String? = null,
     /** 锁定车辆当前是否信号丢失（从实时数据中消失） */
-    val isSignalLost: Boolean = false
+    val isSignalLost: Boolean = false,
+    /** 单线路模式：正在追踪的车辆连续从数据里消失的轮询次数（短暂消失时保持原车） */
+    val missingBusPolls: Int = 0
 )

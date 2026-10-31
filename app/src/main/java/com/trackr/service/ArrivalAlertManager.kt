@@ -5,7 +5,9 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
 import android.os.Build
+import android.os.VibrationAttributes
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -13,7 +15,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.trackr.R
-import com.trackr.TrackrApp
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.service.vendor.LiveUpdatePromotion
@@ -68,6 +69,7 @@ object ArrivalAlertManager {
         ensureNotificationChannel(context)
         cancelCounterpart(context, NOTIFICATION_ID_ARRIVED)
 
+        var posted = false
         if (shouldPostStandaloneNotification(context, state)) {
             val etaText = if (state.etaSeconds > 0) {
                 "（${RouteProjectionMath.formatEtaText(state.etaSeconds)}）"
@@ -85,7 +87,7 @@ object ArrivalAlertManager {
                 .setContentText(content)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(content))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setAutoCancel(true)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setContentIntent(contentPendingIntent)
@@ -93,14 +95,17 @@ object ArrivalAlertManager {
 
             try {
                 NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_APPROACHING, notification)
+                posted = areNotificationsEnabled(context)
             } catch (e: SecurityException) {
                 Log.w(TAG, "Cannot post approaching alert: missing POST_NOTIFICATIONS permission", e)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to post approaching alert notification", e)
             }
         }
-
-        performWaveformVibration(context, APPROACHING_VIBRATION_PATTERN)
+        // 独立通知已由渠道负责振动；只有没发出独立通知时才手动振动，避免振两次
+        if (!posted) {
+            performWaveformVibration(context, APPROACHING_VIBRATION_PATTERN)
+        }
     }
 
     /**
@@ -110,6 +115,7 @@ object ArrivalAlertManager {
         ensureNotificationChannel(context)
         cancelCounterpart(context, NOTIFICATION_ID_APPROACHING)
 
+        var posted = false
         if (shouldPostStandaloneNotification(context, state)) {
             val title = "【车辆已到站】${state.lineName}"
             val content = "${state.lineName} 已到达 ${state.targetStopName}！请注意上车/下车。"
@@ -122,7 +128,7 @@ object ArrivalAlertManager {
                 .setContentText(content)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(content))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .setCategory(NotificationCompat.CATEGORY_REMINDER)
                 .setAutoCancel(true)
                 .setDefaults(NotificationCompat.DEFAULT_ALL)
                 .setContentIntent(contentPendingIntent)
@@ -130,14 +136,17 @@ object ArrivalAlertManager {
 
             try {
                 NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_ARRIVED, notification)
+                posted = areNotificationsEnabled(context)
             } catch (e: SecurityException) {
                 Log.w(TAG, "Cannot post arrived alert: missing POST_NOTIFICATIONS permission", e)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to post arrived alert notification", e)
             }
         }
-
-        performOneShotVibration(context, ARRIVED_VIBRATION_DURATION_MS)
+        // 独立通知已由渠道负责振动；只有没发出独立通知时才手动振动，避免振两次
+        if (!posted) {
+            performOneShotVibration(context, ARRIVED_VIBRATION_DURATION_MS)
+        }
     }
 
     /**
@@ -145,6 +154,9 @@ object ArrivalAlertManager {
      */
     fun triggerTransferAlert(context: Context, transferStationName: String, nextLineName: String) {
         ensureNotificationChannel(context)
+        // 换乘站即本程下车站：只保留换乘提醒，清掉同一站的到站 / 临近通知，避免连发两条
+        cancelCounterpart(context, NOTIFICATION_ID_ARRIVED)
+        cancelCounterpart(context, NOTIFICATION_ID_APPROACHING)
 
         val title = "【换乘提醒】到达 $transferStationName"
         val content = "已到达换乘站 $transferStationName，已自动切换追踪下一程：$nextLineName"
@@ -157,21 +169,25 @@ object ArrivalAlertManager {
             .setContentText(content)
             .setStyle(NotificationCompat.BigTextStyle().bigText(content))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setContentIntent(contentPendingIntent)
             .build()
 
+        var posted = false
         try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_TRANSFER, notification)
+            posted = areNotificationsEnabled(context)
         } catch (e: SecurityException) {
             Log.w(TAG, "Cannot post transfer alert: missing POST_NOTIFICATIONS permission", e)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to post transfer alert notification", e)
         }
-
-        performWaveformVibration(context, TRANSFER_VIBRATION_PATTERN)
+        // 独立通知由渠道负责振动；没发出去时才手动振动
+        if (!posted) {
+            performWaveformVibration(context, TRANSFER_VIBRATION_PATTERN)
+        }
     }
 
     /**
@@ -202,12 +218,12 @@ object ArrivalAlertManager {
      * 避免直接耦合 TrackrApp 全局单例，同时保证单例未初始化时安全降级
      */
     internal var liveNotificationEnabledProvider: () -> Boolean = {
-        runCatching { TrackrApp.instance.repository.isLiveNotificationEnabled.value }.getOrDefault(false)
+        LiveProgressNotificationHelper.readLiveNotificationEnabled()
     }
 
     internal fun resetLiveNotificationEnabledProvider() {
         liveNotificationEnabledProvider = {
-            runCatching { TrackrApp.instance.repository.isLiveNotificationEnabled.value }.getOrDefault(false)
+            LiveProgressNotificationHelper.readLiveNotificationEnabled()
         }
     }
 
@@ -216,6 +232,9 @@ object ArrivalAlertManager {
         if (!liveNotificationEnabledProvider()) return true
         return !liveUpdateActiveChecker(context)
     }
+
+    private fun areNotificationsEnabled(context: Context): Boolean =
+        runCatching { NotificationManagerCompat.from(context).areNotificationsEnabled() }.getOrDefault(true)
 
     private fun cancelCounterpart(context: Context, notificationId: Int) {
         try {
@@ -238,34 +257,33 @@ object ArrivalAlertManager {
     }
 
     private fun performWaveformVibration(context: Context, pattern: LongArray) {
-        try {
-            val vibrator = getVibrator(context)
-            if (vibrator != null && vibrator.hasVibrator()) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createWaveform(pattern, -1))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(pattern, -1)
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to perform waveform vibration", e)
-        }
+        vibrateAsNotification(context, VibrationEffect.createWaveform(pattern, -1))
     }
 
     private fun performOneShotVibration(context: Context, durationMs: Long) {
+        vibrateAsNotification(context, VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
+    }
+
+    /**
+     * 以“通知”用途振动：系统会按静音 / 勿扰 / 通知振动设置决定是否真正振动，
+     * 不会在用户静音时强行振动
+     */
+    private fun vibrateAsNotification(context: Context, effect: VibrationEffect) {
         try {
             val vibrator = getVibrator(context)
-            if (vibrator != null && vibrator.hasVibrator()) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(VibrationEffect.createOneShot(durationMs, VibrationEffect.DEFAULT_AMPLITUDE))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator.vibrate(durationMs)
-                }
+            if (vibrator == null || !vibrator.hasVibrator()) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                vibrator.vibrate(effect, VibrationAttributes.createForUsage(VibrationAttributes.USAGE_NOTIFICATION))
+            } else {
+                val audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(effect, audioAttributes)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to perform one shot vibration", e)
+            Log.w(TAG, "Failed to perform notification vibration", e)
         }
     }
 
