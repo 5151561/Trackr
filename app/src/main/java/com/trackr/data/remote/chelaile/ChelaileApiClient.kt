@@ -217,10 +217,49 @@ class ChelaileApiClient(httpClient: OkHttpClient) : BaseTransitApiClient(httpCli
         }
     }
 
+    /** 逆地理结果：[cityName] 为清洗后的地级市名，[rawDistrict] 为未清洗的区县名（如 "北流市"、"玉州区"） */
+    private data class ReverseGeocodeResult(val cityName: String?, val rawDistrict: String?)
+
+    private data class ReverseGeocodeCacheEntry(
+        val lat: Double,
+        val lng: Double,
+        val atMillis: Long,
+        val result: ReverseGeocodeResult?
+    )
+
+    @Volatile
+    private var lastReverseGeocode: ReverseGeocodeCacheEntry? = null
+
     /**
      * 根据 WGS-84 经纬度逆地理反查所在城市名
      */
-    suspend fun reverseGeocodeCityName(wgsLat: Double, wgsLng: Double): String? = withContext(Dispatchers.IO) {
+    suspend fun reverseGeocodeCityName(wgsLat: Double, wgsLng: Double): String? =
+        reverseGeocode(wgsLat, wgsLng)?.cityName
+
+    /**
+     * 根据 WGS-84 经纬度逆地理反查所在区县名（未清洗，保留 "县"/"市"/"区" 后缀以便调用方判断级别）
+     */
+    suspend fun reverseGeocodeDistrictName(wgsLat: Double, wgsLng: Double): String? =
+        reverseGeocode(wgsLat, wgsLng)?.rawDistrict
+
+    /**
+     * 同一坐标 30 秒内复用上次结果，避免先查区县、再查城市时重复请求
+     */
+    private suspend fun reverseGeocode(wgsLat: Double, wgsLng: Double): ReverseGeocodeResult? {
+        val now = System.currentTimeMillis()
+        lastReverseGeocode?.let { cached ->
+            if (cached.lat == wgsLat && cached.lng == wgsLng && now - cached.atMillis < 30_000L) {
+                return cached.result
+            }
+        }
+        val result = fetchReverseGeocode(wgsLat, wgsLng)
+        if (result != null) {
+            lastReverseGeocode = ReverseGeocodeCacheEntry(wgsLat, wgsLng, now, result)
+        }
+        return result
+    }
+
+    private suspend fun fetchReverseGeocode(wgsLat: Double, wgsLng: Double): ReverseGeocodeResult? = withContext(Dispatchers.IO) {
         try {
             val params = LinkedHashMap(DEFAULT_PARAMS).apply {
                 put("lat", wgsLat.toString())
@@ -241,7 +280,15 @@ class ChelaileApiClient(httpClient: OkHttpClient) : BaseTransitApiClient(httpCli
             val addressComponent = regeocode?.optJSONObject("addressComponent")
 
             var rawCity: String? = null
+            var rawDistrict: String? = null
             if (addressComponent != null) {
+                val districtOpt = addressComponent.opt("district")
+                if (districtOpt is String && districtOpt.isNotBlank() && districtOpt != "[]") {
+                    rawDistrict = districtOpt.trim()
+                } else if (districtOpt is JSONArray && districtOpt.length() > 0) {
+                    rawDistrict = districtOpt.optString(0).trim().takeIf { it.isNotBlank() && it != "[]" }
+                }
+
                 val cityOpt = addressComponent.opt("city")
                 if (cityOpt is String && cityOpt.isNotBlank() && cityOpt != "[]") {
                     rawCity = cityOpt
@@ -266,12 +313,11 @@ class ChelaileApiClient(httpClient: OkHttpClient) : BaseTransitApiClient(httpCli
                     .ifBlank { data.optString("city_name") }
             }
 
-            if (rawCity.isNullOrBlank()) {
+            val cleaned = rawCity?.let { ProvinceCityCatalog.cleanCityName(it) }?.takeIf { it.isNotBlank() }
+            if (cleaned == null && rawDistrict == null) {
                 return@withContext null
             }
-
-            val cleaned = ProvinceCityCatalog.cleanCityName(rawCity)
-            cleaned.takeIf { it.isNotBlank() }
+            ReverseGeocodeResult(cityName = cleaned, rawDistrict = rawDistrict)
         } catch (_: Exception) {
             null
         }

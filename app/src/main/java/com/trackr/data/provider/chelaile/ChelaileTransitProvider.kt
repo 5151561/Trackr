@@ -52,6 +52,10 @@ class ChelaileTransitProvider(
         return chelaileClient.reverseGeocodeCityName(wgsLat, wgsLng)
     }
 
+    override suspend fun resolveDistrictByLocation(wgsLat: Double, wgsLng: Double): String? {
+        return chelaileClient.reverseGeocodeDistrictName(wgsLat, wgsLng)
+    }
+
     override suspend fun search(
         city: TransitCity,
         keyword: String,

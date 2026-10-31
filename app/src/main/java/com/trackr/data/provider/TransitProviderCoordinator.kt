@@ -137,6 +137,27 @@ class TransitProviderCoordinator(
     }
 
     /**
+     * 逆地理区县：按数据源优先级依次查询，返回第一个非空的区县名（未清洗）
+     */
+    suspend fun resolveDistrictByLocation(
+        wgsLat: Double,
+        wgsLng: Double,
+        priority: AggregatedSourcePriority = AggregatedSourcePriority.CHELAILE_FIRST
+    ): String? {
+        val orderedProviders = priority.sourceOrder.mapNotNull { providers[it] } +
+                providers.values.filter { it.sourceType !in priority.sourceOrder }
+        for (provider in orderedProviders) {
+            if (provider.supportsLocationRadar()) {
+                val resolved = runCatching { provider.resolveDistrictByLocation(wgsLat, wgsLng) }.getOrNull()
+                if (!resolved.isNullOrBlank()) {
+                    return resolved
+                }
+            }
+        }
+        return null
+    }
+
+    /**
      * 获取周边站点：根据 EngineMode 单源路由至支持位置雷达能力的 Provider
      */
     suspend fun getNearbyStops(

@@ -231,22 +231,36 @@ class TransitRepository(
 
     override suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): Result<TransitCity?> = runCatching {
         withContext(Dispatchers.IO) {
-            // 1) 优先尝试雷达 Provider GPS 逆地理服务
-            var resolvedName: String? = coordinator.resolveCityByLocation(wgsLat, wgsLng, _aggregatedPriority.value)
+            val priority = _aggregatedPriority.value
+
+            // 1) 优先尝试雷达 Provider GPS 逆地理服务（地级市 + 区县）
+            var resolvedName: String? = coordinator.resolveCityByLocation(wgsLat, wgsLng, priority)
+            var rawDistrict: String? = coordinator.resolveDistrictByLocation(wgsLat, wgsLng, priority)
 
             // 2) 若为空，尝试 Android 系统原生 Geocoder
             if (resolvedName.isNullOrBlank()) {
-                resolvedName = try {
+                try {
                     if (android.location.Geocoder.isPresent()) {
                         @Suppress("DEPRECATION")
                         android.location.Geocoder(context, java.util.Locale.CHINA)
                             .getFromLocation(wgsLat, wgsLng, 1)
                             ?.firstOrNull()
-                            ?.let { it.locality ?: it.subAdminArea ?: it.adminArea }
-                    } else null
+                            ?.let { address ->
+                                resolvedName = address.locality ?: address.subAdminArea ?: address.adminArea
+                                if (rawDistrict.isNullOrBlank()) rawDistrict = address.subLocality
+                            }
+                    }
                 } catch (_: Exception) {
-                    null
                 }
+            }
+
+            val supportedCities = getSupportedCities().getOrDefault(emptyList())
+
+            // 2.5) 定位在县 / 县级市时，优先匹配支持列表里的同名县城（Issue #6）
+            matchCountyLevelCity(rawDistrict, resolvedName, supportedCities)?.let { county ->
+                return@withContext county.copy(
+                    province = county.province.ifBlank { ProvinceCityCatalog.inferProvince(county.cityName) }
+                )
             }
 
             // 3) 若仍为空，使用内置离线核心城市 Haversine 距离（80km 以内）兜底
@@ -254,12 +268,12 @@ class TransitRepository(
                 resolvedName = ProvinceCityCatalog.findNearestCityName(wgsLat, wgsLng)
             }
 
-            if (resolvedName.isNullOrBlank()) {
+            val cityName = resolvedName
+            if (cityName.isNullOrBlank()) {
                 return@withContext null
             }
 
-            val cleanTarget = ProvinceCityCatalog.cleanCityName(resolvedName)
-            val supportedCities = getSupportedCities().getOrDefault(emptyList())
+            val cleanTarget = ProvinceCityCatalog.cleanCityName(cityName)
 
             // 4) 在支持的城市列表中匹配（无后缀精准与包含匹配）
             val matched = supportedCities.firstOrNull { city ->
@@ -517,5 +531,43 @@ class TransitRepository(
 
     companion object {
         const val MAX_SEARCH_HISTORY = 20
+    }
+}
+
+/**
+ * 把逆地理得到的区县名匹配为支持列表里的县城（Issue #6）。
+ *
+ * - 只认 "县"/"市"/"旗" 结尾的县级单位；"区" 是地级市的市辖区，交给地级市匹配，
+ *   避免北京 "朝阳区" 被认成辽宁 "朝阳"。
+ * - 清洗后名字必须完全相同，不用包含匹配。
+ * - 能推断出省份时，县城所在省须与定位地级市所在省一致。
+ */
+internal fun matchCountyLevelCity(
+    rawDistrict: String?,
+    prefectureName: String?,
+    supportedCities: List<TransitCity>
+): TransitCity? {
+    val district = rawDistrict?.trim().orEmpty()
+    if (district.isBlank()) return null
+    if (!(district.endsWith("县") || district.endsWith("市") || district.endsWith("旗"))) return null
+
+    val cleanDistrict = ProvinceCityCatalog.cleanCityName(district)
+    if (cleanDistrict.isBlank()) return null
+    if (!prefectureName.isNullOrBlank() && ProvinceCityCatalog.cleanCityName(prefectureName) == cleanDistrict) {
+        return null
+    }
+
+    val expectedProvince = prefectureName
+        ?.takeIf { it.isNotBlank() }
+        ?.let { ProvinceCityCatalog.cleanCityName(ProvinceCityCatalog.inferProvince(it)) }
+        ?.takeIf { it.isNotBlank() && it != "其他" }
+
+    return supportedCities.firstOrNull { city ->
+        if (ProvinceCityCatalog.cleanCityName(city.cityName) != cleanDistrict) return@firstOrNull false
+        if (expectedProvince == null) return@firstOrNull true
+        val cityProvince = ProvinceCityCatalog.cleanCityName(
+            city.province.ifBlank { ProvinceCityCatalog.inferProvince(city.cityName) }
+        )
+        cityProvince.isBlank() || cityProvince == "其他" || cityProvince == expectedProvince
     }
 }

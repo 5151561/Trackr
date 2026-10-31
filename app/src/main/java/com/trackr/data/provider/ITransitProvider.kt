@@ -22,6 +22,8 @@ interface ITransitProvider {
 
     suspend fun getSupportedCities(): List<TransitCity>
     suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): String?
+    /** 逆地理区县名（未清洗，如 "北流市"、"玉州区"）；不支持的数据源返回 null */
+    suspend fun resolveDistrictByLocation(wgsLat: Double, wgsLng: Double): String? = null
     suspend fun search(
         city: TransitCity,
         keyword: String,
