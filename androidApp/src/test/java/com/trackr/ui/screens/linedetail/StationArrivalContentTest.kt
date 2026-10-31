@@ -10,7 +10,7 @@ import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.LineOperatingState
 import com.trackr.domain.model.LiveBus
 import com.trackr.ui.screens.linedetail.components.StationArrivalContent
-import com.trackr.ui.theme.TrackrTheme
+import com.trackr.core.designsystem.theme.TrackrTheme
 import kotlinx.datetime.LocalTime
 import org.junit.Rule
 import org.junit.Test

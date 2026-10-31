@@ -1,5 +1,5 @@
 pluginManagement {
-    // 约定插件：trackr.android.application / trackr.android.library / trackr.kmp.library / trackr.kmp.compose / trackr.kmp.feature
+    // 约定插件：trackr.android.application / trackr.kmp.library / trackr.kmp.compose / trackr.kmp.feature
     includeBuild("build-logic")
     repositories {
         google()

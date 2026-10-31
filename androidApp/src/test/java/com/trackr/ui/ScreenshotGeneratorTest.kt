@@ -37,7 +37,7 @@ import com.trackr.ui.screens.more.MoreViewModel
 import com.trackr.ui.screens.search.SearchScreen
 import com.trackr.ui.screens.stopdetail.StopDetailScreen
 import com.trackr.ui.screens.stopdetail.StopDetailViewModel
-import com.trackr.ui.theme.TrackrTheme
+import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.util.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import org.junit.Before

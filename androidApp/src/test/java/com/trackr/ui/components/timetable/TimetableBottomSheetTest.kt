@@ -8,7 +8,7 @@ import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.LineTimetable
 import com.trackr.domain.model.TimetableSegment
-import com.trackr.ui.theme.TrackrTheme
+import com.trackr.core.designsystem.theme.TrackrTheme
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test

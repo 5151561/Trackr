@@ -10,7 +10,7 @@ import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.LiveBus
 import com.trackr.ui.screens.linedetail.components.BusFollowContent
-import com.trackr.ui.theme.TrackrTheme
+import com.trackr.core.designsystem.theme.TrackrTheme
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test

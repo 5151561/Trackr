@@ -56,8 +56,8 @@ import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.sanitizePlateOrFleetNo
 import com.trackr.ui.components.common.arrivalToneColor
-import com.trackr.ui.theme.busColors
-import com.trackr.ui.theme.extendedColors
+import com.trackr.core.designsystem.theme.busColors
+import com.trackr.core.designsystem.theme.extendedColors
 import kotlinx.datetime.LocalTime
 
 private val ALERT_THRESHOLD_OPTIONS = listOf(1, 2, 3)

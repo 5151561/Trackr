@@ -6,7 +6,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.LiveBus
-import com.trackr.ui.theme.TrackrTheme
+import com.trackr.core.designsystem.theme.TrackrTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Rule
@@ -121,7 +121,7 @@ class ExpressiveRouteRailUiTest {
 
     @Test
     fun testGetRouteSegmentColor_consistentLogic() {
-        val lightColors = com.trackr.ui.theme.LightBusSemanticColors
+        val lightColors = com.trackr.core.designsystem.theme.LightBusSemanticColors
 
         // 1. 首站或全景模式 (currentSelectedOrder <= 1)：所有路段均为活跃绿
         assertEquals(

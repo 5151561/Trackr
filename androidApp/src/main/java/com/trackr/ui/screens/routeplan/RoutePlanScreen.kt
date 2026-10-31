@@ -152,7 +152,7 @@ import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.ProvinceCityCatalog
 import com.trackr.domain.model.TransitGroup
 import com.trackr.ui.screens.favoritesgroup.FavoritesGroupViewModel
-import com.trackr.ui.theme.extendedColors
+import com.trackr.core.designsystem.theme.extendedColors
 import com.trackr.util.CoordTransform
 import com.trackr.util.SignatureUtils
 import kotlinx.coroutines.delay

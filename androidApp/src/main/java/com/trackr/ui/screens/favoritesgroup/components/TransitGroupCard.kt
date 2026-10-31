@@ -62,7 +62,7 @@ import com.trackr.domain.model.GroupTrackingSessionState
 import com.trackr.domain.model.LegPhase
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitGroup
-import com.trackr.ui.theme.extendedColors
+import com.trackr.core.designsystem.theme.extendedColors
 
 /**
  * 收藏页路线卡片（单程直达 / 多程换乘）。

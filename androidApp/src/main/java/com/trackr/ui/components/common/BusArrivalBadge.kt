@@ -17,7 +17,7 @@ import androidx.compose.ui.unit.dp
 import com.trackr.domain.arrival.ArrivalText
 import com.trackr.domain.arrival.ArrivalTone
 import com.trackr.domain.model.LiveBus
-import com.trackr.ui.theme.extendedColors
+import com.trackr.core.designsystem.theme.extendedColors
 
 /**
  * 临近车辆类型别名（兼容性定义）

@@ -86,7 +86,7 @@ import com.trackr.ui.screens.routeplan.RoutePlanScreen
 import com.trackr.ui.screens.search.SearchScreen
 import com.trackr.ui.screens.stopdetail.StopDetailScreen
 import com.trackr.ui.screens.stopdetail.StopDetailViewModel
-import com.trackr.ui.theme.TrackrTheme
+import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.util.TransitCodeHelper
 import org.koin.compose.viewmodel.koinViewModel
 import org.koin.core.parameter.parametersOf

@@ -30,7 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.LineTimetable
-import com.trackr.ui.components.common.TrackrBottomSheet
+import com.trackr.core.designsystem.component.TrackrBottomSheet
 
 /**
  * 发车时刻表 BottomSheet 弹窗（基于 TrackrBottomSheet 统一规范封装）

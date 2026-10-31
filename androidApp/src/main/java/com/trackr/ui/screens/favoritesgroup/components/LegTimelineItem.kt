@@ -49,7 +49,7 @@ import androidx.compose.ui.unit.dp
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.CandidateLineRealtimeInfo
 import com.trackr.domain.model.TransitLeg
-import com.trackr.ui.theme.extendedColors
+import com.trackr.core.designsystem.theme.extendedColors
 
 /** 时间轴上一程的状态 */
 enum class LegTimelineState {

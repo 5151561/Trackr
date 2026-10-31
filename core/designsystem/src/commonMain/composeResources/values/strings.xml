@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 设计系统的通用文案。页面文案在第 28 步进各 feature 的 composeResources。 -->
+<resources>
+    <string name="action_retry">重试</string>
+    <string name="action_close">关闭</string>
+    <string name="action_back">返回</string>
+    <string name="state_loading">加载中…</string>
+    <string name="data_source_chelaile">车来了</string>
+    <string name="data_source_mygolbs">掌上公交</string>
+</resources>

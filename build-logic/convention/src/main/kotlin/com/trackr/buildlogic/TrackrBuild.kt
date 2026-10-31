@@ -30,7 +30,7 @@ internal fun Project.configureJavaToolchain() {
     }
 }
 
-/** `com.android.application` 与 `com.android.library` 共用的配置。 */
+/** `com.android.application`（`:androidApp`）的通用配置；KMP 库的 Android 目标在 `KmpLibraryConventionPlugin` 里配。 */
 internal fun Project.configureAndroidCommon(android: CommonExtension) {
     android.compileSdk = TrackrVersions.COMPILE_SDK
     android.defaultConfig.minSdk = TrackrVersions.MIN_SDK

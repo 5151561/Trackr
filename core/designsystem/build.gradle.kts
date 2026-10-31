@@ -1,45 +1,42 @@
-// 约定插件 trackr.android.library（build-logic/convention）统一配置：
-// compileSdk 37 / minSdk 26、JDK 21 工具链、Java 17 字节码、单元测试（含 Android 资源、2 GB 堆）、Compose 编译器。
-// 第 5 步改成 trackr.kmp.library + trackr.kmp.compose。
+// 设计系统：KMP + Compose Multiplatform（Android + iosArm64 + iosSimulatorArm64）。
+// 约定插件 trackr.kmp.library（build-logic/convention）统一配置 compileSdk / minSdk、JDK 工具链、
+// Android 主机测试；trackr.kmp.compose 应用 CMP 与 Compose 编译器插件（稳定性配置与 reports）。
 plugins {
-    alias(libs.plugins.trackr.android.library)
-    alias(libs.plugins.kotlin.plugin.compose)
+    alias(libs.plugins.trackr.kmp.library)
+    alias(libs.plugins.trackr.kmp.compose)
 }
 
-android {
-    namespace = "com.trackr.core.designsystem"
-
-    defaultConfig {
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        consumerProguardFiles("consumer-rules.pro")
+kotlin {
+    android {
+        namespace = "com.trackr.core.designsystem"
+        // Compose 资源（图标、通用文案）在 Android 上走 Android 资源 / assets 打进 APK。
+        androidResources.enable = true
     }
 
-    buildTypes {
-        release {
-            isMinifyEnabled = false
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+    sourceSets {
+        commonMain.dependencies {
+            implementation(libs.compose.mp.runtime)
+            implementation(libs.compose.mp.foundation)
+            implementation(libs.compose.mp.ui)
+            implementation(libs.compose.mp.material3)
+            implementation(libs.compose.mp.components.resources)
+            implementation(libs.compose.mp.ui.tooling.preview)
+        }
+
+        getByName("androidHostTest").dependencies {
+            implementation(libs.junit)
+            implementation(libs.kotlinx.coroutines.test)
+            implementation(libs.robolectric)
+            implementation(project.dependencies.platform(libs.androidx.compose.bom))
+            implementation(libs.androidx.compose.ui.test.junit4)
+            implementation(libs.androidx.compose.ui.test.manifest)
+            runtimeOnly("org.robolectric:android-all:14-robolectric-10818077")
         }
     }
 }
 
-dependencies {
-    implementation(platform(libs.androidx.compose.bom))
-    implementation(libs.androidx.compose.ui)
-    implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material.icons.core)
-    implementation(libs.androidx.compose.material.icons.extended)
-    implementation(libs.androidx.compose.ui.tooling.preview)
-    implementation(libs.androidx.graphics.shapes)
-
-    testImplementation(libs.junit)
-    testImplementation(libs.kotlinx.coroutines.test)
-    testImplementation(libs.robolectric)
-    testImplementation(libs.androidx.compose.ui.test.junit4)
-    testRuntimeOnly("org.robolectric:android-all:14-robolectric-10818077")
-
-    debugImplementation(libs.androidx.compose.ui.tooling)
-    debugImplementation(libs.androidx.compose.ui.test.manifest)
+compose.resources {
+    // 生成的 Res 类：com.trackr.core.designsystem.resources.Res，其他模块也能用这些图标和文案。
+    publicResClass = true
+    packageOfResClass = "com.trackr.core.designsystem.resources"
 }

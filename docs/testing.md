@@ -35,11 +35,11 @@
 
 ## 3. 测试目录与套件清单
 
-`./gradlew test` 共跑 55 个测试类：`:androidApp` 54 个，`:core:designsystem` 1 个。
+`./gradlew test` 共跑 55 个测试类：`:androidApp` 53 个，`:core:designsystem` 2 个。KMP 模块的 `test` 由约定插件 `trackr.kmp.library` 补上，只跑 Android 主机测试（`testAndroidHostTest`）；iOS 编译检查另跑 `./gradlew :core:designsystem:compileKotlinIosSimulatorArm64`（需要 Xcode）。
 
 Koin 由 `TrackrApp.onCreate` 启动，Robolectric 用例里每个用例都会重新启动一次。`TransferAutoSwitchManager`、`ArrivalAlertManager`、`LiveProgressNotificationHelper` 这三个旧 object 转发到 Koin 里的实例，只能在 Robolectric（带 `TrackrApp`）用例里调用；纯 JVM 用例里调用会因为 Koin 没启动而抛 `IllegalStateException`。`ReminderScheduler`、`AmapKeyStore` 转发到伴生对象，不受影响。
 
-`:androidApp` 的测试位于 `androidApp/src/test/java/com/trackr/`，下表按子目录列出全部测试类（辅助类 `FakeTransitRepository`、`FakeScheduledReminderRepository`、`MainDispatcherRule` 不含测试）。`:core:designsystem` 的 `RouteRailDrawUtilsTest` 位于 `core/designsystem/src/test/java/com/trackr/core/designsystem/rail/`，覆盖走向条绘制工具（Robolectric Compose UI）。
+`:androidApp` 的测试位于 `androidApp/src/test/java/com/trackr/`，下表按子目录列出全部测试类（辅助类 `FakeTransitRepository`、`FakeScheduledReminderRepository`、`MainDispatcherRule` 不含测试）。`:core:designsystem` 的测试位于 `core/designsystem/src/androidHostTest/kotlin/com/trackr/core/designsystem/`：`rail/RouteRailDrawUtilsTest`（走向条绘制工具常量与绘制不崩溃）、`theme/TrackrThemeTest`（v3 蓝浅 / 深两套且不用动态取色、`TrackrColors` 与旧名别名、`eta` / `item` 字号、圆角与尺寸、Compose 资源在 Android 上能读到），都是 Robolectric Compose UI。单跑：`./gradlew :core:designsystem:testAndroidHostTest`。
 
 | 目录 | 测试类 | 覆盖范围 | 运行方式 |
 | :--- | :--- | :--- | :--- |
@@ -75,7 +75,6 @@ Koin 由 `TrackrApp.onCreate` 启动，Robolectric 用例里每个用例都会�
 | `ui/components` | `BusArrivalBadgeTest` | 到站状态徽标文字与高亮（走 `ArrivalText`） | 本地 JVM |
 |  | `ExpressiveRouteRailUiTest` | 经典横向与纵向走向条渲染、逐字竖排与点击事件响应 | Robolectric Compose UI |
 | `ui/components/citypicker` | `CityPickerItemRowTest` | 城市选择列表项渲染与点击 | Robolectric Compose UI |
-| `ui/components/rail` | `RouteRailDrawUtilsTest` | 走向条绘制工具常量与绘制不崩溃 | Robolectric Compose UI |
 | `ui/components/timetable` | `TimetableBottomSheetTest` | 时刻表底部弹窗渲染 | Robolectric Compose UI |
 | `ui/navigation` | `NavigationFlowTest` | 导航栈后退拦截、深度链接跳转与栈顶去重 | 本地 JVM |
 | `ui/screens/favoritesgroup` | `FavoritesGroupNavigationEventTest` | 分组编辑弹窗未保存时的返回确认 | Robolectric Compose UI |

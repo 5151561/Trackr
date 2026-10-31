@@ -36,7 +36,7 @@ import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.sanitizePlateOrFleetNo
 import com.trackr.ui.components.common.BusArrivalBadge
-import com.trackr.ui.theme.busColors
+import com.trackr.core.designsystem.theme.busColors
 
 /**
  * 状态 2：车辆列表内容 (`BUS_LIST`)

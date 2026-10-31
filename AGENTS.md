@@ -29,8 +29,7 @@
 ## 工程结构
 
 - `:androidApp`（目录 `androidApp/`）：Android 应用，applicationId `com.github.u5151561.trackr`，包名 `com.trackr`。
-- `:core:designsystem`（目录 `core/designsystem/`）：设计系统。
+- `:core:designsystem`（目录 `core/designsystem/`）：设计系统，KMP + Compose Multiplatform。代码在 `src/commonMain`，图标和通用文案在 `src/commonMain/composeResources`（生成类 `com.trackr.core.designsystem.resources.Res`），测试在 `src/androidHostTest`。入口 `TrackrTheme(uiMode)`；页面读 `MaterialTheme.typography.*`、`TrackrTheme.colors.*`、`TrackrTheme.dimens.*`。
 - `build-logic/convention`：约定插件，统一 SDK、JDK、单元测试与 Compose 编译器配置。
   - `trackr.android.application`：`:androidApp` 用。
-  - `trackr.android.library`：`:core:designsystem` 用（第 5 步改成 KMP 后删除）。
-  - `trackr.kmp.library`、`trackr.kmp.compose`、`trackr.kmp.feature`：KMP 模块用（Android + iosArm64 + iosSimulatorArm64），现在还没有模块应用。
+  - `trackr.kmp.library` + `trackr.kmp.compose`：KMP 模块用（Android + iosArm64 + iosSimulatorArm64），`:core:designsystem` 已应用；`trackr.kmp.feature` 留给 `:feature:*`。

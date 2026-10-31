@@ -41,7 +41,7 @@ import com.trackr.domain.model.sanitizePlateOrFleetNo
 import com.trackr.ui.components.StationNode
 import com.trackr.ui.components.common.BusArrivalBadge
 import com.trackr.ui.components.drawVerticalTrackLine
-import com.trackr.ui.theme.busColors
+import com.trackr.core.designsystem.theme.busColors
 
 /**
  * 状态 3：单车跟随行程轴内容 (`BUS_FOLLOW`)

@@ -43,6 +43,15 @@ class KmpLibraryConventionPlugin : Plugin<Project> {
             tasks.withType<Test>().configureEach {
                 maxHeapSize = TrackrVersions.TEST_MAX_HEAP
             }
+
+            // KMP 模块没有叫 `test` 的任务，根目录 `./gradlew test` 会把它漏掉。
+            // 补一个只跑 Android 主机测试的 `test`，让 `./gradlew test` 仍是「全部 JVM 单元测试」；
+            // iOS 测试另跑 `iosSimulatorArm64Test`（需要 Xcode）。
+            tasks.register("test") {
+                group = "verification"
+                description = "Runs the Android host (JVM) unit tests of this KMP module."
+                dependsOn("testAndroidHostTest")
+            }
         }
     }
 }
