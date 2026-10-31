@@ -1,12 +1,14 @@
 package com.trackr.ui.screens.stopdetail
 
 import com.trackr.data.repository.FakeTransitRepository
+import com.trackr.data.repository.ITransitRepository
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.NearbyStop
 import com.trackr.domain.model.NearbyStopLineStatus
 import com.trackr.domain.model.TransitCity
 import com.trackr.util.MainDispatcherRule
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -16,6 +18,32 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+
+/**
+ * 记录站点请求次数、可挂起请求的仓库包装（其余行为委托给 FakeTransitRepository）
+ */
+private class CountingStopRepository(
+    private val delegate: FakeTransitRepository
+) : ITransitRepository by delegate {
+    val stopDetailPhysicalIds = mutableListOf<String?>()
+    var gate: CompletableDeferred<Unit>? = null
+
+    override suspend fun getStopDetail(
+        city: TransitCity,
+        stopId: String?,
+        stopName: String?,
+        physicalStId: String?,
+        namesakeStId: String?,
+        stationLat: Double?,
+        stationLng: Double?,
+        userLat: Double?,
+        userLng: Double?
+    ): Result<List<NearbyStop>> {
+        stopDetailPhysicalIds += physicalStId
+        gate?.await()
+        return delegate.getStopDetail(city, stopId, stopName, physicalStId, namesakeStId, stationLat, stationLng, userLat, userLng)
+    }
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class StopDetailViewModelTest {
@@ -161,6 +189,97 @@ class StopDetailViewModelTest {
         assertTrue(viewModel.isPollingActive)
 
         viewModel.pausePolling()
+        assertFalse(viewModel.isPollingActive)
+    }
+
+    @Test
+    fun testSelectStopIndex_changedPlatform_refreshesWithThatPlatform() = runTest {
+        val repo = CountingStopRepository(fakeRepository)
+        val viewModel = StopDetailViewModel(
+            cityId = "034",
+            stopId = "stop_001",
+            initialStopName = "人民广场",
+            repository = repo,
+            enableAutoPolling = false
+        )
+        testScheduler.runCurrent()
+        assertEquals(1, repo.stopDetailPhysicalIds.size)
+
+        viewModel.selectStopIndex(1)
+        testScheduler.runCurrent()
+        assertEquals(listOf<String?>(null, "phy_02"), repo.stopDetailPhysicalIds)
+        assertEquals(1, viewModel.uiState.value.selectedStopIndex)
+
+        // 选中同一站台不重复请求
+        viewModel.selectStopIndex(1)
+        testScheduler.runCurrent()
+        assertEquals(2, repo.stopDetailPhysicalIds.size)
+    }
+
+    @Test
+    fun testPolling_skipsWhenPreviousLoadStillInFlight() = runTest {
+        val repo = CountingStopRepository(fakeRepository)
+        val gate = CompletableDeferred<Unit>()
+        repo.gate = gate
+        val viewModel = StopDetailViewModel(
+            cityId = "034",
+            stopId = "stop_001",
+            initialStopName = "人民广场",
+            repository = repo,
+            enableAutoPolling = true
+        )
+        testScheduler.runCurrent()
+        assertTrue(viewModel.isLoadInFlight)
+
+        testScheduler.advanceTimeBy(10_000L)
+        testScheduler.runCurrent()
+        assertEquals(1, repo.stopDetailPhysicalIds.size)
+
+        gate.complete(Unit)
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(10_000L)
+        testScheduler.runCurrent()
+        assertEquals(2, repo.stopDetailPhysicalIds.size)
+
+        viewModel.pausePolling()
+    }
+
+    @Test
+    fun testScreenResume_refreshesOnlyWhenStale() = runTest {
+        var now = 0L
+        val repo = CountingStopRepository(fakeRepository)
+        val viewModel = StopDetailViewModel(
+            cityId = "034",
+            stopId = "stop_001",
+            initialStopName = "人民广场",
+            repository = repo,
+            enableAutoPolling = true,
+            clockMillis = { now }
+        )
+        testScheduler.runCurrent()
+
+        viewModel.onScreenResumed()
+        testScheduler.runCurrent()
+        assertEquals(1, repo.stopDetailPhysicalIds.size)
+
+        viewModel.onScreenPaused()
+        assertFalse(viewModel.isPollingActive)
+
+        now += 11_000L
+        viewModel.onScreenResumed()
+        testScheduler.runCurrent()
+        assertEquals(2, repo.stopDetailPhysicalIds.size)
+        assertTrue(viewModel.isPollingActive)
+
+        viewModel.onScreenPaused()
+    }
+
+    @Test
+    fun testScreenResume_noopWhenAutoPollingDisabled() = runTest {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.onScreenResumed()
         assertFalse(viewModel.isPollingActive)
     }
 }

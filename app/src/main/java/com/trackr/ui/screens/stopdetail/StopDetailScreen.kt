@@ -61,6 +61,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trackr.domain.math.RouteProjectionMath
@@ -79,6 +80,12 @@ fun StopDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val currentStop = state.stops.getOrNull(state.selectedStopIndex)
+
+    // 只在页面处于前台（RESUMED）时轮询；回桌面、锁屏或被其他页面覆盖时停止
+    LifecycleResumeEffect(viewModel) {
+        viewModel.onScreenResumed()
+        onPauseOrDispose { viewModel.onScreenPaused() }
+    }
 
     Scaffold(
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -134,7 +141,7 @@ fun StopDetailScreen(
                     },
                     actions = {
                         // 刷新倒计时与手动刷新按钮
-                        IconButton(onClick = { viewModel.loadStopDetail() }) {
+                        IconButton(onClick = { viewModel.refreshNow() }) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Default.Refresh,

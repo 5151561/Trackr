@@ -55,6 +55,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.trackr.TrackrApp
 import com.trackr.domain.model.ScheduledReminder
@@ -98,6 +99,12 @@ fun LineDetailScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val repository = TrackrApp.instance.repository
+
+    // 只在页面处于前台（RESUMED）时轮询；回桌面、锁屏或被其他页面覆盖时停止
+    LifecycleResumeEffect(viewModel) {
+        viewModel.onScreenResumed()
+        onPauseOrDispose { viewModel.onScreenPaused() }
+    }
     val activeTracking by repository.activeTrackingSession.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val busColors = MaterialTheme.busColors

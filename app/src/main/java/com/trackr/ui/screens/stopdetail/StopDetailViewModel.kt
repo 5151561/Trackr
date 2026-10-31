@@ -12,12 +12,14 @@ import com.trackr.domain.model.NearbyStopLineStatus
 import com.trackr.domain.model.TransitCity
 import com.trackr.ui.util.CountdownPollingStrategy
 import com.trackr.ui.util.PollingCoordinator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 站点详情页 UI 状态
@@ -46,7 +48,9 @@ class StopDetailViewModel(
     private val stationLat: Double = 0.0,
     private val stationLng: Double = 0.0,
     private val repository: ITransitRepository = TrackrApp.instance.repository,
-    private val enableAutoPolling: Boolean = true
+    private val enableAutoPolling: Boolean = true,
+    /** 单调时钟（毫秒），用于判断恢复页面时数据是否过期；测试可注入 */
+    private val clockMillis: () -> Long = { System.nanoTime() / 1_000_000L }
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(
@@ -54,18 +58,32 @@ class StopDetailViewModel(
     )
     val uiState: StateFlow<StopDetailUiState> = _uiState.asStateFlow()
 
+    /** 进行中的站点请求数（含手动刷新、切换站台、轮询） */
+    private val activeLoads = AtomicInteger(0)
+
+    /** 最近一次发起刷新的时刻（[clockMillis]），null 表示尚未请求过 */
+    @Volatile
+    private var lastRefreshAtMillis: Long? = null
+
     internal val pollingCoordinator = PollingCoordinator(
         scope = viewModelScope,
         strategy = CountdownPollingStrategy(
-            intervalSeconds = 10,
+            intervalSeconds = POLL_INTERVAL_SECONDS,
             onTick = { remaining ->
                 _uiState.update { it.copy(refreshCountdownSeconds = remaining) }
             }
         ),
         initialEnabled = enableAutoPolling
     ) {
-        loadStopDetail(isInitial = false)
+        // 直接在轮询协程内挂起执行：暂停轮询时请求随之取消；上一轮未完成就跳过
+        if (activeLoads.get() == 0) {
+            fetchStopDetail(isInitial = false)
+        }
     }
+
+    /** 当前是否有站点请求在进行（测试用） */
+    internal val isLoadInFlight: Boolean
+        get() = activeLoads.get() > 0
 
     val isPollingActive: Boolean
         get() = pollingCoordinator.isPollingActive
@@ -87,6 +105,25 @@ class StopDetailViewModel(
      */
     fun loadStopDetail(isInitial: Boolean = false) {
         viewModelScope.launch {
+            fetchStopDetail(isInitial)
+        }
+    }
+
+    /**
+     * 手动立即刷新，并重置倒计时
+     */
+    fun refreshNow() {
+        pollingCoordinator.restartCountdown(POLL_INTERVAL_SECONDS)
+        loadStopDetail(isInitial = false)
+    }
+
+    /**
+     * 挂起执行一次站点详情请求并更新 UI 状态
+     */
+    private suspend fun fetchStopDetail(isInitial: Boolean) {
+        activeLoads.incrementAndGet()
+        lastRefreshAtMillis = clockMillis()
+        try {
             if (isInitial) {
                 _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             } else {
@@ -160,14 +197,24 @@ class StopDetailViewModel(
                     )
                 }
             }
+        } catch (ce: CancellationException) {
+            // 轮询暂停等取消场景：复位加载指示，不显示错误
+            _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
+            throw ce
+        } finally {
+            activeLoads.decrementAndGet()
         }
     }
 
     fun selectStopIndex(index: Int) {
         if (index in _uiState.value.stops.indices) {
+            val changed = index != _uiState.value.selectedStopIndex
             _uiState.update { it.copy(selectedStopIndex = index) }
             val targetStop = _uiState.value.stops[index]
-            if (targetStop.lines.isEmpty() || targetStop.lines.all { it.line.lineId.isBlank() }) {
+            val lacksLines = targetStop.lines.isEmpty() || targetStop.lines.all { it.line.lineId.isBlank() }
+            // 其他物理站台的数据来自缓存补全，切换后以该站台为主查询立即刷新一次，并重置倒计时
+            if (changed || lacksLines) {
+                pollingCoordinator.restartCountdown(POLL_INTERVAL_SECONDS)
                 loadStopDetail(isInitial = false)
             }
         }
@@ -204,6 +251,27 @@ class StopDetailViewModel(
     }
 
     /**
+     * 页面回到前台（Lifecycle RESUMED）：恢复轮询；若距上次刷新已超过一个周期，立即刷新一次。
+     * 测试或预览中 enableAutoPolling = false 时不做任何事。
+     */
+    fun onScreenResumed() {
+        if (!enableAutoPolling) return
+        pollingCoordinator.setActive(true)
+        val last = lastRefreshAtMillis ?: return
+        if (activeLoads.get() == 0 && clockMillis() - last >= POLL_INTERVAL_SECONDS * 1000L) {
+            pollingCoordinator.restartCountdown(POLL_INTERVAL_SECONDS)
+            loadStopDetail(isInitial = false)
+        }
+    }
+
+    /**
+     * 页面离开前台（Lifecycle PAUSED / 移出组合）：停止轮询，进行中的轮询请求随之取消。
+     */
+    fun onScreenPaused() {
+        pollingCoordinator.setActive(false)
+    }
+
+    /**
      * 暂停后台轮询，安全取消当前轮询 Job
      */
     fun pausePolling() {
@@ -220,5 +288,10 @@ class StopDetailViewModel(
     override fun onCleared() {
         super.onCleared()
         pausePolling()
+    }
+
+    companion object {
+        /** 自动轮询周期（秒） */
+        const val POLL_INTERVAL_SECONDS = 10
     }
 }

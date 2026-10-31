@@ -1,6 +1,7 @@
 package com.trackr.ui.screens.linedetail
 
 import com.trackr.data.repository.FakeTransitRepository
+import com.trackr.data.repository.ITransitRepository
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusStop
@@ -11,6 +12,7 @@ import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.ui.components.RouteRailLayoutMode
 import com.trackr.util.MainDispatcherRule
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -21,6 +23,32 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+
+/**
+ * 记录线路请求次数、可挂起请求的仓库包装（其余行为委托给 FakeTransitRepository）
+ */
+private class CountingLineRepository(
+    private val delegate: FakeTransitRepository
+) : ITransitRepository by delegate {
+    val lineDetailTargetOrders = mutableListOf<Int?>()
+    var gate: CompletableDeferred<Unit>? = null
+
+    override suspend fun getLineDetail(
+        city: TransitCity,
+        lineId: String,
+        targetOrder: Int?,
+        stationId: String?,
+        wgsLat: Double?,
+        wgsLng: Double?,
+        source: DataSourceType,
+        lineNameHint: String,
+        directionHint: Int
+    ): Result<BusLineDetail> {
+        lineDetailTargetOrders += targetOrder
+        gate?.await()
+        return delegate.getLineDetail(city, lineId, targetOrder, stationId, wgsLat, wgsLng, source, lineNameHint, directionHint)
+    }
+}
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LineDetailViewModelTest {
@@ -291,6 +319,131 @@ class LineDetailViewModelTest {
         assertTrue(viewModel.isPollingActive)
 
         viewModel.pausePolling()
+        assertFalse(viewModel.isPollingActive)
+    }
+
+    @Test
+    fun testInitialLoad_withTargetOrder_requestsOnce() = runTest {
+        val repo = CountingLineRepository(fakeRepository)
+        LineDetailViewModel(
+            cityId = "034",
+            initialLineId = "line_001",
+            initialTargetOrder = 2,
+            repository = repo,
+            enableAutoPolling = false
+        )
+        testScheduler.runCurrent()
+
+        assertEquals(listOf<Int?>(2), repo.lineDetailTargetOrders)
+    }
+
+    @Test
+    fun testInitialLoad_withoutTargetOrder_followsUpOnceForDefaultStop() = runTest {
+        val repo = CountingLineRepository(fakeRepository)
+        val viewModel = LineDetailViewModel(
+            cityId = "034",
+            initialLineId = "line_001",
+            repository = repo,
+            enableAutoPolling = false
+        )
+        testScheduler.runCurrent()
+
+        // 首车在第 2 站 → 默认候车站为第 3 站；只补一次精确请求
+        assertEquals(listOf<Int?>(null, 3), repo.lineDetailTargetOrders)
+        assertEquals(3, viewModel.uiState.value.selectedStop?.order)
+    }
+
+    @Test
+    fun testPolling_skipsWhenPreviousLoadStillInFlight() = runTest {
+        val repo = CountingLineRepository(fakeRepository)
+        val gate = CompletableDeferred<Unit>()
+        repo.gate = gate
+        val viewModel = LineDetailViewModel(
+            cityId = "034",
+            initialLineId = "line_001",
+            initialTargetOrder = 2,
+            repository = repo,
+            enableAutoPolling = true
+        )
+        testScheduler.runCurrent()
+        assertTrue(viewModel.isLoadInFlight)
+
+        // 10 秒到期时上一轮仍未返回 → 跳过
+        testScheduler.advanceTimeBy(10_000L)
+        testScheduler.runCurrent()
+        assertEquals(1, repo.lineDetailTargetOrders.size)
+
+        gate.complete(Unit)
+        testScheduler.runCurrent()
+        assertFalse(viewModel.isLoadInFlight)
+
+        // 下一周期正常请求
+        testScheduler.advanceTimeBy(10_000L)
+        testScheduler.runCurrent()
+        assertEquals(2, repo.lineDetailTargetOrders.size)
+
+        viewModel.pausePolling()
+    }
+
+    @Test
+    fun testSelectStop_resetsCountdown() = runTest {
+        val viewModel = LineDetailViewModel(
+            cityId = "034",
+            initialLineId = "line_001",
+            initialTargetOrder = 2,
+            repository = fakeRepository,
+            enableAutoPolling = true
+        )
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(5_000L)
+        testScheduler.runCurrent()
+        assertTrue(viewModel.uiState.value.refreshCountdownSeconds < 10)
+
+        viewModel.selectStop(stops[2])
+        assertEquals(10, viewModel.uiState.value.refreshCountdownSeconds)
+
+        viewModel.pausePolling()
+    }
+
+    @Test
+    fun testScreenResume_refreshesOnlyWhenStale() = runTest {
+        var now = 0L
+        val repo = CountingLineRepository(fakeRepository)
+        val viewModel = LineDetailViewModel(
+            cityId = "034",
+            initialLineId = "line_001",
+            initialTargetOrder = 2,
+            repository = repo,
+            enableAutoPolling = true,
+            clockMillis = { now }
+        )
+        testScheduler.runCurrent()
+        assertEquals(1, repo.lineDetailTargetOrders.size)
+
+        // 刚加载完就 resume：不额外请求
+        viewModel.onScreenResumed()
+        testScheduler.runCurrent()
+        assertEquals(1, repo.lineDetailTargetOrders.size)
+
+        viewModel.onScreenPaused()
+        assertFalse(viewModel.isPollingActive)
+
+        // 后台超过一个周期后回到前台：立即刷新一次并恢复轮询
+        now += 11_000L
+        viewModel.onScreenResumed()
+        testScheduler.runCurrent()
+        assertEquals(2, repo.lineDetailTargetOrders.size)
+        assertTrue(viewModel.isPollingActive)
+
+        viewModel.onScreenPaused()
+    }
+
+    @Test
+    fun testScreenResume_noopWhenAutoPollingDisabled() = runTest {
+        val viewModel = createViewModel(targetOrder = 2)
+        testScheduler.runCurrent()
+
+        viewModel.onScreenResumed()
         assertFalse(viewModel.isPollingActive)
     }
 }

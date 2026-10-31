@@ -17,6 +17,7 @@ import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.ui.components.RouteRailLayoutMode
 import com.trackr.ui.util.CountdownPollingStrategy
 import com.trackr.ui.util.PollingCoordinator
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +27,7 @@ import kotlinx.coroutines.launch
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 详情页核心三态卡片面板枚举
@@ -75,7 +77,9 @@ class LineDetailViewModel(
     private val enableAutoPolling: Boolean = true,
     private val nowHHmm: () -> String = {
         ZonedDateTime.now(ZoneId.of("Asia/Shanghai")).format(DateTimeFormatter.ofPattern("HH:mm"))
-    }
+    },
+    /** 单调时钟（毫秒），用于判断恢复页面时数据是否过期；测试可注入 */
+    private val clockMillis: () -> Long = { System.nanoTime() / 1_000_000L }
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LineDetailUiState())
@@ -84,18 +88,32 @@ class LineDetailViewModel(
     private var currentLineId: String = initialLineId
     private var currentSource: DataSourceType = initialSource
 
+    /** 进行中的线路请求数（含手动刷新、选站、轮询） */
+    private val activeLoads = AtomicInteger(0)
+
+    /** 最近一次发起刷新的时刻（[clockMillis]），null 表示尚未请求过 */
+    @Volatile
+    private var lastRefreshAtMillis: Long? = null
+
     internal val pollingCoordinator = PollingCoordinator(
         scope = viewModelScope,
         strategy = CountdownPollingStrategy(
-            intervalSeconds = 10,
+            intervalSeconds = POLL_INTERVAL_SECONDS,
             onTick = { remaining ->
                 _uiState.update { it.copy(refreshCountdownSeconds = remaining) }
             }
         ),
         initialEnabled = enableAutoPolling
     ) {
-        loadLineDetail(isInitial = false)
+        // 直接在轮询协程内挂起执行：暂停轮询时请求随之取消；上一轮未完成就跳过
+        if (activeLoads.get() == 0) {
+            fetchLineDetail(isInitial = false)
+        }
     }
+
+    /** 当前是否有线路请求在进行（测试用） */
+    internal val isLoadInFlight: Boolean
+        get() = activeLoads.get() > 0
 
     val isPollingActive: Boolean
         get() = pollingCoordinator.isPollingActive
@@ -120,10 +138,21 @@ class LineDetailViewModel(
     }
 
     /**
-     * 加载当前线路详情与实时车辆
+     * 加载当前线路详情与实时车辆（在 viewModelScope 中发起）
      */
     fun loadLineDetail(isInitial: Boolean = false, targetOrderOverride: Int? = null) {
         viewModelScope.launch {
+            fetchLineDetail(isInitial = isInitial, targetOrderOverride = targetOrderOverride)
+        }
+    }
+
+    /**
+     * 挂起执行一次线路详情请求并更新 UI 状态
+     */
+    private suspend fun fetchLineDetail(isInitial: Boolean = false, targetOrderOverride: Int? = null) {
+        activeLoads.incrementAndGet()
+        lastRefreshAtMillis = clockMillis()
+        try {
             if (isInitial) {
                 _uiState.update { it.copy(isLoading = true, errorMessage = null) }
             } else {
@@ -172,9 +201,11 @@ class LineDetailViewModel(
 
                 refreshFallbackNextDeparture(detail, targetStop)
 
-                // 若之前初次加载未指定 targetOrder，现在已确立选中站，则补充一次精确到该站的 ETA 计算
+                // 初次加载未指定候车站时，需要再按默认候车站请求一次才能拿到到该站的精确 ETA；
+                // 在同一协程内顺序执行并重置倒计时，避免轮询紧接着再发一次
                 if (isInitial && targetStop != null && targetOrder == null) {
-                    selectStop(targetStop)
+                    pollingCoordinator.restartCountdown(POLL_INTERVAL_SECONDS)
+                    fetchLineDetail(isInitial = false, targetOrderOverride = targetStop.order)
                 }
             }.onFailure { ex ->
                 _uiState.update {
@@ -185,6 +216,12 @@ class LineDetailViewModel(
                     )
                 }
             }
+        } catch (ce: CancellationException) {
+            // 轮询暂停等取消场景：复位加载指示，不显示错误
+            _uiState.update { it.copy(isLoading = false, isRefreshing = false) }
+            throw ce
+        } finally {
+            activeLoads.decrementAndGet()
         }
     }
 
@@ -248,6 +285,27 @@ class LineDetailViewModel(
     }
 
     /**
+     * 页面回到前台（Lifecycle RESUMED）：恢复轮询；若距上次刷新已超过一个周期，立即刷新一次。
+     * 测试或预览中 enableAutoPolling = false 时不做任何事。
+     */
+    fun onScreenResumed() {
+        if (!enableAutoPolling) return
+        pollingCoordinator.setActive(true)
+        val last = lastRefreshAtMillis ?: return
+        if (activeLoads.get() == 0 && clockMillis() - last >= POLL_INTERVAL_SECONDS * 1000L) {
+            pollingCoordinator.restartCountdown(POLL_INTERVAL_SECONDS)
+            loadLineDetail(isInitial = false)
+        }
+    }
+
+    /**
+     * 页面离开前台（Lifecycle PAUSED / 移出组合）：停止轮询，进行中的轮询请求随之取消。
+     */
+    fun onScreenPaused() {
+        pollingCoordinator.setActive(false)
+    }
+
+    /**
      * 暂停后台轮询，安全取消当前轮询 Job
      */
     fun pausePolling() {
@@ -265,7 +323,7 @@ class LineDetailViewModel(
      * 手动立即刷新
      */
     fun refreshNow() {
-        pollingCoordinator.restartCountdown(10)
+        pollingCoordinator.restartCountdown(POLL_INTERVAL_SECONDS)
         loadLineDetail(isInitial = false)
     }
 
@@ -281,6 +339,8 @@ class LineDetailViewModel(
             )
         }
         checkFavoriteState(repository.favorites.value)
+        // 选站即刷新，同时重置倒计时，避免 1 秒后轮询又发一次
+        pollingCoordinator.restartCountdown(POLL_INTERVAL_SECONDS)
         loadLineDetail(isInitial = false, targetOrderOverride = stop.order)
     }
 
@@ -507,5 +567,10 @@ class LineDetailViewModel(
     override fun onCleared() {
         super.onCleared()
         pausePolling()
+    }
+
+    companion object {
+        /** 自动轮询周期（秒） */
+        const val POLL_INTERVAL_SECONDS = 10
     }
 }
