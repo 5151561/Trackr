@@ -57,7 +57,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.trackr.TrackrApp
 import com.trackr.domain.model.ScheduledReminder
 import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.service.BusTrackingService
@@ -98,14 +97,13 @@ fun LineDetailScreen(
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val repository = TrackrApp.instance.repository
 
     // 只在页面处于前台（RESUMED）时轮询；回桌面、锁屏或被其他页面覆盖时停止
     LifecycleResumeEffect(viewModel) {
         viewModel.onScreenResumed()
         onPauseOrDispose { viewModel.onScreenPaused() }
     }
-    val activeTracking by repository.activeTrackingSession.collectAsStateWithLifecycle()
+    val activeTracking by viewModel.activeTrackingSession.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val busColors = MaterialTheme.busColors
 
@@ -434,7 +432,7 @@ fun LineDetailScreen(
                     minute = minute,
                     daysOfWeek = daysOfWeek,
                     cityId = viewModel.cityId,
-                    cityName = TrackrApp.instance.repository.selectedCity.value.cityName,
+                    cityName = viewModel.selectedCityName(),
                     lineId = lineDetail.line.lineId,
                     lineName = lineDetail.line.name,
                     direction = lineDetail.line.direction,
@@ -448,7 +446,7 @@ fun LineDetailScreen(
                     autoStartLiveTracking = autoStartTracking
                 )
                 coroutineScope.launch {
-                    TrackrApp.instance.reminderRepository.saveReminder(reminder)
+                    viewModel.saveReminder(reminder)
                     Toast.makeText(
                         context,
                         "已设定通勤提醒：${reminder.formatTime()} (${reminder.formatRepeatSummary()})",

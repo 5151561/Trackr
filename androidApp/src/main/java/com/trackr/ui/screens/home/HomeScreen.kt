@@ -92,7 +92,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
+import org.koin.compose.viewmodel.koinViewModel
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.EngineMode
@@ -106,7 +106,7 @@ import com.trackr.util.TransitCodeHelper
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
-    viewModel: HomeViewModel = viewModel(),
+    viewModel: HomeViewModel = koinViewModel(),
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit,
     onNavigateToStopDetail: ((cityId: String, stopId: String, stopName: String, physicalStId: String, namesakeStId: String, lat: Double, lng: Double) -> Unit)? = null,
     onNavigateToSearch: () -> Unit,

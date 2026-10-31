@@ -2,7 +2,7 @@ package com.trackr.ui.screens.linedetail
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.trackr.TrackrApp
+import com.trackr.data.repository.IScheduledReminderRepository
 import com.trackr.data.repository.ITransitRepository
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDetail
@@ -12,6 +12,8 @@ import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.LineTimetable
 import com.trackr.domain.model.LiveBus
+import com.trackr.domain.model.ScheduledReminder
+import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitCodeProvider
 import com.trackr.ui.components.RouteRailLayoutMode
@@ -73,7 +75,9 @@ class LineDetailViewModel(
     private val initialStationId: String? = null,
     private val initialSource: DataSourceType = if (initialLineId.startsWith("mg:")) DataSourceType.MYGOLBS else DataSourceType.CHELAILE,
     private val lineNameHint: String = "",
-    private val repository: ITransitRepository = TrackrApp.instance.repository,
+    private val repository: ITransitRepository,
+    /** 定时提醒仓库（页面里「定时提醒」弹窗保存用） */
+    private val reminderRepository: IScheduledReminderRepository,
     private val enableAutoPolling: Boolean = true,
     private val nowHHmm: () -> String = {
         ZonedDateTime.now(ZoneId.of("Asia/Shanghai")).format(DateTimeFormatter.ofPattern("HH:mm"))
@@ -117,6 +121,17 @@ class LineDetailViewModel(
 
     val isPollingActive: Boolean
         get() = pollingCoordinator.isPollingActive
+
+    /** 当前追踪会话（页面据此判断「本站是否正在追踪」）；原来由页面直接读仓库 */
+    val activeTrackingSession: StateFlow<TrackingSessionState> = repository.activeTrackingSession
+
+    /** 当前所选城市名（保存定时提醒时写进提醒）；原来由页面直接读仓库 */
+    fun selectedCityName(): String = repository.selectedCity.value.cityName
+
+    /** 保存定时提醒；原来由页面直接调仓库。挂起函数，由页面在自己的协程里调用，时序不变 */
+    suspend fun saveReminder(reminder: ScheduledReminder) {
+        reminderRepository.saveReminder(reminder)
+    }
 
     init {
         // 监听收藏夹变动

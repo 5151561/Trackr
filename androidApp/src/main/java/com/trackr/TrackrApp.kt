@@ -10,7 +10,12 @@ import com.trackr.data.remote.chelaile.ChelaileApiClient
 import com.trackr.data.remote.mygolbs.MygolbsApiClient
 import com.trackr.data.repository.ITransitRepository
 import com.trackr.data.repository.TransitRepository
+import com.trackr.di.appModules
 import okhttp3.OkHttpClient
+import org.koin.android.ext.koin.androidContext
+import org.koin.core.context.GlobalContext
+import org.koin.core.context.startKoin
+import org.koin.core.context.stopKoin
 import java.util.concurrent.TimeUnit
 
 class TrackrApp : Application() {
@@ -83,6 +88,18 @@ class TrackrApp : Application() {
         routeGroupRepository = com.trackr.data.repository.RouteGroupRepository(
             context = applicationContext
         )
+
+        // 上面的实例构建完再启动 Koin：Koin 只登记定义（都是懒加载），不做额外的读盘
+        startKoinOnce()
+    }
+
+    private fun startKoinOnce() {
+        // 生产环境每个进程只会走一次；Robolectric 每个用例都新建 Application，而 Koin 的全局容器跨用例保留，先停掉旧的
+        if (GlobalContext.getOrNull() != null) stopKoin()
+        startKoin {
+            androidContext(this@TrackrApp)
+            modules(appModules)
+        }
     }
 
     companion object {

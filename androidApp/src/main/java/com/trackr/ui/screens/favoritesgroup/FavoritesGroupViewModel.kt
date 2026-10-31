@@ -1,22 +1,17 @@
 package com.trackr.ui.screens.favoritesgroup
 
-import android.Manifest
-import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
-import android.content.pm.PackageManager
-import android.location.Location
-import android.location.LocationManager
-import android.os.SystemClock
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.trackr.TrackrApp
+import com.trackr.data.location.AndroidDeviceLocationProvider
+import com.trackr.data.location.DeviceLocationProvider
 import com.trackr.data.provider.TransitProviderCoordinator
 import com.trackr.data.provider.model.LineDetailRequest
 import com.trackr.data.provider.model.StopDetailRequest
 import com.trackr.data.remote.amap.AmapKeyStore
 import com.trackr.data.remote.amap.AmapLruCache
+import com.trackr.data.remote.amap.AmapSdkKeyApplier
 import com.trackr.data.remote.amap.AmapSdkManager
 import com.trackr.data.remote.amap.AmapSdkTransitService
 import com.trackr.data.remote.amap.AmapTipItem
@@ -100,13 +95,14 @@ interface AmapRouteGateway {
  */
 @OptIn(FlowPreview::class)
 class FavoritesGroupViewModel(
-    private val groupRepository: IRouteGroupRepository = TrackrApp.instance.routeGroupRepository,
-    private val transitRepository: ITransitRepository = TrackrApp.instance.repository,
-    private val coordinator: TransitProviderCoordinator? = runCatching { TrackrApp.instance.coordinator }.getOrNull(),
-    private val okHttpClient: OkHttpClient? = runCatching { TrackrApp.instance.okHttpClient }.getOrNull(),
+    private val groupRepository: IRouteGroupRepository,
+    private val transitRepository: ITransitRepository,
+    private val coordinator: TransitProviderCoordinator? = null,
+    private val okHttpClient: OkHttpClient? = null,
     private val amapApiClient: AmapTransitApiClient = AmapTransitApiClient(okHttpClient ?: OkHttpClient()),
-    private val amapSdkService: AmapSdkTransitService? = runCatching { AmapSdkTransitService(TrackrApp.instance) }.getOrNull(),
-    private val prefs: SharedPreferences? = runCatching { TrackrApp.instance.getSharedPreferences("trackr_prefs", Context.MODE_PRIVATE) }.getOrNull(),
+    private val amapSdkService: AmapSdkTransitService? = null,
+    /** `trackr_prefs`，只用来记一次性数据迁移的版本号；为 null 时每次都跑迁移 */
+    private val prefs: SharedPreferences? = null,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     enableAutoRefresh: Boolean = true,
     private val enableAutoMigration: Boolean = true,
@@ -115,7 +111,11 @@ class FavoritesGroupViewModel(
     /** 墙钟（毫秒），用于算路缓存时间桶与对齐缓存过期；测试可替换 */
     private val wallClockMillis: () -> Long = { System.currentTimeMillis() },
     /** 高德 Key 专用存储（与普通设置分文件，备份时排除）；测试可注入 */
-    private val amapKeyPrefs: SharedPreferences? = runCatching { AmapKeyStore.prefs(TrackrApp.instance) }.getOrNull()
+    private val amapKeyPrefs: SharedPreferences? = null,
+    /** 把 Android Key 注入高德 SDK；测试默认不注入 */
+    private val amapSdkKeyApplier: AmapSdkKeyApplier = AmapSdkKeyApplier { },
+    /** 「我的位置」兜底用的系统 lastKnown 定位；为 null 时没有兜底 */
+    private val locationProvider: DeviceLocationProvider? = null
 ) : ViewModel() {
 
     companion object {
@@ -157,7 +157,7 @@ class FavoritesGroupViewModel(
         private const val ALIGN_CONCURRENCY = 4
 
         /** 系统 lastKnown 定位兜底的最大年龄 */
-        const val MAX_LAST_KNOWN_AGE_MS = 10 * 60 * 1000L
+        const val MAX_LAST_KNOWN_AGE_MS = AndroidDeviceLocationProvider.MAX_LAST_KNOWN_AGE_MS
 
         /** 输入提示是否值得发请求：至少 2 个字符，或包含 1 个汉字 */
         fun isTipsKeywordEligible(keyword: String): Boolean {
@@ -313,7 +313,7 @@ class FavoritesGroupViewModel(
     init {
         // SDK Key 已在 TrackrApp 启动阶段完成注入，这里只在运行期配置变更后重新对齐一次
         runCatching {
-            AmapSdkManager.applyApiKey(TrackrApp.instance, _customAmapApiKey.value)
+            amapSdkKeyApplier.apply(_customAmapApiKey.value)
         }
         if (enableAutoMigration) {
             runDataMigrationIfNeeded()
@@ -438,7 +438,7 @@ class FavoritesGroupViewModel(
         AmapKeyStore.writeAndroidKey(amapKeyPrefs, trimmed)
         _customAmapApiKey.value = trimmed
         runCatching {
-            AmapSdkManager.applyApiKey(TrackrApp.instance, trimmed)
+            amapSdkKeyApplier.apply(trimmed)
         }
     }
 
@@ -749,7 +749,7 @@ class FavoritesGroupViewModel(
      * 优先用首页定位链路写入的坐标，其次是系统 lastKnown（需有权限且不超过 10 分钟）。
      */
     private suspend fun resolveMyLocationTip(city: TransitCity): AmapTipItem? {
-        val (lat, lng) = transitRepository.userLocation.value ?: lastKnownWgsLocation() ?: return null
+        val (lat, lng) = transitRepository.userLocation.value ?: locationProvider?.lastKnownWgsLocation() ?: return null
         val nearby = runCatching {
             transitRepository.getNearbyStops(city, lat, lng, 1).getOrNull()?.firstOrNull()
         }.getOrNull()
@@ -771,43 +771,6 @@ class FavoritesGroupViewModel(
             )
         }
     }
-
-    /**
-     * 系统 lastKnown 定位兜底（WGS-84）：先检查定位权限，只接受 10 分钟内的定位，多个来源取精度最高的。
-     */
-    @SuppressLint("MissingPermission")
-    private fun lastKnownWgsLocation(): Pair<Double, Double>? {
-        val app = runCatching { TrackrApp.instance }.getOrNull() ?: return null
-        val granted = ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_FINE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(app, Manifest.permission.ACCESS_COARSE_LOCATION) ==
-            PackageManager.PERMISSION_GRANTED
-        if (!granted) return null
-        val lm = app.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
-        val best = listOf(
-            LocationManager.GPS_PROVIDER,
-            LocationManager.NETWORK_PROVIDER,
-            LocationManager.PASSIVE_PROVIDER
-        ).mapNotNull { provider ->
-            try {
-                lm.getLastKnownLocation(provider)
-            } catch (_: SecurityException) {
-                null
-            } catch (_: Exception) {
-                null
-            }
-        }.filter { locationAgeMillis(it) in 0..MAX_LAST_KNOWN_AGE_MS }
-            .minByOrNull { if (it.hasAccuracy()) it.accuracy else Float.MAX_VALUE }
-        return best?.let { it.latitude to it.longitude }
-    }
-
-    /** 定位年龄：优先用单调时钟 elapsedRealtimeNanos（不受改系统时间影响），缺失时回落墙钟 */
-    private fun locationAgeMillis(loc: Location): Long =
-        if (loc.elapsedRealtimeNanos > 0L) {
-            (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000L
-        } else {
-            System.currentTimeMillis() - loc.time
-        }
 
     /** 算路缓存键：城市 + 6 位小数坐标 + 15 分钟时间桶；坐标非法时不缓存 */
     private fun buildPlanCacheKey(city: TransitCity, originLngLat: String, destLngLat: String): String? {

@@ -3,7 +3,6 @@ package com.trackr.ui.screens.more
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.trackr.TrackrApp
 import com.trackr.data.repository.IScheduledReminderRepository
 import com.trackr.data.repository.ITransitRepository
 import com.trackr.domain.model.AggregatedSourcePriority
@@ -33,18 +32,6 @@ class MoreViewModel(
     private val repository: ITransitRepository,
     private val reminderRepository: IScheduledReminderRepository
 ) : AndroidViewModel(application) {
-
-    constructor(application: Application) : this(
-        application,
-        (application as? TrackrApp)?.repository ?: TrackrApp.instance.repository,
-        (application as? TrackrApp)?.reminderRepository ?: TrackrApp.instance.reminderRepository
-    )
-
-    constructor() : this(
-        TrackrApp.instance,
-        TrackrApp.instance.repository,
-        TrackrApp.instance.reminderRepository
-    )
 
     val engineMode: StateFlow<EngineMode> = repository.engineMode
     val aggregatedPriority: StateFlow<AggregatedSourcePriority> = repository.aggregatedPriority

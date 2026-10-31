@@ -77,7 +77,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
+import org.koin.compose.viewmodel.koinViewModel
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusLineSummary
@@ -91,7 +91,7 @@ private val SEARCH_SUGGESTIONS = listOf("1路", "2路", "10路", "快速公交",
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun SearchScreen(
-    viewModel: HomeViewModel = viewModel(),
+    viewModel: HomeViewModel = koinViewModel(),
     onNavigateBack: () -> Unit,
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit,
     onNavigateToStopDetail: (cityId: String, stopId: String, stopName: String, physicalStId: String, namesakeStId: String, lat: Double, lng: Double) -> Unit

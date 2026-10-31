@@ -2,7 +2,6 @@ package com.trackr.ui.screens.stopdetail
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.trackr.TrackrApp
 import com.trackr.data.repository.ITransitRepository
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.DataSourceType
@@ -47,7 +46,7 @@ class StopDetailViewModel(
     private val namesakeStId: String = "",
     private val stationLat: Double = 0.0,
     private val stationLng: Double = 0.0,
-    private val repository: ITransitRepository = TrackrApp.instance.repository,
+    private val repository: ITransitRepository,
     private val enableAutoPolling: Boolean = true,
     /** 单调时钟（毫秒），用于判断恢复页面时数据是否过期；测试可注入 */
     private val clockMillis: () -> Long = { System.nanoTime() / 1_000_000L }

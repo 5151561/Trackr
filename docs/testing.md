@@ -35,7 +35,7 @@
 
 ## 3. 测试目录与套件清单
 
-`./gradlew test` 共跑 52 个测试类：`:androidApp` 51 个，`:core:designsystem` 1 个。
+`./gradlew test` 共跑 53 个测试类：`:androidApp` 52 个，`:core:designsystem` 1 个。
 
 `:androidApp` 的测试位于 `androidApp/src/test/java/com/trackr/`，下表按子目录列出全部测试类（辅助类 `FakeTransitRepository`、`FakeScheduledReminderRepository`、`MainDispatcherRule` 不含测试）。`:core:designsystem` 的 `RouteRailDrawUtilsTest` 位于 `core/designsystem/src/test/java/com/trackr/core/designsystem/rail/`，覆盖走向条绘制工具（Robolectric Compose UI）。
 
@@ -57,6 +57,7 @@
 |  | `RouteGroupRepositoryTest` | 路线分组与收藏分组增删改排序、并发写入不丢更新、JSON 损坏备份 | Robolectric (JVM) |
 |  | `ScheduledReminderRepositoryTest` | 定时提醒增删改与持久化、并发写入不丢更新、JSON 损坏备份、计划触发时间记录 | Robolectric (JVM) |
 |  | `TransitRepositoryLineDetailCacheTest` | 线路详情同 key 并发只请求一次上游、TTL 内复用与过期重拉、目标站顺序不同算不同 key、失败不缓存、取消的调用方不影响其他等待者 | Robolectric (JVM) |
+| `di` | `KoinGraphVerifyTest` | Koin 依赖图：每个模块 `verify()` 静态检查构造参数都有绑定；Robolectric 里把每个定义实际取一次（带参数的 ViewModel 用样例 key） | Robolectric (JVM) |
 | `receiver` | `ScheduledReminderReceiverTest` | 定时提醒触发、自动跟车需精确闹钟、前台服务启动失败降级 | Robolectric (JVM) |
 |  | `BootCompletedReceiverTest` | 开机禁用已错过的一次性提醒、时间变化重新调度、无关广播忽略 | Robolectric (JVM) |
 | `service` | `ArrivalAlertManagerTest` | 到站/临近提醒与实时通知并存时的去重 | Robolectric (JVM) |

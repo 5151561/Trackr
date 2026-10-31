@@ -132,8 +132,13 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     implementation(libs.okhttp)
     implementation(libs.amap.search)
+    implementation(platform(libs.koin.bom))
+    implementation(libs.koin.android)
+    implementation(libs.koin.compose.viewmodel)
 
     testImplementation(libs.junit)
+    testImplementation(platform(libs.koin.bom))
+    testImplementation(libs.koin.test)
     testImplementation(libs.org.json)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)

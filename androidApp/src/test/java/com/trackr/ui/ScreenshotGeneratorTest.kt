@@ -1,5 +1,7 @@
 package com.trackr.ui
 
+import com.trackr.service.AndroidTrackingController
+import com.trackr.data.location.AndroidDeviceLocationProvider
 import android.app.Application
 import android.graphics.Bitmap
 import androidx.compose.foundation.layout.fillMaxSize
@@ -257,6 +259,7 @@ class ScreenshotGeneratorTest {
             initialTargetOrder = 5,
             initialStationId = "s5",
             repository = fakeRepo,
+            reminderRepository = FakeScheduledReminderRepository(),
             enableAutoPolling = false
         )
         mainDispatcherRule.testDispatcher.scheduler.advanceUntilIdle()
@@ -302,6 +305,7 @@ class ScreenshotGeneratorTest {
             initialTargetOrder = 5,
             initialStationId = "s5",
             repository = fakeRepo,
+            reminderRepository = FakeScheduledReminderRepository(),
             enableAutoPolling = false
         )
         mainDispatcherRule.testDispatcher.scheduler.advanceUntilIdle()
@@ -543,7 +547,8 @@ class ScreenshotGeneratorTest {
         fakeRepo.favoritesRealtimeResult = Result.success(favRealtime)
 
         val vm = HomeViewModel(
-            application = app,
+            locationProvider = AndroidDeviceLocationProvider(app),
+            trackingController = AndroidTrackingController(app),
             repository = fakeRepo,
             enableAutoPolling = false
         )
@@ -717,7 +722,8 @@ class ScreenshotGeneratorTest {
         )
 
         val vm = HomeViewModel(
-            application = app,
+            locationProvider = AndroidDeviceLocationProvider(app),
+            trackingController = AndroidTrackingController(app),
             repository = fakeRepo,
             enableAutoPolling = false
         )

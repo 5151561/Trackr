@@ -59,12 +59,9 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.compose.dropUnlessResumed
-import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
 import androidx.navigation3.runtime.entryProvider
 import androidx.navigation3.runtime.rememberNavBackStack
@@ -95,6 +92,8 @@ import com.trackr.widget.BusStopWidgetProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.withContext
+import org.koin.compose.viewmodel.koinViewModel
+import org.koin.core.parameter.parametersOf
 
 class MainActivity : ComponentActivity() {
 
@@ -211,8 +210,8 @@ fun TrackrNavApp(
         "group" -> groupBackStack
         else -> moreBackStack
     }
-    val homeViewModel: HomeViewModel = viewModel()
-    val favoritesGroupViewModel: FavoritesGroupViewModel = viewModel()
+    val homeViewModel: HomeViewModel = koinViewModel()
+    val favoritesGroupViewModel: FavoritesGroupViewModel = koinViewModel()
 
     // 首页轮询只在 App 前台、当前 tab 是首页且首页在回退栈顶时进行；切 tab / 进详情 / 回桌面即暂停
     val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
@@ -662,22 +661,9 @@ fun TrackrNavApp(
                 }
 
                 entry<ScreenKey.LineDetail> { key ->
-                    val detailViewModel: LineDetailViewModel = viewModel(
-                        key = "detail_${key.cityId}_${key.lineId}_${key.targetOrder}",
-                        factory = object : ViewModelProvider.Factory {
-                            @Suppress("UNCHECKED_CAST")
-                            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                                return LineDetailViewModel(
-                                    cityId = key.cityId,
-                                    initialLineId = key.lineId,
-                                    initialTargetOrder = key.targetOrder.takeIf { it > 0 },
-                                    initialStationId = key.stopId.takeIf { it.isNotBlank() },
-                                    initialSource = key.source,
-                                    lineNameHint = key.lineName
-                                ) as T
-                            }
-                        }
-                    )
+                    val detailViewModel: LineDetailViewModel = koinViewModel(
+                        key = "detail_${key.cityId}_${key.lineId}_${key.targetOrder}"
+                    ) { parametersOf(key) }
 
                     LineDetailScreen(
                         viewModel = detailViewModel,
@@ -690,23 +676,9 @@ fun TrackrNavApp(
                 }
 
                 entry<ScreenKey.StopDetail> { key ->
-                    val stopDetailViewModel: StopDetailViewModel = viewModel(
-                        key = "stop_${key.cityId}_${key.stopId}_${key.physicalStId}_${key.stopName}",
-                        factory = object : ViewModelProvider.Factory {
-                            @Suppress("UNCHECKED_CAST")
-                            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                                return StopDetailViewModel(
-                                    cityId = key.cityId,
-                                    stopId = key.stopId,
-                                    initialStopName = key.stopName,
-                                    physicalStId = key.physicalStId,
-                                    namesakeStId = key.namesakeStId,
-                                    stationLat = key.lat,
-                                    stationLng = key.lng
-                                ) as T
-                            }
-                        }
-                    )
+                    val stopDetailViewModel: StopDetailViewModel = koinViewModel(
+                        key = "stop_${key.cityId}_${key.stopId}_${key.physicalStId}_${key.stopName}"
+                    ) { parametersOf(key) }
 
                     StopDetailScreen(
                         viewModel = stopDetailViewModel,
@@ -732,7 +704,7 @@ fun TrackrNavApp(
                 }
 
                 entry<ScreenKey.More> {
-                    val moreViewModel: MoreViewModel = viewModel()
+                    val moreViewModel: MoreViewModel = koinViewModel()
                     MoreScreen(
                         viewModel = moreViewModel,
                         onNavigateToAbout = dropUnlessResumed {

@@ -1,19 +1,10 @@
 package com.trackr.ui.screens.home
 
-import android.Manifest
-import android.app.Application
-import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.location.Location
-import android.location.LocationListener
-import android.location.LocationManager
-import android.os.Looper
 import android.os.SystemClock
-import androidx.core.content.ContextCompat
-import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.trackr.TrackrApp
+import com.trackr.data.location.AndroidDeviceLocationProvider
+import com.trackr.data.location.DeviceLocationProvider
 import com.trackr.data.repository.ITransitRepository
 import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.EngineMode
@@ -23,6 +14,7 @@ import com.trackr.domain.model.ProvinceCityCatalog
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitSearchResult
+import com.trackr.service.TrackingController
 import com.trackr.ui.util.FixedDelayPollingStrategy
 import com.trackr.ui.util.PollingCoordinator
 import kotlinx.coroutines.Job
@@ -33,9 +25,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlin.coroutines.resume
 
 data class HomeUiState(
     val currentCity: TransitCity = TransitCity(cityId = "034", cityName = "上海", pinyin = "shanghai", supportSubway = true, isHot = true, province = "直辖市"),
@@ -78,22 +67,15 @@ data class HomeUiState(
 }
 
 class HomeViewModel(
-    application: Application,
     private val repository: ITransitRepository,
+    /** 设备定位（首页刷新时取一次当前位置） */
+    private val locationProvider: DeviceLocationProvider,
+    /** 追踪服务控制（「结束追踪」、把定位喂给换乘引擎） */
+    private val trackingController: TrackingController,
     private val enableAutoPolling: Boolean = true,
     /** 单调时钟（毫秒），用于判断恢复轮询时距上次刷新是否已超过一个周期；测试可替换 */
     private val elapsedRealtimeMillis: () -> Long = { SystemClock.elapsedRealtime() }
-) : AndroidViewModel(application) {
-
-    constructor(application: Application) : this(
-        application,
-        (application as? TrackrApp)?.repository ?: TrackrApp.instance.repository
-    )
-
-    constructor() : this(
-        TrackrApp.instance,
-        TrackrApp.instance.repository
-    )
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -138,7 +120,6 @@ class HomeViewModel(
         get() = pollingCoordinator.isPollingActive
 
     private var searchJob: Job? = null
-    private val locationManager = application.getSystemService(Context.LOCATION_SERVICE) as? LocationManager
 
     init {
         // 观察数据仓库中选中的城市
@@ -275,157 +256,6 @@ class HomeViewModel(
         refresh(switchCity)
     }
 
-    private fun hasLocationPermission(): Boolean {
-        val context = getApplication<Application>()
-        val hasFine = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_FINE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        val hasCoarse = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.ACCESS_COARSE_LOCATION
-        ) == PackageManager.PERMISSION_GRANTED
-        return hasFine || hasCoarse
-    }
-
-    /**
-     * 获取一次设备定位（WGS-84）。
-     *
-     * 1. 先看各 provider 的 lastKnown：够新（强制刷新 10 秒 / 否则 60 秒内）且精度 ≤100m 的直接用；
-     * 2. 否则在 [LOCATION_WINDOW_MS] 窗口内主动监听，收集多个 fix 取精度最高的（拿到 ≤100m 的提前结束）；
-     * 3. 窗口内什么都没拿到时，才退回 lastKnown 里最新的一个，且只接受 [MAX_STALE_LOCATION_AGE_MS] 内的。
-     * 年龄一律用单调时钟 elapsedRealtimeNanos 计算，不受用户改系统时间影响。
-     */
-    private suspend fun fetchGpsLocation(forceFresh: Boolean = false): Location? {
-        if (!hasLocationPermission()) return null
-        val lm = locationManager ?: return null
-
-        val candidateProviders = listOf(
-            "fused",
-            LocationManager.NETWORK_PROVIDER,
-            LocationManager.GPS_PROVIDER,
-            LocationManager.PASSIVE_PROVIDER
-        )
-
-        var bestFresh: Location? = null
-        var bestStale: Location? = null
-        val freshThreshold = if (forceFresh) 10_000L else 60_000L // 强制刷新时仅复用10秒内极新鲜的定位，超时则向硬件重新请求实时 fix
-
-        for (provider in candidateProviders) {
-            try {
-                if (lm.isProviderEnabled(provider)) {
-                    val loc = lm.getLastKnownLocation(provider) ?: continue
-                    val age = locationAgeMillis(loc)
-                    if (age < 0L) continue
-                    if (age < freshThreshold && isMoreAccurate(loc, bestFresh)) {
-                        bestFresh = loc
-                    }
-                    if (age <= MAX_STALE_LOCATION_AGE_MS &&
-                        (bestStale == null || age < locationAgeMillis(bestStale))
-                    ) {
-                        bestStale = loc
-                    }
-                }
-            } catch (_: SecurityException) {
-            } catch (_: Exception) {
-            }
-        }
-
-        val freshCandidate = bestFresh
-        if (freshCandidate != null && isGoodEnough(freshCandidate)) {
-            return freshCandidate
-        }
-
-        // 主动向可用 provider 发起高频监听，在窗口内收集多个 fix
-        val activeProviders = listOf("fused", LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER).filter { provider ->
-            try {
-                lm.isProviderEnabled(provider)
-            } catch (_: Exception) {
-                false
-            }
-        }
-
-        if (activeProviders.isEmpty()) {
-            return freshCandidate ?: bestStale
-        }
-
-        // 窗口内收到的最准 fix（监听回调与本协程都在主线程，无并发问题）
-        var bestLive: Location? = null
-        val goodFix = withTimeoutOrNull(LOCATION_WINDOW_MS) {
-            suspendCancellableCoroutine<Location?> { cont ->
-                val listener = object : LocationListener {
-                    override fun onLocationChanged(location: Location) {
-                        if (isMoreAccurate(location, bestLive)) {
-                            bestLive = location
-                        }
-                        if (isGoodEnough(location)) {
-                            try {
-                                lm.removeUpdates(this)
-                            } catch (_: Exception) {
-                            }
-                            if (cont.isActive) {
-                                cont.resume(location)
-                            }
-                        }
-                    }
-
-                    @Deprecated("Deprecated in Java")
-                    override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
-                    override fun onProviderEnabled(provider: String) {}
-                    override fun onProviderDisabled(provider: String) {}
-                }
-
-                cont.invokeOnCancellation {
-                    try {
-                        lm.removeUpdates(listener)
-                    } catch (_: Exception) {
-                    }
-                }
-
-                var requestedAny = false
-                for (provider in activeProviders) {
-                    try {
-                        lm.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
-                        requestedAny = true
-                    } catch (_: SecurityException) {
-                    } catch (_: Exception) {
-                    }
-                }
-
-                if (!requestedAny && cont.isActive) {
-                    cont.resume(null)
-                }
-            }
-        }
-
-        val liveCandidate = bestLive
-        return goodFix
-            ?: pickMoreAccurate(liveCandidate, freshCandidate)
-            ?: bestStale
-    }
-
-    /** 定位年龄（毫秒）：优先用 elapsedRealtimeNanos，缺失（为 0）时回落墙钟 time */
-    private fun locationAgeMillis(loc: Location): Long =
-        if (loc.elapsedRealtimeNanos > 0L) {
-            (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000L
-        } else {
-            System.currentTimeMillis() - loc.time
-        }
-
-    private fun accuracyOf(loc: Location): Float = if (loc.hasAccuracy()) loc.accuracy else Float.MAX_VALUE
-
-    private fun isGoodEnough(loc: Location): Boolean = loc.hasAccuracy() && loc.accuracy <= GOOD_ACCURACY_METERS
-
-    private fun isMoreAccurate(candidate: Location, current: Location?): Boolean =
-        current == null || accuracyOf(candidate) < accuracyOf(current)
-
-    private fun pickMoreAccurate(a: Location?, b: Location?): Location? = when {
-        a == null -> b
-        b == null -> a
-        accuracyOf(a) <= accuracyOf(b) -> a
-        else -> b
-    }
-
     private fun loadNearbyStops(
         lat: Double,
         lng: Double,
@@ -474,7 +304,7 @@ class HomeViewModel(
                 _uiState.update { it.copy(favoritesRealtime = favResult.getOrNull().orEmpty()) }
             }
 
-            val gpsLocation = fetchGpsLocation(forceFresh = true)
+            val gpsLocation = locationProvider.fetchCurrentLocation(forceFresh = true)
 
             val nearbyJob = launch {
                 val (lat, lng, targetCity) = if (gpsLocation != null) {
@@ -482,7 +312,7 @@ class HomeViewModel(
                     val lng = gpsLocation.longitude
                     repository.updateUserLocation(lat, lng)
                     // 带精度与定位时刻喂给换乘引擎，过期 / 不准的定位不参与下车站判定
-                    com.trackr.service.TransferAutoSwitchManager.updateUserFix(
+                    trackingController.updateUserFix(
                         lat = lat,
                         lng = lng,
                         accuracyMeters = if (gpsLocation.hasAccuracy()) gpsLocation.accuracy else null,
@@ -739,7 +569,7 @@ class HomeViewModel(
             repository.updateTrackingSession(TrackingSessionState(isActive = false))
             try {
                 // 直接停止追踪服务；分组追踪时同时清掉换乘组状态
-                com.trackr.service.TransferAutoSwitchManager.stopGroupTracking(getApplication<Application>())
+                trackingController.stopTracking()
             } catch (_: Exception) {
             }
         }
@@ -757,13 +587,13 @@ class HomeViewModel(
         const val NEARBY_STOPS_LIMIT = 4
         const val POLLING_INTERVAL_MS = 15_000L
 
-        /** 主动定位的收集窗口 */
-        const val LOCATION_WINDOW_MS = 4_500L
+        /** 主动定位的收集窗口（定位代码已移到 [AndroidDeviceLocationProvider]） */
+        const val LOCATION_WINDOW_MS = AndroidDeviceLocationProvider.LOCATION_WINDOW_MS
 
         /** 精度达到该值即可提前结束定位收集 */
-        const val GOOD_ACCURACY_METERS = 100f
+        const val GOOD_ACCURACY_METERS = AndroidDeviceLocationProvider.GOOD_ACCURACY_METERS
 
         /** 兜底使用的旧定位最大年龄 */
-        const val MAX_STALE_LOCATION_AGE_MS = 10 * 60 * 1000L
+        const val MAX_STALE_LOCATION_AGE_MS = AndroidDeviceLocationProvider.MAX_STALE_LOCATION_AGE_MS
     }
 }

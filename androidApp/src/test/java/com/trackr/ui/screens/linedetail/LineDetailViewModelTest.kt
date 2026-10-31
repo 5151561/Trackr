@@ -1,5 +1,6 @@
 package com.trackr.ui.screens.linedetail
 
+import com.trackr.data.repository.FakeScheduledReminderRepository
 import com.trackr.data.repository.FakeTransitRepository
 import com.trackr.data.repository.ITransitRepository
 import com.trackr.domain.model.BusLineDetail
@@ -108,6 +109,7 @@ class LineDetailViewModelTest {
             initialStationId = stationId,
             initialSource = DataSourceType.CHELAILE,
             repository = fakeRepository,
+            reminderRepository = FakeScheduledReminderRepository(),
             enableAutoPolling = false
         )
     }
@@ -223,6 +225,7 @@ class LineDetailViewModelTest {
             cityId = "034",
             initialLineId = "line_001",
             repository = fakeRepository,
+            reminderRepository = FakeScheduledReminderRepository(),
             enableAutoPolling = true
         )
         assertTrue(vmWithAutoPolling.isPollingActive)
@@ -284,6 +287,7 @@ class LineDetailViewModelTest {
             initialLineId = "line_001",
             initialTargetOrder = 1,
             repository = fakeRepository,
+            reminderRepository = FakeScheduledReminderRepository(),
             enableAutoPolling = false,
             nowHHmm = { "21:28" }
         )
@@ -302,6 +306,7 @@ class LineDetailViewModelTest {
             initialLineId = "line_001",
             initialTargetOrder = 3,
             repository = fakeRepository,
+            reminderRepository = FakeScheduledReminderRepository(),
             enableAutoPolling = false,
             nowHHmm = { "21:28" }
         )
@@ -330,6 +335,7 @@ class LineDetailViewModelTest {
             initialLineId = "line_001",
             initialTargetOrder = 2,
             repository = repo,
+            reminderRepository = FakeScheduledReminderRepository(),
             enableAutoPolling = false
         )
         testScheduler.runCurrent()
@@ -344,6 +350,7 @@ class LineDetailViewModelTest {
             cityId = "034",
             initialLineId = "line_001",
             repository = repo,
+            reminderRepository = FakeScheduledReminderRepository(),
             enableAutoPolling = false
         )
         testScheduler.runCurrent()
@@ -363,6 +370,7 @@ class LineDetailViewModelTest {
             initialLineId = "line_001",
             initialTargetOrder = 2,
             repository = repo,
+            reminderRepository = FakeScheduledReminderRepository(),
             enableAutoPolling = true
         )
         testScheduler.runCurrent()
@@ -392,6 +400,7 @@ class LineDetailViewModelTest {
             initialLineId = "line_001",
             initialTargetOrder = 2,
             repository = fakeRepository,
+            reminderRepository = FakeScheduledReminderRepository(),
             enableAutoPolling = true
         )
         testScheduler.runCurrent()
@@ -414,6 +423,7 @@ class LineDetailViewModelTest {
             initialLineId = "line_001",
             initialTargetOrder = 2,
             repository = repo,
+            reminderRepository = FakeScheduledReminderRepository(),
             enableAutoPolling = true,
             clockMillis = { now }
         )

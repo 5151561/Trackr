@@ -6,8 +6,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.trackr.TrackrApp
-import com.trackr.data.remote.update.GithubUpdateChecker
 import com.trackr.data.remote.update.IUpdateChecker
 import com.trackr.domain.model.AppUpdateInfo
 import com.trackr.domain.model.UpdateCheckResult
@@ -34,16 +32,6 @@ class AboutViewModel(
         getDefaultAppVersion(application)
     }
 ) : AndroidViewModel(application) {
-
-    constructor(application: Application) : this(
-        application,
-        GithubUpdateChecker((application as? TrackrApp)?.okHttpClient ?: TrackrApp.instance.okHttpClient)
-    )
-
-    constructor() : this(
-        TrackrApp.instance,
-        GithubUpdateChecker(TrackrApp.instance.okHttpClient)
-    )
 
     private val _updateState = MutableStateFlow<AboutUpdateUiState>(AboutUpdateUiState.Idle)
     val updateState: StateFlow<AboutUpdateUiState> = _updateState.asStateFlow()

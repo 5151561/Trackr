@@ -1,5 +1,7 @@
 package com.trackr.ui.screens.home
 
+import com.trackr.service.AndroidTrackingController
+import com.trackr.data.location.AndroidDeviceLocationProvider
 import android.app.Application
 import androidx.test.core.app.ApplicationProvider
 import com.trackr.data.repository.FakeTransitRepository
@@ -45,7 +47,8 @@ class HomeViewModelTest {
 
     private fun createViewModel(): HomeViewModel {
         return HomeViewModel(
-            application = app,
+            locationProvider = AndroidDeviceLocationProvider(app),
+            trackingController = AndroidTrackingController(app),
             repository = fakeRepository,
             enableAutoPolling = false
         )
@@ -535,7 +538,8 @@ class HomeViewModelTest {
     @Test
     fun testPollingLifecycle_pauseResumeAndExplicitControl() = runTest {
         val vmWithAutoPolling = HomeViewModel(
-            application = app,
+            locationProvider = AndroidDeviceLocationProvider(app),
+            trackingController = AndroidTrackingController(app),
             repository = fakeRepository,
             enableAutoPolling = true
         )
@@ -572,7 +576,8 @@ class HomeViewModelTest {
     fun testSetPollingActive_resumeAfterOneInterval_refreshesImmediately() = runTest {
         var now = 1_000_000L
         val viewModel = HomeViewModel(
-            application = app,
+            locationProvider = AndroidDeviceLocationProvider(app),
+            trackingController = AndroidTrackingController(app),
             repository = fakeRepository,
             enableAutoPolling = false,
             elapsedRealtimeMillis = { now }
@@ -594,7 +599,8 @@ class HomeViewModelTest {
     fun testSetPollingActive_resumeWithinInterval_doesNotRefreshImmediately() = runTest {
         var now = 1_000_000L
         val viewModel = HomeViewModel(
-            application = app,
+            locationProvider = AndroidDeviceLocationProvider(app),
+            trackingController = AndroidTrackingController(app),
             repository = fakeRepository,
             enableAutoPolling = false,
             elapsedRealtimeMillis = { now }

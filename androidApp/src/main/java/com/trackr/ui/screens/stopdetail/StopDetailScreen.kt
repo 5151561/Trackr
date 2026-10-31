@@ -63,7 +63,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.NearbyStop
@@ -74,7 +73,7 @@ import com.trackr.ui.components.common.computeArrivalStatus
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StopDetailScreen(
-    viewModel: StopDetailViewModel = viewModel(),
+    viewModel: StopDetailViewModel,
     onNavigateBack: () -> Unit,
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit
 ) {

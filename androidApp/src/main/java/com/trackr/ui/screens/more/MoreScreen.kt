@@ -66,7 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.compose.LifecycleResumeEffect
-import androidx.lifecycle.viewmodel.compose.viewModel
+import org.koin.compose.viewmodel.koinViewModel
 import com.trackr.domain.model.AggregatedSourcePriority
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.EngineMode
@@ -80,7 +80,7 @@ import com.trackr.util.TransitCodeHelper
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MoreScreen(
-    viewModel: MoreViewModel = viewModel(),
+    viewModel: MoreViewModel = koinViewModel(),
     onNavigateToAbout: () -> Unit,
     onNavigateToLineDetail: (cityId: String, lineId: String, targetOrder: Int, stopId: String, source: DataSourceType, lineName: String) -> Unit
 ) {
