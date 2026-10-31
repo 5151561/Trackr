@@ -1,5 +1,6 @@
 package com.trackr.receiver
 
+import android.app.ForegroundServiceStartNotAllowedException
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -71,10 +72,16 @@ class ScheduledReminderReceiver : BroadcastReceiver() {
             ReminderScheduler.scheduleReminder(context, reminder)
         }
 
-        // 2. 如果配置了自动开启跟车，直接拉起前台服务
+        // 2. 如果配置了自动开启跟车，仅在精确闹钟（享有后台启动前台服务豁免）触发时直接拉起前台服务；
+        //    非精确闹钟或启动被系统拒绝时降级为带「开启实时追踪」按钮的普通提醒通知（通知按钮点击享有豁免）
+        var autoStartFallback = false
         if (reminder.autoStartLiveTracking) {
-            startTrackingForReminder(context, reminder)
-            return
+            if (shouldAutoStartTracking(reminder, ReminderScheduler.canScheduleExact(context)) &&
+                tryStartTracking(context, reminder)
+            ) {
+                return
+            }
+            autoStartFallback = true
         }
 
         // 3. 否则拉取单次实时公交数据并弹出通知卡片
@@ -144,7 +151,12 @@ class ScheduledReminderReceiver : BroadcastReceiver() {
             contentText = "点击打开【${reminder.lineName}】查看实时到站动态"
         }
 
-        showReminderNotification(context, reminder, summaryText, contentText)
+        val finalContent = if (autoStartFallback) {
+            "$contentText\n系统限制未能自动开启跟车，请点击「开启实时追踪」"
+        } else {
+            contentText
+        }
+        showReminderNotification(context, reminder, summaryText, finalContent)
     }
 
     private fun showReminderNotification(
@@ -209,11 +221,36 @@ class ScheduledReminderReceiver : BroadcastReceiver() {
 
     private fun handleStartTrackingNow(context: Context, reminderId: String, app: TrackrApp) {
         val reminder = app.reminderRepository.getReminderById(reminderId) ?: return
-        startTrackingForReminder(context, reminder)
+        // 通知按钮点击享有后台启动前台服务豁免，这里仍兜底捕获异常避免崩溃
+        if (!tryStartTracking(context, reminder)) return
 
-        // 关闭快报通知
+        // 关闭快报通知（启动失败时保留通知，方便用户重试）
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
         notificationManager?.cancel(NOTIFICATION_BASE_ID + reminder.id.hashCode() % 10000)
+    }
+
+    /**
+     * 尝试为提醒拉起前台跟车服务。
+     * Android 12+ 后台受限时 startForegroundService 会抛 ForegroundServiceStartNotAllowedException
+     * （IllegalStateException 子类，低版本后台启动亦抛 IllegalStateException），此时返回 false 交由调用方降级。
+     */
+    internal fun tryStartTracking(
+        context: Context,
+        reminder: ScheduledReminder,
+        starter: (Context, ScheduledReminder) -> Unit = this::startTrackingForReminder
+    ): Boolean {
+        return try {
+            starter(context, reminder)
+            true
+        } catch (e: IllegalStateException) {
+            val notAllowed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                e is ForegroundServiceStartNotAllowedException
+            Log.w(TAG, "Cannot start tracking service for ${reminder.id} (fgsNotAllowed=$notAllowed)", e)
+            false
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Cannot start tracking service for ${reminder.id}", e)
+            false
+        }
     }
 
     private fun startTrackingForReminder(context: Context, reminder: ScheduledReminder) {
@@ -268,6 +305,14 @@ class ScheduledReminderReceiver : BroadcastReceiver() {
         const val ACTION_TRIGGER_REMINDER = "com.trackr.action.TRIGGER_REMINDER"
         const val ACTION_START_TRACKING_NOW = "com.trackr.action.START_TRACKING_NOW"
         const val EXTRA_REMINDER_ID = "extra_reminder_id"
+
+        /**
+         * 到点是否直接拉起前台跟车服务：只有配置了自动跟车且本次为精确闹钟时才直接启动。
+         * Android 12+ 未授予精确闹钟权限时闹钟以非精确方式触发，不享有后台启动前台服务的豁免。
+         */
+        internal fun shouldAutoStartTracking(reminder: ScheduledReminder, canScheduleExact: Boolean): Boolean {
+            return reminder.autoStartLiveTracking && canScheduleExact
+        }
 
         private const val CHANNEL_ID_SCHEDULED = "channel_transit_scheduled"
         private const val CHANNEL_NAME_SCHEDULED = "通勤定时到站提醒"

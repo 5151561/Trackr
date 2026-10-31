@@ -1,5 +1,6 @@
 package com.trackr.util
 
+import com.trackr.domain.model.ScheduledReminder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -118,5 +119,45 @@ class ReminderSchedulerTest {
         assertEquals(31, triggerCal.get(Calendar.DAY_OF_MONTH))
         assertEquals(9, triggerCal.get(Calendar.HOUR_OF_DAY))
         assertEquals(30, triggerCal.get(Calendar.MINUTE))
+    }
+
+    private fun reminder(id: String, daysOfWeek: Set<Int>, enabled: Boolean = true) = ScheduledReminder(
+        id = id,
+        enabled = enabled,
+        hour = 8,
+        minute = 0,
+        daysOfWeek = daysOfWeek,
+        cityId = "034",
+        cityName = "上海",
+        lineId = "line-101",
+        lineName = "70路",
+        direction = 0,
+        endStopName = "科技园",
+        targetStopId = "stop-5",
+        targetStopName = "大冲",
+        targetOrder = 5
+    )
+
+    @Test
+    fun testFindExpiredOneTimeReminderIds_onlyPastOneTimeWithRecord() {
+        val now = 1_000_000L
+        val reminders = listOf(
+            reminder("one-expired", emptySet()),
+            reminder("one-future", emptySet()),
+            reminder("one-no-record", emptySet()),
+            reminder("one-disabled", emptySet(), enabled = false),
+            reminder("repeat-expired", setOf(1, 2, 3, 4, 5))
+        )
+        val planned = mapOf(
+            "one-expired" to now - 60_000L,
+            "one-future" to now + 60_000L,
+            "one-disabled" to now - 60_000L,
+            "repeat-expired" to now - 60_000L
+        )
+
+        val expired = ReminderScheduler.findExpiredOneTimeReminderIds(reminders, now) { planned[it] }
+
+        // 只有「已启用 + 一次性 + 有计划记录且已过期」的提醒会被判定过期
+        assertEquals(setOf("one-expired"), expired)
     }
 }

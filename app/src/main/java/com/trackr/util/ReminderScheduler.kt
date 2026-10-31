@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.os.Build
 import android.util.Log
 import androidx.core.app.AlarmManagerCompat
@@ -17,6 +18,51 @@ import java.util.Calendar
 object ReminderScheduler {
 
     private const val TAG = "ReminderScheduler"
+
+    /** 记录每个提醒最近一次计划触发时间的独立 SharedPreferences（不改动提醒数据模型） */
+    private const val SCHEDULE_STATE_PREFS = "trackr_reminder_schedule_state"
+    private const val KEY_PREFIX_NEXT_TRIGGER = "next_trigger_"
+
+    /**
+     * 当前是否可以设置精确闹钟。
+     * Android 12 以下无需授权，始终为 true；Android 12+ 取决于用户是否授予 SCHEDULE_EXACT_ALARM。
+     * 供 UI 设置提醒时判断是否需要引导用户开启「闹钟和提醒」权限。
+     */
+    fun canScheduleExact(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return false
+        return alarmManager.canScheduleExactAlarms()
+    }
+
+    /**
+     * 读取指定提醒最近一次计划的触发时间；从未调度或已取消时返回 null
+     */
+    fun getLastScheduledTriggerMillis(context: Context, reminderId: String): Long? {
+        val prefs = scheduleStatePrefs(context)
+        val key = KEY_PREFIX_NEXT_TRIGGER + reminderId
+        return if (prefs.contains(key)) prefs.getLong(key, 0L) else null
+    }
+
+    /**
+     * 找出计划时间已过却未触发（如关机期间错过）的一次性提醒 ID。
+     * 没有计划时间记录的提醒不视为过期，保持原有重新调度行为。
+     *
+     * @param lastScheduledTrigger 根据提醒 ID 查询上次计划触发时间
+     */
+    fun findExpiredOneTimeReminderIds(
+        reminders: List<ScheduledReminder>,
+        nowMillis: Long,
+        lastScheduledTrigger: (String) -> Long?
+    ): Set<String> {
+        return reminders
+            .filter { it.enabled && it.isOneTime }
+            .filter { reminder ->
+                val planned = lastScheduledTrigger(reminder.id)
+                planned != null && planned <= nowMillis
+            }
+            .map { it.id }
+            .toSet()
+    }
 
     /**
      * 计算下一个准确触发的时间戳 (毫秒)
@@ -143,6 +189,7 @@ object ReminderScheduler {
                 pendingIntent
             )
         }
+        recordNextTrigger(context, reminder.id, nextTriggerMillis)
     }
 
     /**
@@ -153,6 +200,7 @@ object ReminderScheduler {
         val pendingIntent = createPendingIntent(context, reminderId)
         alarmManager.cancel(pendingIntent)
         pendingIntent.cancel()
+        scheduleStatePrefs(context).edit().remove(KEY_PREFIX_NEXT_TRIGGER + reminderId).apply()
         Log.d(TAG, "Cancelled reminder $reminderId")
     }
 
@@ -167,6 +215,15 @@ object ReminderScheduler {
                 cancelReminder(context, reminder.id)
             }
         }
+    }
+
+    private fun scheduleStatePrefs(context: Context): SharedPreferences =
+        context.getSharedPreferences(SCHEDULE_STATE_PREFS, Context.MODE_PRIVATE)
+
+    private fun recordNextTrigger(context: Context, reminderId: String, triggerMillis: Long) {
+        scheduleStatePrefs(context).edit()
+            .putLong(KEY_PREFIX_NEXT_TRIGGER + reminderId, triggerMillis)
+            .apply()
     }
 
     private fun createPendingIntent(context: Context, reminderId: String): PendingIntent {
