@@ -9,6 +9,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.os.Looper
+import android.os.SystemClock
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -24,7 +25,6 @@ import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitSearchResult
 import com.trackr.ui.util.FixedDelayPollingStrategy
 import com.trackr.ui.util.PollingCoordinator
-import com.trackr.widget.BusStopWidgetProvider
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -80,7 +80,9 @@ data class HomeUiState(
 class HomeViewModel(
     application: Application,
     private val repository: ITransitRepository,
-    private val enableAutoPolling: Boolean = true
+    private val enableAutoPolling: Boolean = true,
+    /** 单调时钟（毫秒），用于判断恢复轮询时距上次刷新是否已超过一个周期；测试可替换 */
+    private val elapsedRealtimeMillis: () -> Long = { SystemClock.elapsedRealtime() }
 ) : AndroidViewModel(application) {
 
     constructor(application: Application) : this(
@@ -96,11 +98,23 @@ class HomeViewModel(
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    /** 上一次实时数据（附近站 + 收藏）刷新完成的时间，基于 [elapsedRealtimeMillis]；0 表示还没刷新过 */
+    @Volatile
+    private var lastRealtimeRefreshAtMs: Long = 0L
+
+    /** 恢复轮询时补发的一次立即刷新 */
+    private var catchUpPollJob: Job? = null
+
     internal val pollingCoordinator = PollingCoordinator(
         scope = viewModelScope,
         strategy = FixedDelayPollingStrategy(POLLING_INTERVAL_MS),
         initialEnabled = enableAutoPolling
     ) {
+        pollRealtimeOnce()
+    }
+
+    /** 轮询一次附近站点与收藏线路的实时到站（定位 / 下拉刷新进行中时跳过，避免并发重复请求） */
+    private suspend fun pollRealtimeOnce() {
         val state = _uiState.value
         if (!state.isRefreshing && !state.isLoadingNearby && !state.isLocating) {
             val nearbyResult = repository.getNearbyStops(
@@ -116,6 +130,7 @@ class HomeViewModel(
                     favoritesRealtime = favResult.getOrNull() ?: it.favoritesRealtime
                 )
             }
+            lastRealtimeRefreshAtMs = elapsedRealtimeMillis()
         }
     }
 
@@ -156,12 +171,10 @@ class HomeViewModel(
             }
         }
 
-        // 观察数据仓库收藏列表，并在变更时同步桌面快捷方式与微件
+        // 观察数据仓库收藏列表（桌面快捷方式与微件的同步统一在 MainActivity 里做，且只在收藏内容真变时触发）
         viewModelScope.launch {
             repository.favorites.collect { favs ->
                 _uiState.update { it.copy(favorites = favs) }
-                BusStopWidgetProvider.updateDynamicShortcuts(getApplication(), favs)
-                BusStopWidgetProvider.triggerRefresh(getApplication())
             }
         }
 
@@ -275,6 +288,14 @@ class HomeViewModel(
         return hasFine || hasCoarse
     }
 
+    /**
+     * 获取一次设备定位（WGS-84）。
+     *
+     * 1. 先看各 provider 的 lastKnown：够新（强制刷新 10 秒 / 否则 60 秒内）且精度 ≤100m 的直接用；
+     * 2. 否则在 [LOCATION_WINDOW_MS] 窗口内主动监听，收集多个 fix 取精度最高的（拿到 ≤100m 的提前结束）；
+     * 3. 窗口内什么都没拿到时，才退回 lastKnown 里最新的一个，且只接受 [MAX_STALE_LOCATION_AGE_MS] 内的。
+     * 年龄一律用单调时钟 elapsedRealtimeNanos 计算，不受用户改系统时间影响。
+     */
     private suspend fun fetchGpsLocation(forceFresh: Boolean = false): Location? {
         if (!hasLocationPermission()) return null
         val lm = locationManager ?: return null
@@ -288,19 +309,20 @@ class HomeViewModel(
 
         var bestFresh: Location? = null
         var bestStale: Location? = null
-        val now = System.currentTimeMillis()
         val freshThreshold = if (forceFresh) 10_000L else 60_000L // 强制刷新时仅复用10秒内极新鲜的定位，超时则向硬件重新请求实时 fix
 
         for (provider in candidateProviders) {
             try {
                 if (lm.isProviderEnabled(provider)) {
                     val loc = lm.getLastKnownLocation(provider) ?: continue
-                    if (now - loc.time < freshThreshold) {
-                        if (bestFresh == null || (loc.hasAccuracy() && loc.accuracy < (bestFresh.accuracy.takeIf { bestFresh.hasAccuracy() } ?: Float.MAX_VALUE))) {
-                            bestFresh = loc
-                        }
+                    val age = locationAgeMillis(loc)
+                    if (age < 0L) continue
+                    if (age < freshThreshold && isMoreAccurate(loc, bestFresh)) {
+                        bestFresh = loc
                     }
-                    if (bestStale == null || loc.time > bestStale.time) {
+                    if (age <= MAX_STALE_LOCATION_AGE_MS &&
+                        (bestStale == null || age < locationAgeMillis(bestStale))
+                    ) {
                         bestStale = loc
                     }
                 }
@@ -309,11 +331,12 @@ class HomeViewModel(
             }
         }
 
-        if (bestFresh != null) {
-            return bestFresh
+        val freshCandidate = bestFresh
+        if (freshCandidate != null && isGoodEnough(freshCandidate)) {
+            return freshCandidate
         }
 
-        // 主动向可用 provider 发起高频监听，最多等待 4.5 秒
+        // 主动向可用 provider 发起高频监听，在窗口内收集多个 fix
         val activeProviders = listOf("fused", LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER).filter { provider ->
             try {
                 lm.isProviderEnabled(provider)
@@ -323,19 +346,26 @@ class HomeViewModel(
         }
 
         if (activeProviders.isEmpty()) {
-            return bestStale
+            return freshCandidate ?: bestStale
         }
 
-        val realTimeFix = withTimeoutOrNull(4500L) {
+        // 窗口内收到的最准 fix（监听回调与本协程都在主线程，无并发问题）
+        var bestLive: Location? = null
+        val goodFix = withTimeoutOrNull(LOCATION_WINDOW_MS) {
             suspendCancellableCoroutine<Location?> { cont ->
                 val listener = object : LocationListener {
                     override fun onLocationChanged(location: Location) {
-                        try {
-                            lm.removeUpdates(this)
-                        } catch (_: Exception) {
+                        if (isMoreAccurate(location, bestLive)) {
+                            bestLive = location
                         }
-                        if (cont.isActive) {
-                            cont.resume(location)
+                        if (isGoodEnough(location)) {
+                            try {
+                                lm.removeUpdates(this)
+                            } catch (_: Exception) {
+                            }
+                            if (cont.isActive) {
+                                cont.resume(location)
+                            }
                         }
                     }
 
@@ -368,7 +398,32 @@ class HomeViewModel(
             }
         }
 
-        return realTimeFix ?: bestStale
+        val liveCandidate = bestLive
+        return goodFix
+            ?: pickMoreAccurate(liveCandidate, freshCandidate)
+            ?: bestStale
+    }
+
+    /** 定位年龄（毫秒）：优先用 elapsedRealtimeNanos，缺失（为 0）时回落墙钟 time */
+    private fun locationAgeMillis(loc: Location): Long =
+        if (loc.elapsedRealtimeNanos > 0L) {
+            (SystemClock.elapsedRealtimeNanos() - loc.elapsedRealtimeNanos) / 1_000_000L
+        } else {
+            System.currentTimeMillis() - loc.time
+        }
+
+    private fun accuracyOf(loc: Location): Float = if (loc.hasAccuracy()) loc.accuracy else Float.MAX_VALUE
+
+    private fun isGoodEnough(loc: Location): Boolean = loc.hasAccuracy() && loc.accuracy <= GOOD_ACCURACY_METERS
+
+    private fun isMoreAccurate(candidate: Location, current: Location?): Boolean =
+        current == null || accuracyOf(candidate) < accuracyOf(current)
+
+    private fun pickMoreAccurate(a: Location?, b: Location?): Location? = when {
+        a == null -> b
+        b == null -> a
+        accuracyOf(a) <= accuracyOf(b) -> a
+        else -> b
     }
 
     private fun loadNearbyStops(
@@ -511,14 +566,30 @@ class HomeViewModel(
             favJob.join()
             nearbyJob.join()
             _uiState.update { it.copy(isRefreshing = false, isLocating = false, isLoadingNearby = false) }
+            lastRealtimeRefreshAtMs = elapsedRealtimeMillis()
         }
     }
 
     /**
-     * 设置轮询是否激活（生命周期感知或显式开关）
+     * 设置轮询是否激活（生命周期感知或显式开关）。
+     * 只应在 App 前台、当前 tab 是首页且首页在回退栈顶时激活（由 MainActivity 控制）。
+     * 从暂停恢复时，若距上次刷新已超过一个轮询周期，立即补刷一次，而不是再等一个完整周期。
      */
     fun setPollingActive(active: Boolean) {
+        val resuming = active && !pollingCoordinator.isPollingActive
         pollingCoordinator.setActive(active)
+        if (!active) {
+            catchUpPollJob?.cancel()
+            catchUpPollJob = null
+            return
+        }
+        val lastRefresh = lastRealtimeRefreshAtMs
+        if (resuming && lastRefresh > 0L &&
+            elapsedRealtimeMillis() - lastRefresh >= POLLING_INTERVAL_MS &&
+            catchUpPollJob?.isActive != true
+        ) {
+            catchUpPollJob = viewModelScope.launch { pollRealtimeOnce() }
+        }
     }
 
     /**
@@ -685,5 +756,14 @@ class HomeViewModel(
         const val MAX_NEARBY_STOPS_LIMIT = 16
         const val NEARBY_STOPS_LIMIT = 4
         const val POLLING_INTERVAL_MS = 15_000L
+
+        /** 主动定位的收集窗口 */
+        const val LOCATION_WINDOW_MS = 4_500L
+
+        /** 精度达到该值即可提前结束定位收集 */
+        const val GOOD_ACCURACY_METERS = 100f
+
+        /** 兜底使用的旧定位最大年龄 */
+        const val MAX_STALE_LOCATION_AGE_MS = 10 * 60 * 1000L
     }
 }

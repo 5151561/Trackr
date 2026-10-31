@@ -20,6 +20,8 @@ import com.trackr.data.remote.amap.AmapSdkManager
  * 这里用一个 Activity 级的容器持有地图实例：
  * - 切走：只把 container 从窗口摘下来（onPause），地图实例、瓦片缓存、相机位置都留着；
  * - 回来：同一个实例重新挂上去（onResume），已绘制的覆盖物原样保留；
+ * - 按 Home / 锁屏（Activity ON_PAUSE）：调用 [onHostPause] 暂停内置定位与 GL 渲染，
+ *   回到前台（ON_RESUME）且容器仍挂在窗口上时由 [onHostResume] 恢复；
  * - Activity 真正销毁时才 onDestroy。
  *
  * 注意：onCreate 必须等 view attach 到窗口之后再调用，否则高德 SDK 会卡在初始化状态，
@@ -34,6 +36,9 @@ class AmapMapSession(private val activity: Activity) {
     private var isCreated = false
     private var isResumed = false
     private var isDestroyed = false
+
+    /** 宿主 Activity 是否处于 pause 状态（按 Home / 锁屏）；暂停期间即使容器挂上窗口也不 onResume */
+    private var isHostPaused = false
 
     private var appliedKey: String? = null
     private var darkMode = false
@@ -78,6 +83,18 @@ class AmapMapSession(private val activity: Activity) {
         if (dark == darkMode) return
         darkMode = dark
         applyMapType()
+    }
+
+    /** 宿主 Activity ON_PAUSE：暂停地图（停止内置定位与渲染） */
+    fun onHostPause() {
+        isHostPaused = true
+        pause()
+    }
+
+    /** 宿主 Activity ON_RESUME：容器仍挂在窗口上时恢复地图 */
+    fun onHostResume() {
+        isHostPaused = false
+        if (container.isAttachedToWindow) resume()
     }
 
     /** 用户主动重试：丢弃当前实例重新创建 */
@@ -172,7 +189,7 @@ class AmapMapSession(private val activity: Activity) {
     }
 
     private fun resume() {
-        if (isDestroyed || !isCreated || isResumed) return
+        if (isDestroyed || !isCreated || isResumed || isHostPaused) return
         isResumed = true
         runCatching { mapView?.onResume() }
     }

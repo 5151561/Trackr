@@ -203,9 +203,13 @@ fun RoutePlanScreen(
     }
     // 定位不可用时的兜底视角：当前城市中心。未收录的城市宁可不动相机，
     // 也不能回落到某个内置城市（否则用户会被搬到毫不相干的地方）。
+    // 城市中心表是 WGS-84，高德取景要 GCJ-02，先转换（否则偏 300~600 米）
     val cityCenterLatLng = remember(currentCity.cityName) {
         ProvinceCityCatalog.findCityCenterCoordinates(currentCity.cityName)
-            ?.let { (lat, lng) -> LatLng(lat, lng) }
+            ?.let { (lat, lng) ->
+                val (gcjLat, gcjLng) = CoordTransform.wgs84ToGcj02(lat, lng)
+                LatLng(gcjLat, gcjLng)
+            }
     }
 
     var originText by rememberSaveable { mutableStateOf("") }
@@ -1847,7 +1851,8 @@ fun AmapRealVectorMapView(
     // 切换方案不重新缩放，用户可以直接对比。
     LaunchedEffect(schemes, selectedIndex, aMap, isMapLoaded, leg1ColorArgb, leg2ColorArgb, walkColorArgb, otherSchemeColorArgb) {
         if (aMap == null || !isMapLoaded) return@LaunchedEffect
-        aMap.clear()
+        // clear(true)：保留定位蓝点，只清掉方案覆盖物
+        aMap.clear(true)
 
         // 1. 其他方案：细灰半透明线
         schemes.forEachIndexed { index, scheme ->

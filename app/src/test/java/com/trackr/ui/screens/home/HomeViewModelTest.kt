@@ -567,4 +567,114 @@ class HomeViewModelTest {
         viewModel.pausePolling()
         assertFalse(viewModel.isPollingActive)
     }
+
+    @Test
+    fun testSetPollingActive_resumeAfterOneInterval_refreshesImmediately() = runTest {
+        var now = 1_000_000L
+        val viewModel = HomeViewModel(
+            application = app,
+            repository = fakeRepository,
+            enableAutoPolling = false,
+            elapsedRealtimeMillis = { now }
+        )
+        testScheduler.runCurrent()
+        val callsBefore = fakeRepository.nearbyStopsCalls.size
+
+        // 离开首页超过一个轮询周期后回来：立即补刷一次，而不是再等 15 秒
+        now += HomeViewModel.POLLING_INTERVAL_MS + 1
+        viewModel.setPollingActive(true)
+        testScheduler.runCurrent()
+
+        assertEquals(callsBefore + 1, fakeRepository.nearbyStopsCalls.size)
+        viewModel.setPollingActive(false)
+        assertFalse(viewModel.isPollingActive)
+    }
+
+    @Test
+    fun testSetPollingActive_resumeWithinInterval_doesNotRefreshImmediately() = runTest {
+        var now = 1_000_000L
+        val viewModel = HomeViewModel(
+            application = app,
+            repository = fakeRepository,
+            enableAutoPolling = false,
+            elapsedRealtimeMillis = { now }
+        )
+        testScheduler.runCurrent()
+        val callsBefore = fakeRepository.nearbyStopsCalls.size
+
+        now += 1_000L
+        viewModel.setPollingActive(true)
+        testScheduler.runCurrent()
+
+        assertEquals(callsBefore, fakeRepository.nearbyStopsCalls.size)
+        viewModel.setPollingActive(false)
+    }
+
+    @Test
+    fun testRefresh_whenCachedLocationOlderThanTenMinutes_isRejected() = runTest {
+        val shadowApp = org.robolectric.Shadows.shadowOf(app)
+        shadowApp.grantPermissions(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        val lm = app.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+        val shadowLm = org.robolectric.Shadows.shadowOf(lm)
+        shadowLm.setProviderEnabled(android.location.LocationManager.GPS_PROVIDER, true)
+        // 11 分钟前的旧位置：超过 10 分钟兜底门槛，不能再当作当前位置
+        shadowLm.setLastKnownLocation(
+            android.location.LocationManager.GPS_PROVIDER,
+            android.location.Location(android.location.LocationManager.GPS_PROVIDER).apply {
+                latitude = 30.2741
+                longitude = 120.1551
+                time = System.currentTimeMillis() - 11 * 60_000L
+                accuracy = 10.0f
+            }
+        )
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(HomeViewModel.LOCATION_WINDOW_MS + 500L)
+        testScheduler.runCurrent()
+
+        assertEquals(null, fakeRepository.userLocation.value)
+        assertEquals("定位不可用，已保留当前位置", viewModel.uiState.value.locationError)
+        assertFalse(viewModel.uiState.value.isLocating)
+    }
+
+    @Test
+    fun testRefresh_collectsFixesInWindow_andPicksMostAccurate() = runTest {
+        val shadowApp = org.robolectric.Shadows.shadowOf(app)
+        shadowApp.grantPermissions(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        val lm = app.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+        val shadowLm = org.robolectric.Shadows.shadowOf(lm)
+        shadowLm.setProviderEnabled(android.location.LocationManager.GPS_PROVIDER, true)
+        shadowLm.setProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER, true)
+
+        val viewModel = createViewModel()
+        // 启动定位：没有可用的 lastKnown，开始在窗口内监听
+        testScheduler.runCurrent()
+
+        fun fix(provider: String, lat: Double, lng: Double, acc: Float) =
+            android.location.Location(provider).apply {
+                latitude = lat
+                longitude = lng
+                accuracy = acc
+                time = System.currentTimeMillis()
+                elapsedRealtimeNanos = android.os.SystemClock.elapsedRealtimeNanos()
+            }
+        // 先到的网络定位精度差，后到的 GPS 更准（都没到 100m，不会提前结束）
+        shadowLm.simulateLocation(fix(android.location.LocationManager.NETWORK_PROVIDER, 30.10, 120.10, 800f))
+        shadowLm.simulateLocation(fix(android.location.LocationManager.GPS_PROVIDER, 30.20, 120.20, 300f))
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        testScheduler.advanceTimeBy(HomeViewModel.LOCATION_WINDOW_MS + 500L)
+        testScheduler.runCurrent()
+
+        assertEquals(30.20, fakeRepository.userLocation.value?.first ?: 0.0, 0.0001)
+        assertEquals(120.20, fakeRepository.userLocation.value?.second ?: 0.0, 0.0001)
+        assertFalse(viewModel.uiState.value.isLocating)
+    }
 }

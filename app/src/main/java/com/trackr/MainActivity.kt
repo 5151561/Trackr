@@ -57,9 +57,12 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.currentStateAsState
 import androidx.lifecycle.compose.dropUnlessResumed
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.navigation3.rememberViewModelStoreNavEntryDecorator
@@ -90,6 +93,7 @@ import com.trackr.ui.theme.TrackrTheme
 import com.trackr.util.TransitCodeHelper
 import com.trackr.widget.BusStopWidgetProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
@@ -181,6 +185,20 @@ fun TrackrNavApp(
         onDispose { mapSession?.destroy() }
     }
 
+    // 按 Home / 锁屏时暂停地图（内置定位 4s 一次 + GL 渲染），回到前台再恢复
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, mapSession) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> mapSession?.onHostPause()
+                Lifecycle.Event.ON_RESUME -> mapSession?.onHostResume()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val homeBackStack = rememberNavBackStack(ScreenKey.Home)
     val routePlanBackStack = rememberNavBackStack(ScreenKey.RoutePlan)
     val groupBackStack = rememberNavBackStack(ScreenKey.FavoritesGroup)
@@ -196,13 +214,26 @@ fun TrackrNavApp(
     val homeViewModel: HomeViewModel = viewModel()
     val favoritesGroupViewModel: FavoritesGroupViewModel = viewModel()
 
-    // 自动同步收藏到桌面快捷方式 (App Shortcuts) 与桌面小组件 (AppWidget)，切离主线程调度
-    val favorites by TrackrApp.instance.repository.favorites.collectAsStateWithLifecycle()
-    LaunchedEffect(favorites) {
-        withContext(Dispatchers.IO) {
-            BusStopWidgetProvider.updateDynamicShortcuts(context, favorites)
-            BusStopWidgetProvider.triggerRefresh(context)
-        }
+    // 首页轮询只在 App 前台、当前 tab 是首页且首页在回退栈顶时进行；切 tab / 进详情 / 回桌面即暂停
+    val lifecycleState by lifecycleOwner.lifecycle.currentStateAsState()
+    val shouldPollHome = selectedTab == "home" &&
+        homeBackStack.lastOrNull() is ScreenKey.Home &&
+        lifecycleState.isAtLeast(Lifecycle.State.STARTED)
+    LaunchedEffect(shouldPollHome) {
+        homeViewModel.setPollingActive(shouldPollHome)
+    }
+
+    // 收藏内容真正变化时才同步桌面快捷方式 (App Shortcuts) 与桌面小组件 (AppWidget)，切离主线程调度。
+    // StateFlow 只在内容不同（equals）时才发新值；跳过订阅时的当前值，冷启动 / 旋转屏幕不再重复刷新。
+    LaunchedEffect(Unit) {
+        TrackrApp.instance.repository.favorites
+            .drop(1)
+            .collect { favorites ->
+                withContext(Dispatchers.IO) {
+                    BusStopWidgetProvider.updateDynamicShortcuts(context, favorites)
+                    BusStopWidgetProvider.triggerRefresh(context)
+                }
+            }
     }
 
     // 申请定位与通知权限
