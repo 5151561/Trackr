@@ -217,14 +217,8 @@ class FavoritesGroupViewModel(
                     refreshRealtimeEta(groupList)
                 }
             }
-            // 将设备实时定位（WGS-84）喂给换乘引擎，作为 ON_BOARD 阶段到达下车站的辅助判定
-            viewModelScope.launch {
-                transitRepository.userLocation.collect { loc ->
-                    if (loc != null) {
-                        TransferAutoSwitchManager.updateUserLocation(loc.first, loc.second)
-                    }
-                }
-            }
+            // 换乘引擎的下车站定位辅助判定需要精度与定位时刻，由拿到 Location 的地方直接调用
+            // TransferAutoSwitchManager.updateUserFix；仓库里的纯经纬度不再转发（无法判断是否过期）
         }
     }
 

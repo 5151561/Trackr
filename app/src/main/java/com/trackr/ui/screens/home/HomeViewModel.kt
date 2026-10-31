@@ -426,6 +426,13 @@ class HomeViewModel(
                     val lat = gpsLocation.latitude
                     val lng = gpsLocation.longitude
                     repository.updateUserLocation(lat, lng)
+                    // 带精度与定位时刻喂给换乘引擎，过期 / 不准的定位不参与下车站判定
+                    com.trackr.service.TransferAutoSwitchManager.updateUserFix(
+                        lat = lat,
+                        lng = lng,
+                        accuracyMeters = if (gpsLocation.hasAccuracy()) gpsLocation.accuracy else null,
+                        elapsedRealtimeNanos = gpsLocation.elapsedRealtimeNanos
+                    )
 
                     // 尝试反向根据坐标解析匹配城市
                     val resolvedCity = try {
@@ -659,11 +666,9 @@ class HomeViewModel(
     fun stopTracking() {
         viewModelScope.launch {
             repository.updateTrackingSession(TrackingSessionState(isActive = false))
-            val stopIntent = Intent("com.trackr.action.STOP_TRACKING").apply {
-                setPackage(getApplication<Application>().packageName)
-            }
             try {
-                getApplication<Application>().sendBroadcast(stopIntent)
+                // 直接停止追踪服务；分组追踪时同时清掉换乘组状态
+                com.trackr.service.TransferAutoSwitchManager.stopGroupTracking(getApplication<Application>())
             } catch (_: Exception) {
             }
         }
