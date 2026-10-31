@@ -30,6 +30,9 @@ class FakeTransitRepository(
     private val _selectedCity = MutableStateFlow(initialCity)
     override val selectedCity: StateFlow<TransitCity> = _selectedCity.asStateFlow()
 
+    /** 可在测试中设为 false 模拟首次安装（从未存过城市） */
+    override var hasSavedCity: Boolean = true
+
     private val _engineMode = MutableStateFlow(EngineMode.CHELAILE)
     override val engineMode: StateFlow<EngineMode> = _engineMode.asStateFlow()
 
@@ -89,15 +92,25 @@ class FakeTransitRepository(
 
     override suspend fun selectCity(city: TransitCity) {
         _selectedCity.value = city
+        hasSavedCity = true
     }
 
     override suspend fun getSupportedCities(forceRefresh: Boolean): Result<List<TransitCity>> {
         return supportedCitiesResult
     }
 
+    /** 为 null 时默认返回当前已选城市 */
+    var resolveCityResult: Result<TransitCity?>? = null
+
     override suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): Result<TransitCity?> {
-        return Result.success(_selectedCity.value)
+        return resolveCityResult ?: Result.success(_selectedCity.value)
     }
+
+    /** 记录每次附近站点查询的 (城市, 纬度, 经度) */
+    val nearbyStopsCalls: MutableList<Triple<TransitCity, Double, Double>> = mutableListOf()
+
+    /** 可按查询坐标返回不同结果；为 null 时统一返回 [nearbyStopsResult] */
+    var nearbyStopsResultProvider: ((TransitCity, Double, Double) -> Result<List<NearbyStop>>)? = null
 
     override suspend fun getNearbyStops(
         city: TransitCity,
@@ -105,7 +118,8 @@ class FakeTransitRepository(
         wgsLng: Double,
         limit: Int
     ): Result<List<NearbyStop>> {
-        return nearbyStopsResult
+        nearbyStopsCalls += Triple(city, wgsLat, wgsLng)
+        return nearbyStopsResultProvider?.invoke(city, wgsLat, wgsLng) ?: nearbyStopsResult
     }
 
     override suspend fun getStopDetail(

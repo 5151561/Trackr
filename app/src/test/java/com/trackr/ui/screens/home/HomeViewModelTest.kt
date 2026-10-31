@@ -434,6 +434,104 @@ class HomeViewModelTest {
         assertEquals(121.4737, fakeRepository.userLocation.value?.second ?: 0.0, 0.0001)
     }
 
+    private fun grantFreshGpsLocation(lat: Double, lng: Double) {
+        org.robolectric.Shadows.shadowOf(app).grantPermissions(
+            android.Manifest.permission.ACCESS_FINE_LOCATION,
+            android.Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+        val lm = app.getSystemService(android.content.Context.LOCATION_SERVICE) as android.location.LocationManager
+        val shadowLm = org.robolectric.Shadows.shadowOf(lm)
+        shadowLm.setProviderEnabled(android.location.LocationManager.GPS_PROVIDER, true)
+        shadowLm.setLastKnownLocation(
+            android.location.LocationManager.GPS_PROVIDER,
+            android.location.Location(android.location.LocationManager.GPS_PROVIDER).apply {
+                latitude = lat
+                longitude = lng
+                time = System.currentTimeMillis()
+                accuracy = 3.0f
+            }
+        )
+    }
+
+    @Test
+    fun testStartupLocate_keepsSavedCity_whenLocatedCityDiffers() = runTest {
+        // Issue #6：已选城市（上海），定位到另一个城市（杭州），重启后不应被覆盖
+        grantFreshGpsLocation(30.2741, 120.1551)
+        fakeRepository.resolveCityResult = Result.success(hangzhou)
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        assertEquals("034", fakeRepository.selectedCity.value.cityId)
+        assertEquals("上海", viewModel.uiState.value.currentCity.cityName)
+        assertEquals("杭州", viewModel.uiState.value.locatedCity?.cityName)
+        assertEquals(30.2741, fakeRepository.userLocation.value?.first ?: 0.0, 0.0001)
+    }
+
+    @Test
+    fun testPullToRefresh_keepsSavedCity() = runTest {
+        grantFreshGpsLocation(30.2741, 120.1551)
+        fakeRepository.resolveCityResult = Result.success(hangzhou)
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        viewModel.refresh()
+        testScheduler.runCurrent()
+
+        assertEquals("034", fakeRepository.selectedCity.value.cityId)
+        assertEquals("上海", viewModel.uiState.value.currentCity.cityName)
+    }
+
+    @Test
+    fun testStartupLocate_switchesToLocatedCity_whenNoCitySavedYet() = runTest {
+        grantFreshGpsLocation(30.2741, 120.1551)
+        fakeRepository.hasSavedCity = false
+        fakeRepository.resolveCityResult = Result.success(hangzhou)
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        assertEquals("0571", fakeRepository.selectedCity.value.cityId)
+        assertEquals("杭州", viewModel.uiState.value.currentCity.cityName)
+    }
+
+    @Test
+    fun testRelocateFromCityPicker_switchesToLocatedCity() = runTest {
+        grantFreshGpsLocation(30.2741, 120.1551)
+        fakeRepository.resolveCityResult = Result.success(hangzhou)
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals("上海", viewModel.uiState.value.currentCity.cityName)
+
+        viewModel.refreshLocationAndNearby(switchCity = true)
+        testScheduler.runCurrent()
+
+        assertEquals("0571", fakeRepository.selectedCity.value.cityId)
+        assertEquals("杭州", viewModel.uiState.value.currentCity.cityName)
+    }
+
+    @Test
+    fun testStartupLocate_awayFromSavedCity_fallsBackToSavedCityCenter() = runTest {
+        // 人在杭州，已选上海：GPS 坐标查不到上海站点，改用上海中心点再查
+        grantFreshGpsLocation(30.2741, 120.1551)
+        fakeRepository.resolveCityResult = Result.success(hangzhou)
+        val center = com.trackr.domain.model.ProvinceCityCatalog.findCityCenterCoordinates("上海")!!
+        val centerStop = NearbyStop(stopId = "sh_center", name = "人民广场", distanceMeters = 0, lines = emptyList())
+        fakeRepository.nearbyStopsResultProvider = { _, lat, lng ->
+            if (lat == center.first && lng == center.second) Result.success(listOf(centerStop))
+            else Result.success(emptyList())
+        }
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        assertEquals("034", fakeRepository.selectedCity.value.cityId)
+        assertEquals(listOf("人民广场"), viewModel.uiState.value.nearbyStops.map { it.name })
+        assertEquals(center.first, viewModel.uiState.value.currentLat, 0.0001)
+        assertEquals(center.second, viewModel.uiState.value.currentLng, 0.0001)
+    }
+
     @Test
     fun testPollingLifecycle_pauseResumeAndExplicitControl() = runTest {
         val vmWithAutoPolling = HomeViewModel(
