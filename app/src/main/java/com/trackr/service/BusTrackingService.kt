@@ -83,6 +83,23 @@ class BusTrackingService : LifecycleService() {
     /** 最近一次成功刷新拿到的在途车辆（手动“我已上车”选车用） */
     private var lastBuses: List<LiveBus> = emptyList()
 
+    /** 服务内定位（跟车检测、下车判定用）；只有前台服务带上 location 类型时才启用 */
+    private val locationSource: ServiceLocationSource by lazy {
+        ServiceLocationSource(this).also { source ->
+            source.onFix = { fix ->
+                TransferAutoSwitchManager.updateUserFix(
+                    lat = fix.latitude,
+                    lng = fix.longitude,
+                    accuracyMeters = if (fix.hasAccuracy()) fix.accuracy else null,
+                    elapsedRealtimeNanos = fix.elapsedRealtimeNanos
+                )
+            }
+        }
+    }
+
+    /** 本次前台服务是否带上了 location 类型（没有就拿不到锁屏后的定位，跟车检测关闭） */
+    private var locationTrackingAllowed: Boolean = false
+
     /** 服务内部切程：换乘引擎在服务存活时直接调用，不再 startForegroundService 绕一圈 */
     private val inServiceLegSwitcher: (TrackingStartParams) -> Boolean = { params ->
         if (Looper.myLooper() == Looper.getMainLooper() && currentSession.isActive) {
@@ -112,19 +129,45 @@ class BusTrackingService : LifecycleService() {
 
         // 先进入前台（startForegroundService 要求尽快调用 startForeground）
         val notification = LiveProgressNotificationHelper.buildNotification(this, buildInitialSession(params))
-        val fgsType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+        // 分组换乘且有精确定位权限时，前台服务带上 location 类型，锁屏后也能定位做跟车检测
+        val wantLocation = !params.groupId.isNullOrEmpty() && locationSource.hasPrecisePermission()
+        locationTrackingAllowed = enterForeground(notification, wantLocation)
+
+        beginSession(params)
+    }
+
+    /**
+     * 进入前台。带 location 类型失败时（如从后台启动、Android 14+ 不允许使用期间定位）退回只用 specialUse。
+     * @return 是否成功带上了 location 类型
+     */
+    private fun enterForeground(notification: android.app.Notification, wantLocation: Boolean): Boolean {
+        val baseType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else {
             0
+        }
+        if (wantLocation && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            try {
+                ServiceCompat.startForeground(
+                    this,
+                    LiveProgressNotificationHelper.NOTIFICATION_ID_LIVE_PROGRESS,
+                    notification,
+                    baseType or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                )
+                return true
+            } catch (e: SecurityException) {
+                Log.w(TAG, "Location FGS type not allowed, tracking without location", e)
+            } catch (e: IllegalStateException) {
+                Log.w(TAG, "Location FGS type rejected, tracking without location", e)
+            }
         }
         ServiceCompat.startForeground(
             this,
             LiveProgressNotificationHelper.NOTIFICATION_ID_LIVE_PROGRESS,
             notification,
-            fgsType
+            baseType
         )
-
-        beginSession(params)
+        return false
     }
 
     /**
@@ -149,6 +192,7 @@ class BusTrackingService : LifecycleService() {
         TrackrApp.instance.repository.updateTrackingSession(currentSession)
         // 2. 刷新常驻通知
         LiveProgressNotificationHelper.updateNotification(this, currentSession)
+        updateLocationCadence(currentSession)
         // 3. 服务存活期间由服务内部完成切程
         TransferAutoSwitchManager.legSwitcher = inServiceLegSwitcher
         // 4. 启动定时轮询协程
@@ -253,7 +297,7 @@ class BusTrackingService : LifecycleService() {
 
             // 分组换乘使用两阶段追踪核心（等车站 A / 锁定车 -> 下车站 B）
             if (currentSession.legPhase != LegPhase.SINGLE) {
-                handleGroupPollSuccess(detail.buses)
+                handleGroupPollSuccess(detail)
             } else {
                 handleSinglePollSuccess(detail)
             }
@@ -299,9 +343,11 @@ class BusTrackingService : LifecycleService() {
     /**
      * 分组换乘两阶段轮询处理：委托纯函数 [GroupLegTracker]，再处理提醒与换乘流转。
      */
-    private fun handleGroupPollSuccess(buses: List<LiveBus>) {
+    private fun handleGroupPollSuccess(detail: BusLineDetail) {
         val previous = currentSession
-        val update = GroupLegTracker.processPoll(previous, buses)
+        val update = GroupLegTracker.processPoll(previous, detail.buses, buildBoardingInput(previous, detail))
+        if (update.missedBoarding) Log.i(TAG, "Boarding missed for bus ${previous.boardingCandidateBusId}")
+        if (update.relocked) Log.i(TAG, "Relocked boarded bus to ${update.state.lockedBusId}")
         // 提醒编排按“轮询前”的阶段判断：先发上车站到站提醒，再重置标志进入 ON_BOARD
         val decision = GroupLegTracker.planAlerts(previous, update)
         val alertState = decision.alertState
@@ -324,12 +370,36 @@ class BusTrackingService : LifecycleService() {
         TransferAutoSwitchManager.onLegProgressUpdated(this, state)
     }
 
+    /**
+     * 构建定位跟车上下文。返回 null 表示本轮不用定位（保持“车到上车站即上车”的原行为）：
+     * 前台服务没带 location 类型、没有精确定位权限、或拿不到上车站坐标。
+     */
+    private fun buildBoardingInput(session: TrackingSessionState, detail: BusLineDetail): BoardingDetector.Input? {
+        if (!locationTrackingAllowed || !locationSource.hasPrecisePermission()) return null
+        val boardStop = detail.stops.firstOrNull { it.order == session.boardStopOrder } ?: return null
+        if (boardStop.wgsLat <= 0.0 || boardStop.wgsLng <= 0.0) return null
+        val fix = locationSource.usableFix()
+        return BoardingDetector.Input(
+            user = fix?.let { BoardingDetector.UserPosition(it.latitude, it.longitude, it.accuracy) },
+            boardStopLat = boardStop.wgsLat,
+            boardStopLng = boardStop.wgsLng,
+            nowMillis = System.currentTimeMillis()
+        )
+    }
+
     /** 写回会话状态并刷新通知；会话已停止时什么都不做（停止后不再刷新通知） */
     private fun publishState(state: TrackingSessionState) {
         if (!currentSession.isActive || !state.isActive) return
         currentSession = state
         TrackrApp.instance.repository.updateTrackingSession(state)
         LiveProgressNotificationHelper.updateNotification(this, state)
+        updateLocationCadence(state)
+    }
+
+    /** 按追踪阶段调整定位频率；不需要时关闭定位 */
+    private fun updateLocationCadence(state: TrackingSessionState) {
+        val tier = if (locationTrackingAllowed) LocationCadence.tierFor(state) else LocationCadence.Tier.OFF
+        locationSource.apply(tier)
     }
 
     /**
@@ -367,6 +437,7 @@ class BusTrackingService : LifecycleService() {
         val stoppedState = TrackingSessionState(isActive = false)
         currentSession = stoppedState
         TrackrApp.instance.repository.updateTrackingSession(stoppedState)
+        locationSource.stop()
         TransferAutoSwitchManager.clearUserFix()
         unregisterLegSwitcher()
 
@@ -385,6 +456,7 @@ class BusTrackingService : LifecycleService() {
         sessionGeneration++
         pollingJob?.cancel()
         pollingJob = null
+        locationSource.stop()
         unregisterLegSwitcher()
         // 服务被销毁（含系统回收）时把仓库里的追踪状态置为 inactive，避免 UI 一直显示“追踪中”
         if (currentSession.isActive) {

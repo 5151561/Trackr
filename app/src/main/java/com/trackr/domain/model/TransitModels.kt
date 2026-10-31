@@ -408,5 +408,22 @@ data class TrackingSessionState(
     /** 锁定车辆当前是否信号丢失（从实时数据中消失） */
     val isSignalLost: Boolean = false,
     /** 单线路模式：正在追踪的车辆连续从数据里消失的轮询次数（短暂消失时保持原车） */
-    val missingBusPolls: Int = 0
-)
+    val missingBusPolls: Int = 0,
+    // 定位跟车检测（仅分组换乘、有精确定位时使用）
+    /** WAITING_BOARD：车已到上车站、正在用定位确认用户是否上了这辆车；null 表示没有待确认的车 */
+    val boardingCandidateBusId: String? = null,
+    /** 进入待确认的时刻（墙钟毫秒），用于超时兜底 */
+    val boardingCandidateSinceMillis: Long = 0L,
+    /** 连续满足“已上车”条件的轮询次数 */
+    val boardingConfirmStreak: Int = 0,
+    /** 连续满足“没赶上”条件的轮询次数 */
+    val boardingMissStreak: Int = 0,
+    /** ON_BOARD：疑似锁错车时，离用户更近的那辆车 */
+    val relockCandidateBusId: String? = null,
+    /** 连续满足“应改锁 [relockCandidateBusId]”条件的轮询次数 */
+    val relockStreak: Int = 0
+) {
+    /** 车已到上车站，正在用定位确认用户是否上车 */
+    val isAwaitingBoardingConfirmation: Boolean
+        get() = legPhase == LegPhase.WAITING_BOARD && boardingCandidateBusId != null
+}

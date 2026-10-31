@@ -1,5 +1,6 @@
 package com.trackr.service
 
+import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.LegPhase
 import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.TrackingSessionState
@@ -11,7 +12,10 @@ import com.trackr.domain.model.TrackingSessionState
  * - WAITING_BOARD（等车）：目标是上车站 A（boardStopOrder）。只考虑 order<=A 的车，
  *   取离 A 最近的一辆；该车到 A 后锁定其 busId 并进入 ON_BOARD。
  * - ON_BOARD（已上车）：只跟踪锁定的 busId，目标下车站 B（targetOrder）；
- *   锁定车辆从数据里消失时保持上次状态并标记信号丢失，绝不换成别的车。
+ *   锁定车辆从数据里消失时保持上次状态并标记信号丢失，不会凭车辆数据换成别的车。
+ *
+ * 有精确定位时（传入 [BoardingDetector.Input]），车到 A 不再直接算上车，而是先进入“待确认”，
+ * 由 [BoardingDetector] 根据人车距离判断上车 / 没赶上；ON_BOARD 阶段也可据定位纠正锁错的车。
  */
 object GroupLegTracker {
 
@@ -24,7 +28,13 @@ object GroupLegTracker {
     data class LegUpdate(
         val state: TrackingSessionState,
         val reachedBoardStop: Boolean = false,
-        val reachedDropStop: Boolean = false
+        val reachedDropStop: Boolean = false,
+        /** 定位跟车：车刚到上车站 A，但还没确认用户上车（应发“车已到站”提醒，阶段仍为 WAITING_BOARD） */
+        val busArrivedAtBoard: Boolean = false,
+        /** 定位跟车：判定用户没赶上待确认的那班车，已改为等下一班 */
+        val missedBoarding: Boolean = false,
+        /** 定位跟车：ON_BOARD 阶段根据定位改锁了所乘车辆 */
+        val relocked: Boolean = false
     )
 
     /** 本轮应发出的提醒类型 */
@@ -91,10 +101,13 @@ object GroupLegTracker {
      */
     fun confirmBoarded(session: TrackingSessionState, buses: List<LiveBus>): TrackingSessionState {
         val boardOrder = session.boardStopOrder
-        val picked = pickBoardedBus(boardOrder, buses)
-        return session.copy(
+        // 定位跟车正在确认某辆车时，用户手动确认的就是这辆
+        val candidateId = session.boardingCandidateBusId
+        val picked = candidateId?.let { id -> buses.find { it.busId == id } }
+            ?: pickBoardedBus(boardOrder, buses)
+        return BoardingDetector.clearBoardingFields(session).copy(
             legPhase = LegPhase.ON_BOARD,
-            lockedBusId = picked?.busId,
+            lockedBusId = picked?.busId ?: candidateId,
             currentBusId = picked?.busId ?: session.currentBusId,
             currentBusOrder = picked?.order ?: session.currentBusOrder,
             currentBusProgress = picked?.segmentProgress ?: session.currentBusProgress,
@@ -144,6 +157,17 @@ object GroupLegTracker {
                         AlertDecision(state)
                     }
                 }
+                if (update.busArrivedAtBoard) {
+                    // 定位跟车：车到站先提醒，阶段仍为等车（等定位确认是否上车）
+                    if (state.hasTriggeredArrivedAlert) return AlertDecision(state)
+                    val alertState = state.copy(
+                        targetStopName = previous.boardStopName,
+                        stopsRemaining = 0,
+                        isBusArrivedAtStop = true
+                    )
+                    state = state.copy(hasTriggeredArrivedAlert = true, hasTriggeredApproachingAlert = true)
+                    return AlertDecision(state, AlertKind.BOARD_ARRIVED, alertState)
+                }
                 if (state.stopsRemaining in 0..state.alertThresholdStops && !state.hasTriggeredApproachingAlert) {
                     val alertState = state.copy(targetStopName = previous.boardStopName)
                     state = state.copy(hasTriggeredApproachingAlert = true)
@@ -186,16 +210,93 @@ object GroupLegTracker {
      *
      * @param session 当前会话状态（legPhase 必须为 WAITING_BOARD 或 ON_BOARD）
      * @param buses 本次实时数据中该线路的在途车辆
+     * @param boarding 定位跟车上下文；null 表示定位不可用（没有精确定位权限等），保持“车到 A 即上车”的原行为
      */
-    fun processPoll(session: TrackingSessionState, buses: List<LiveBus>): LegUpdate {
+    fun processPoll(
+        session: TrackingSessionState,
+        buses: List<LiveBus>,
+        boarding: BoardingDetector.Input? = null
+    ): LegUpdate {
         return when (session.legPhase) {
-            LegPhase.WAITING_BOARD -> processWaitingBoard(session, buses)
-            LegPhase.ON_BOARD -> processOnBoard(session, buses)
+            LegPhase.WAITING_BOARD -> processWaitingBoard(session, buses, boarding)
+            LegPhase.ON_BOARD -> processOnBoard(session, buses, boarding)
             LegPhase.SINGLE -> LegUpdate(session) // 不应走到这里
         }
     }
 
-    private fun processWaitingBoard(session: TrackingSessionState, buses: List<LiveBus>): LegUpdate {
+    private fun processWaitingBoard(
+        session: TrackingSessionState,
+        buses: List<LiveBus>,
+        boarding: BoardingDetector.Input?
+    ): LegUpdate {
+        val candidateId = session.boardingCandidateBusId
+            ?: return selectWaitingBus(session, buses, boarding)
+
+        // 车已到 A、正在确认用户是否上了这辆车
+        val candidate = buses.find { it.busId == candidateId }
+        if (boarding == null) {
+            // 定位中途不可用（如权限被撤销）：退回原行为，按已上车处理
+            return boardBus(session, candidate, candidateId)
+        }
+        val result = BoardingDetector.evaluateCandidate(session, candidate, boarding)
+        return when (result.verdict) {
+            BoardingDetector.Verdict.BOARDED -> boardBus(result.state, candidate, candidateId)
+            BoardingDetector.Verdict.MISSED -> {
+                // 没赶上：放弃这辆车，重置提醒标志，改等下一班
+                val released = BoardingDetector.clearBoardingFields(result.state).copy(
+                    currentBusId = null,
+                    hasTriggeredApproachingAlert = false,
+                    hasTriggeredArrivedAlert = false
+                )
+                val next = selectWaitingBus(released, buses.filter { it.busId != candidateId }, boarding)
+                next.copy(
+                    state = next.state.copy(statusSummary = "似乎没赶上这班车，已改为等下一班 · ${next.state.statusSummary}"),
+                    missedBoarding = true
+                )
+            }
+            BoardingDetector.Verdict.PENDING -> LegUpdate(
+                result.state.copy(
+                    currentBusId = candidateId,
+                    currentBusOrder = candidate?.order ?: result.state.currentBusOrder,
+                    currentBusProgress = candidate?.segmentProgress ?: result.state.currentBusProgress,
+                    stopsRemaining = 0,
+                    etaSeconds = candidate?.etaSeconds ?: -1,
+                    isBusArrivedAtStop = true,
+                    isSignalLost = false,
+                    statusSummary = "车已到 ${session.boardStopName}，正在确认你是否上车…",
+                    updatedAtMillis = now()
+                )
+            )
+        }
+    }
+
+    /** 锁定 [busId] 并进入 ON_BOARD（[bus] 为本轮数据中的这辆车，可能为 null） */
+    private fun boardBus(session: TrackingSessionState, bus: LiveBus?, busId: String): LegUpdate {
+        val order = bus?.order ?: session.currentBusOrder
+        val stopsToDrop = (session.targetOrder - order).coerceAtLeast(0)
+        val locked = BoardingDetector.clearBoardingFields(session).copy(
+            legPhase = LegPhase.ON_BOARD,
+            lockedBusId = busId,
+            currentBusId = busId,
+            currentBusOrder = order,
+            currentBusProgress = bus?.segmentProgress ?: session.currentBusProgress,
+            startTrackingOrder = session.boardStopOrder,
+            stopsRemaining = stopsToDrop,
+            etaSeconds = bus?.etaSeconds ?: -1,
+            isBusArrivedAtStop = false,
+            isSignalLost = false,
+            statusSummary = "已上车，距下车站 ${session.targetStopName} 还有 $stopsToDrop 站",
+            updatedAtMillis = now()
+        )
+        return LegUpdate(locked, reachedBoardStop = true)
+    }
+
+    /** 正常等车：在未开过 A 的车里选离 A 最近的一辆；车到 A 时按是否有定位决定直接上车还是进入待确认 */
+    private fun selectWaitingBus(
+        session: TrackingSessionState,
+        buses: List<LiveBus>,
+        boarding: BoardingDetector.Input?
+    ): LegUpdate {
         val boardOrder = session.boardStopOrder
         // 只考虑尚未开过上车站 A 的车（order <= A），取离 A 最近的一辆
         val candidates = buses.filter { it.order <= boardOrder }
@@ -214,26 +315,58 @@ object GroupLegTracker {
             )
         }
 
+        // 上一班车已开过 A（或消失）而没有上车：提醒标志属于那班车，换到新车时重置
+        val previousBusGone = session.currentBusId != null && candidates.none { it.busId == session.currentBusId }
+        val base = if (previousBusGone && session.currentBusId != best.busId) {
+            session.copy(hasTriggeredApproachingAlert = false, hasTriggeredArrivedAlert = false)
+        } else {
+            session
+        }
+
         val stopsRemaining = (boardOrder - best.order).coerceAtLeast(0)
         val arrivedBoard = isArrivedAtOrder(boardOrder, best)
 
         if (arrivedBoard) {
-            // 车到上车站 A，锁定该车并进入 ON_BOARD
-            val locked = session.copy(
-                legPhase = LegPhase.ON_BOARD,
-                lockedBusId = best.busId,
-                currentBusId = best.busId,
-                currentBusOrder = best.order,
-                currentBusProgress = best.segmentProgress,
-                startTrackingOrder = boardOrder,
-                stopsRemaining = (session.targetOrder - best.order).coerceAtLeast(0),
-                etaSeconds = best.etaSeconds,
-                isBusArrivedAtStop = false,
-                isSignalLost = false,
-                statusSummary = "已上车，距下车站 ${session.targetStopName} 还有 ${(session.targetOrder - best.order).coerceAtLeast(0)} 站",
-                updatedAtMillis = now()
+            // 没有可用定位：车到上车站 A 即锁定该车并进入 ON_BOARD（原行为）
+            if (boarding == null) return boardBus(base, best, best.busId)
+
+            if (BoardingDetector.shouldStartCandidate(boarding)) {
+                return LegUpdate(
+                    base.copy(
+                        boardingCandidateBusId = best.busId,
+                        boardingCandidateSinceMillis = boarding.nowMillis,
+                        boardingConfirmStreak = 0,
+                        boardingMissStreak = 0,
+                        currentBusId = best.busId,
+                        currentBusOrder = best.order,
+                        currentBusProgress = best.segmentProgress,
+                        stopsRemaining = 0,
+                        etaSeconds = best.etaSeconds,
+                        isBusArrivedAtStop = true,
+                        isSignalLost = false,
+                        statusSummary = "车已到 ${session.boardStopName}，正在确认你是否上车…",
+                        updatedAtMillis = now()
+                    ),
+                    busArrivedAtBoard = true
+                )
+            }
+            // 用户明显不在站附近：只提醒车到了，不算上车
+            val away = BoardingDetector.userDistanceToBoardStop(boarding)
+            val awayText = away?.let { "你离站约 ${RouteProjectionMath.formatDistanceText(it)}，" }.orEmpty()
+            return LegUpdate(
+                base.copy(
+                    currentBusId = best.busId,
+                    currentBusOrder = best.order,
+                    currentBusProgress = best.segmentProgress,
+                    stopsRemaining = 0,
+                    etaSeconds = best.etaSeconds,
+                    isBusArrivedAtStop = true,
+                    isSignalLost = false,
+                    statusSummary = "车已到 ${session.boardStopName}，${awayText}赶不上可等下一班",
+                    updatedAtMillis = now()
+                ),
+                busArrivedAtBoard = true
             )
-            return LegUpdate(locked, reachedBoardStop = true)
         }
 
         val etaText = formatEtaSeconds(best.etaSeconds)
@@ -249,7 +382,7 @@ object GroupLegTracker {
             session.startTrackingOrder
         }
         return LegUpdate(
-            session.copy(
+            base.copy(
                 startTrackingOrder = waitStartOrder,
                 currentBusId = best.busId,
                 currentBusOrder = best.order,
@@ -264,22 +397,40 @@ object GroupLegTracker {
         )
     }
 
-    private fun processOnBoard(session: TrackingSessionState, buses: List<LiveBus>): LegUpdate {
-        if (session.lockedBusId == null) {
+    private fun processOnBoard(
+        incoming: TrackingSessionState,
+        buses: List<LiveBus>,
+        boarding: BoardingDetector.Input?
+    ): LegUpdate {
+        if (incoming.lockedBusId == null) {
             // 手动确认上车时没锁到车：按同样规则（A..A+1 且离 A 最近）补锁
-            val picked = pickBoardedBus(session.boardStopOrder, buses)
+            val picked = pickBoardedBus(incoming.boardStopOrder, buses)
                 ?: return LegUpdate(
-                    session.copy(
+                    incoming.copy(
                         isSignalLost = false,
                         statusSummary = "已确认上车，正在识别所乘车辆…",
                         updatedAtMillis = now()
                     )
                 )
-            return processOnBoard(session.copy(lockedBusId = picked.busId), buses)
+            return processOnBoard(incoming.copy(lockedBusId = picked.busId), buses, boarding)
         }
 
-        val lockedId = session.lockedBusId
+        val lockedId = incoming.lockedBusId
         val locked = buses.find { it.busId == lockedId }
+
+        // 定位跟车：锁定车离用户很远、另一辆车就在用户身边，连续多次后改锁
+        var session = incoming
+        if (boarding != null) {
+            val (relockId, updated) = BoardingDetector.evaluateRelock(incoming, locked, buses, boarding)
+            session = updated
+            if (relockId != null) {
+                val relocked = processOnBoard(session.copy(lockedBusId = relockId), buses, null)
+                return relocked.copy(
+                    state = relocked.state.copy(statusSummary = "已根据定位更正所乘车辆 · ${relocked.state.statusSummary}"),
+                    relocked = true
+                )
+            }
+        }
 
         if (locked == null) {
             // 锁定车辆从数据里消失：保持上次状态，提示信号丢失，绝不换车
