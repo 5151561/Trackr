@@ -270,7 +270,8 @@ fun LineDetailScreen(
                                             }
                                         }
                                     },
-                                    onOpenScheduledReminder = { showReminderDialog = true }
+                                    onOpenScheduledReminder = { showReminderDialog = true },
+                                    fallbackNextDeparture = uiState.fallbackNextDeparture
                                 )
                             }
 

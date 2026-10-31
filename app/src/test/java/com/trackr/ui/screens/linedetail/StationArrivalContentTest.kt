@@ -68,6 +68,7 @@ class StationArrivalContentTest {
 
         composeTestRule.onNodeWithText("车辆均已过该站").assertIsDisplayed()
         composeTestRule.onNodeWithText("下一班约 21:05 从始发站（延安东路外滩）发车").assertIsDisplayed()
+        composeTestRule.onNodeWithText("全线 1 辆车在途 · 查看").assertIsDisplayed()
     }
 
     @Test
@@ -82,7 +83,35 @@ class StationArrivalContentTest {
         setContent(detail, stops[1])
 
         composeTestRule.onNodeWithText("车辆均已过该站").assertIsDisplayed()
-        composeTestRule.onNodeWithText("等待下一班车调度").assertIsDisplayed()
+        composeTestRule.onNodeWithText("暂无下一班发车信息 · 末班 23:30").assertIsDisplayed()
+    }
+
+    @Test
+    fun allBusesPassed_withTimetableFallback_showsStartDepartureTime() {
+        val detail = BusLineDetail(
+            line = lineDirection,
+            stops = stops,
+            buses = listOf(LiveBus(busId = "b1", plateOrFleetNo = "沪A·D8866", order = 6)),
+            operatingState = LineOperatingState.RUNNING,
+            nextDepartureFromStart = null
+        )
+        composeTestRule.setContent {
+            TrackrTheme {
+                StationArrivalContent(
+                    lineDetail = detail,
+                    selectedStop = stops[1],
+                    isTrackingActive = false,
+                    alertThreshold = 2,
+                    onThresholdChange = {},
+                    onOpenBusList = {},
+                    onToggleTracking = {},
+                    onOpenScheduledReminder = {},
+                    fallbackNextDeparture = "21:40"
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithText("下一班约 21:40 从始发站（延安东路外滩）发车").assertIsDisplayed()
     }
 
     @Test
@@ -124,6 +153,6 @@ class StationArrivalContentTest {
         setContent(detail, stops[1])
 
         composeTestRule.onNodeWithText("切换反向同名站").assertDoesNotExist()
-        composeTestRule.onNodeWithText("查看全线车辆 (0)").assertIsDisplayed()
+        composeTestRule.onNodeWithText("全线暂无在途车辆").assertIsDisplayed()
     }
 }

@@ -5,6 +5,7 @@ import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
 import com.trackr.domain.model.BusStop
 import com.trackr.domain.model.DataSourceType
+import com.trackr.domain.model.LineTimetable
 import com.trackr.domain.model.LiveBus
 import com.trackr.domain.model.TransitCity
 import com.trackr.domain.model.TransitCodeProvider
@@ -231,6 +232,54 @@ class LineDetailViewModelTest {
 
         viewModel.setAlertThreshold(5)
         assertEquals(3, viewModel.uiState.value.alertThresholdStops)
+    }
+
+    @Test
+    fun testAllBusesPassed_fillsNextDepartureFromTimetable() = runTest {
+        fakeRepository.lineDetailResult = Result.success(
+            BusLineDetail(
+                line = forwardDirection,
+                stops = stops,
+                buses = listOf(LiveBus(busId = "b1", plateOrFleetNo = "沪A1234", order = 3)),
+                nextDepartureFromStart = null
+            )
+        )
+        fakeRepository.timetableResult = Result.success(
+            LineTimetable(
+                lineId = "line_001",
+                lineName = "49路",
+                todayDepartures = listOf("21:00", "21:40", "22:20")
+            )
+        )
+        val viewModel = LineDetailViewModel(
+            cityId = "034",
+            initialLineId = "line_001",
+            initialTargetOrder = 1,
+            repository = fakeRepository,
+            enableAutoPolling = false,
+            nowHHmm = { "21:28" }
+        )
+        testScheduler.runCurrent()
+
+        assertEquals("21:40", viewModel.uiState.value.fallbackNextDeparture)
+    }
+
+    @Test
+    fun testUpcomingBus_doesNotUseTimetableFallback() = runTest {
+        fakeRepository.timetableResult = Result.success(
+            LineTimetable(lineId = "line_001", lineName = "49路", todayDepartures = listOf("21:40"))
+        )
+        val viewModel = LineDetailViewModel(
+            cityId = "034",
+            initialLineId = "line_001",
+            initialTargetOrder = 3,
+            repository = fakeRepository,
+            enableAutoPolling = false,
+            nowHHmm = { "21:28" }
+        )
+        testScheduler.runCurrent()
+
+        assertNull(viewModel.uiState.value.fallbackNextDeparture)
     }
 
     @Test

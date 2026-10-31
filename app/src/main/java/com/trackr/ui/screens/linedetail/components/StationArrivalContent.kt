@@ -72,7 +72,8 @@ fun StationArrivalContent(
     onOpenBusList: () -> Unit,
     onToggleTracking: () -> Unit,
     onOpenScheduledReminder: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    fallbackNextDeparture: String? = null
 ) {
     val busColors = MaterialTheme.busColors
     val currentOrder = selectedStop?.order ?: 1
@@ -247,6 +248,7 @@ fun StationArrivalContent(
             // 无可用在途车：分运营状态给出下一班始发时间等有效信息
             val line = lineDetail.line
             val nextDeparture = lineDetail.nextDepartureFromStart?.takeIf { it.isNotBlank() }
+                ?: fallbackNextDeparture?.takeIf { it.isNotBlank() }
 
             val (headline, subline) = when (lineDetail.operatingState) {
                 LineOperatingState.ENDED -> {
@@ -264,7 +266,11 @@ fun StationArrivalContent(
                     if (nextDeparture != null) {
                         "车辆均已过该站" to "下一班约 $nextDeparture 从始发站（${line.startStop}）发车"
                     } else if (lineDetail.buses.isNotEmpty()) {
-                        "车辆均已过该站" to "等待下一班车调度"
+                        "车辆均已过该站" to if (line.lastTime.isNotBlank()) {
+                            "暂无下一班发车信息 · 末班 ${line.lastTime}"
+                        } else {
+                            "暂无下一班发车信息"
+                        }
                     } else {
                         "当前暂无在途车辆" to "运营状态：${lineDetail.operatingState.defaultLabel}"
                     }
@@ -294,7 +300,9 @@ fun StationArrivalContent(
             shape = RoundedCornerShape(12.dp)
         ) {
             Text(
-                text = "查看全线车辆 (${lineDetail.buses.size})",
+                text = lineDetail.buses.size.let { count ->
+                    if (count > 0) "全线 $count 辆车在途 · 查看" else "全线暂无在途车辆"
+                },
                 fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold
             )

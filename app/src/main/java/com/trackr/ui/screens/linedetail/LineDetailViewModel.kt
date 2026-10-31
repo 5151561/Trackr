@@ -23,6 +23,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 
 /**
  * 详情页核心三态卡片面板枚举
@@ -52,7 +55,9 @@ data class LineDetailUiState(
     val layoutMode: RouteRailLayoutMode = RouteRailLayoutMode.Horizontal,
     val flipRotationDegrees: Float = 0f,
     val preferredTransitCodeProvider: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
-    val isTransitCodeSheetOpen: Boolean = false
+    val isTransitCodeSheetOpen: Boolean = false,
+    /** 实时接口未给下一班时，从时刻表补齐的下一班始发时间（HH:mm） */
+    val fallbackNextDeparture: String? = null
 )
 
 /**
@@ -67,7 +72,10 @@ class LineDetailViewModel(
     private val initialSource: DataSourceType = if (initialLineId.startsWith("mg:")) DataSourceType.MYGOLBS else DataSourceType.CHELAILE,
     private val lineNameHint: String = "",
     private val repository: ITransitRepository = TrackrApp.instance.repository,
-    private val enableAutoPolling: Boolean = true
+    private val enableAutoPolling: Boolean = true,
+    private val nowHHmm: () -> String = {
+        ZonedDateTime.now(ZoneId.of("Asia/Shanghai")).format(DateTimeFormatter.ofPattern("HH:mm"))
+    }
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(LineDetailUiState())
@@ -162,6 +170,8 @@ class LineDetailViewModel(
 
                 checkFavoriteState(repository.favorites.value)
 
+                refreshFallbackNextDeparture(detail, targetStop)
+
                 // 若之前初次加载未指定 targetOrder，现在已确立选中站，则补充一次精确到该站的 ETA 计算
                 if (isInitial && targetStop != null && targetOrder == null) {
                     selectStop(targetStop)
@@ -175,6 +185,41 @@ class LineDetailViewModel(
                     )
                 }
             }
+        }
+    }
+
+    /** 每条线路方向的时刻表缓存，避免 10 秒轮询时反复拉取 */
+    private val timetableCache = mutableMapOf<String, LineTimetable>()
+
+    /**
+     * 候车站前方无车且实时接口未给下一班时间时，用时刻表补出下一班始发时间。
+     */
+    private suspend fun refreshFallbackNextDeparture(detail: BusLineDetail, stop: BusStop?) {
+        val order = stop?.order ?: run {
+            _uiState.update { it.copy(fallbackNextDeparture = null) }
+            return
+        }
+        val hasUpcomingBus = detail.buses.any { it.order <= order }
+        if (hasUpcomingBus || !detail.nextDepartureFromStart.isNullOrBlank()) {
+            _uiState.update { it.copy(fallbackNextDeparture = null) }
+            return
+        }
+
+        val lineId = detail.line.lineId
+        val timetable = timetableCache[lineId]
+            ?: repository.getTimetable(repository.selectedCity.value, detail.line)
+                .getOrNull()
+                ?.also { timetableCache[lineId] = it }
+
+        val now = nowHHmm()
+        val next = timetable?.let { tb ->
+            tb.todayDepartures.firstOrNull { it >= now }
+                ?: tb.yesterdayDepartures.firstOrNull { it >= now }
+                ?: tb.nextDeparture?.takeIf { it >= now }
+        }
+        // 防止切线后旧请求覆盖新线路
+        if (_uiState.value.lineDetail?.line?.lineId == lineId) {
+            _uiState.update { it.copy(fallbackNextDeparture = next) }
         }
     }
 
@@ -318,7 +363,8 @@ class LineDetailViewModel(
                         lineDetail = revDetail,
                         selectedStop = oppositeStop,
                         panelMode = PanelMode.STATION_CARD,
-                        followedBusId = null
+                        followedBusId = null,
+                        fallbackNextDeparture = null
                     )
                 }
 

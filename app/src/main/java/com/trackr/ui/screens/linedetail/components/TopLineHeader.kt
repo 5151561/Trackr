@@ -8,13 +8,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.DirectionsBus
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -28,7 +26,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.ui.components.common.DataSourceBadge
-import com.trackr.ui.theme.busColors
 
 /**
  * 顶部线路元信息头
@@ -40,7 +37,6 @@ fun TopLineHeader(
     modifier: Modifier = Modifier
 ) {
     val line = lineDetail.line
-    val busColors = MaterialTheme.busColors
 
     Column(
         modifier = modifier
@@ -85,7 +81,7 @@ fun TopLineHeader(
 
         Spacer(modifier = Modifier.height(10.dp))
 
-        // 标签胶囊行：首末班、票价、总站数、当前在途车数
+        // 标签胶囊行：运营时间、票价、总站数（在途车数见站点卡片）
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -96,32 +92,6 @@ fun TopLineHeader(
             CapsuleBadge("运营 ${line.firstTime.ifEmpty { "—" }}–${line.lastTime.ifEmpty { "—" }}")
             if (line.price.isNotEmpty()) CapsuleBadge("票价 ${line.price}")
             CapsuleBadge("共 ${lineDetail.stops.size} 站")
-
-            // 实时在途车辆数胶囊
-            val busCount = lineDetail.buses.size
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = if (busCount > 0) busColors.busChipContainer else MaterialTheme.colorScheme.surfaceVariant
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.DirectionsBus,
-                        contentDescription = null,
-                        tint = if (busCount > 0) busColors.busChipContent else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(13.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (busCount > 0) "当前 $busCount 辆车在途" else "暂无在途车辆",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (busCount > 0) busColors.busChipContent else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
         }
     }
 }
