@@ -16,7 +16,8 @@ import com.trackr.MainActivity
 import com.trackr.R
 import com.trackr.data.repository.ITransitRepository
 import com.trackr.di.AppScopeQualifier
-import com.trackr.domain.math.RouteProjectionMath
+import com.trackr.domain.arrival.ArrivalState
+import com.trackr.domain.arrival.ArrivalText
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.TransitCity
@@ -132,28 +133,32 @@ class BusStopWidgetProvider : AppWidgetProvider(), KoinComponent {
     private fun buildEta(favorite: FavoriteStationLine, detail: BusLineDetail?): Pair<String, Int?> {
         if (detail == null) return "点击刷新同步数据" to 0
 
-        val nearestBus = detail.buses
-            .filter { it.order <= favorite.targetOrder }
-            .maxByOrNull { it.order + it.segmentProgress }
-            ?: return detail.statusDescription.ifBlank {
-                if (detail.operatingState.defaultLabel.isNotEmpty()) {
-                    detail.operatingState.defaultLabel
-                } else {
-                    "暂无在途车辆"
-                }
-            } to 0
-
-        val stopsRemaining = favorite.targetOrder - nearestBus.order
-        return if (stopsRemaining == 0 && nearestBus.isArrived) {
-            "已到达 ${favorite.targetStopName}" to 100
-        } else if (stopsRemaining == 0) {
-            "即将进站" to 92
-        } else {
-            val etaFormatted = RouteProjectionMath.formatEtaText(nearestBus.etaSeconds)
-            val totalToTarget = favorite.targetOrder.coerceAtLeast(1)
-            val currentSegment = (nearestBus.order - 1).coerceAtLeast(0) + nearestBus.segmentProgress
-            "还有 $stopsRemaining 站 · $etaFormatted" to ((currentSegment / totalToTarget) * 100).toInt().coerceIn(5, 95)
+        // 到站文字走 ArrivalText（「到站了」按 ArrivalRules 判；车都过了只给下一班始发时间）
+        val line = detail.line
+        val state = ArrivalText.stateFor(
+            targetOrder = favorite.targetOrder,
+            buses = detail.buses,
+            operatingState = detail.operatingState,
+            startStop = line.startStop,
+            firstTime = line.firstTime,
+            lastTime = line.lastTime,
+            nextDeparture = detail.nextDepartureFromStart,
+            statusDescription = detail.statusDescription,
+            now = ArrivalText.localTimeOf(detail.updatedAtMillis)
+        )
+        val text = ArrivalText.format(state).short
+        val nearestBus = ArrivalText.nearestBus(favorite.targetOrder, detail.buses)
+        val progress = when {
+            state is ArrivalState.Arriving -> 100
+            nearestBus == null -> 0
+            favorite.targetOrder - nearestBus.order <= 0 -> 92
+            else -> {
+                val totalToTarget = favorite.targetOrder.coerceAtLeast(1)
+                val currentSegment = (nearestBus.order - 1).coerceAtLeast(0) + nearestBus.segmentProgress
+                ((currentSegment / totalToTarget) * 100).toInt().coerceIn(5, 95)
+            }
         }
+        return text to progress
     }
 
     private fun buildBaseRemoteViews(

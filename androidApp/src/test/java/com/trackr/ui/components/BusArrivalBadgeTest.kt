@@ -18,12 +18,26 @@ class BusArrivalBadgeTest {
             isArrived = true
         )
         val status = computeArrivalStatus(targetOrder = 5, approachingBus = bus)
-        assertEquals("已到站", status.text)
+        assertEquals("到站了", status.text)
         assertTrue(status.isHighlighted)
     }
 
     @Test
-    fun computeArrivalStatus_approachingStation() {
+    fun computeArrivalStatus_imminentEta_isArrived() {
+        val bus = LiveBus(
+            busId = "bus_1",
+            plateOrFleetNo = "粤B12345",
+            order = 5,
+            etaSeconds = 40
+        )
+        val status = computeArrivalStatus(targetOrder = 5, approachingBus = bus)
+        assertEquals("到站了", status.text)
+        assertTrue(status.isHighlighted)
+    }
+
+    @Test
+    fun computeArrivalStatus_zeroStopsWithoutArrival_isNextStopNotArrived() {
+        // 剩 0 站、没到站标志、坐标缺失（插值不可信）、没 ETA：按 ArrivalRules 还没到
         val bus = LiveBus(
             busId = "bus_1",
             plateOrFleetNo = "粤B12345",
@@ -31,7 +45,7 @@ class BusArrivalBadgeTest {
             isArrived = false
         )
         val status = computeArrivalStatus(targetOrder = 5, approachingBus = bus)
-        assertEquals("即将进站", status.text)
+        assertEquals("下一站就到", status.text)
         assertTrue(status.isHighlighted)
     }
 
@@ -41,11 +55,24 @@ class BusArrivalBadgeTest {
             busId = "bus_1",
             plateOrFleetNo = "粤B12345",
             order = 3,
+            etaSeconds = 600
+        )
+        val status = computeArrivalStatus(targetOrder = 5, approachingBus = bus)
+        assertEquals("10 分钟 · 还有 2 站", status.text)
+        assertFalse(status.isHighlighted)
+    }
+
+    @Test
+    fun computeArrivalStatus_withinThreeMinutes_isHighlighted() {
+        val bus = LiveBus(
+            busId = "bus_1",
+            plateOrFleetNo = "粤B12345",
+            order = 3,
             etaSeconds = 180
         )
         val status = computeArrivalStatus(targetOrder = 5, approachingBus = bus)
-        assertEquals("还有 2 站 · 约 3 分钟", status.text)
-        assertFalse(status.isHighlighted)
+        assertEquals("3 分钟 · 还有 2 站", status.text)
+        assertTrue(status.isHighlighted)
     }
 
     @Test
@@ -57,7 +84,7 @@ class BusArrivalBadgeTest {
             etaSeconds = -1
         )
         val status = computeArrivalStatus(targetOrder = 5, approachingBus = bus)
-        assertEquals("还有 2 站 · 暂无预测", status.text)
+        assertEquals("还有 2 站 · 暂无到站时间", status.text)
         assertFalse(status.isHighlighted)
     }
 
@@ -70,7 +97,7 @@ class BusArrivalBadgeTest {
             etaSeconds = -1
         )
         val status = computeArrivalStatus(targetOrder = 0, approachingBus = bus)
-        assertEquals("在途行驶中", status.text)
+        assertEquals("在路上 · 暂无到站时间", status.text)
         assertFalse(status.isHighlighted)
     }
 

@@ -124,7 +124,7 @@ class LiveProgressNotificationHelperTest {
 
     @Test
     fun testBuildNotification_capsuleAndContentTexts_avoidRemainingZeroStops() {
-        // 验证 stopsRemaining == 0 且在途即将进站时，短文本显示“即将进站”而不是荒谬的“剩0站”
+        // stopsRemaining == 0 但 ETA 90 秒（不在 1..45 秒）：还没到站，写“下一站就到”，不写“剩 0 站”也不写“即将进站”
         val stateApproaching = TrackingSessionState(
             isActive = true,
             lineName = "49路",
@@ -143,8 +143,10 @@ class LiveProgressNotificationHelperTest {
         val title = notifApproaching.extras.getCharSequence("android.title")?.toString().orEmpty()
         val text = notifApproaching.extras.getCharSequence("android.text")?.toString().orEmpty()
         assertTrue("标题应包含线路名", title.contains("49路"))
-        assertTrue("正文应显示即将进站而非剩0站", text.contains("即将进站"))
+        assertEquals("上海体育馆：2 分钟 · 下一站就到", text)
         assertTrue("正文不应包含剩 0 站", !text.contains("剩 0 站"))
+        assertFalse("没到 45 秒内不应说进站", text.contains("即将进站") || text.contains("到站了"))
+        assertEquals("下一站到", LiveProgressNotificationHelper.shortCriticalTextFor(stateApproaching))
 
         // 验证到达状态
         val stateArrived = stateApproaching.copy(
@@ -153,7 +155,8 @@ class LiveProgressNotificationHelperTest {
         )
         val notifArrived = LiveProgressNotificationHelper.buildNotification(context, stateArrived)
         val arrivedText = notifArrived.extras.getCharSequence("android.text")?.toString().orEmpty()
-        assertTrue("到达状态正文应显示车辆已到达", arrivedText.contains("车辆已到达"))
+        assertEquals("上海体育馆：到站了，快去上车", arrivedText)
+        assertEquals("到站了", LiveProgressNotificationHelper.shortCriticalTextFor(stateArrived))
     }
 
     // ---------------- 分组换乘两阶段 ----------------
@@ -201,9 +204,24 @@ class LiveProgressNotificationHelperTest {
     @Test
     fun buildTexts_waitingBoard() {
         val texts = LiveProgressNotificationHelper.buildTexts(waitingState(), nextLineName = "M492")
-        assertEquals("B612 还有 2 站到 科技园", texts.title)
-        assertEquals("约 4 分钟", texts.content)
+        assertEquals("B612 4 分钟到 科技园", texts.title)
+        assertEquals("还有 2 站", texts.content)
         assertEquals("第 1/2 程 · 等车", texts.subText)
+
+        val noEta = LiveProgressNotificationHelper.buildTexts(waitingState().copy(etaSeconds = -1))
+        assertEquals("B612 还有 2 站到 科技园", noEta.title)
+        assertEquals("暂无到站时间", noEta.content)
+
+        val nextStop = LiveProgressNotificationHelper.buildTexts(waitingState().copy(stopsRemaining = 0, etaSeconds = 90))
+        assertEquals("B612 2 分钟到 科技园", nextStop.title)
+        assertEquals("下一站就到", nextStop.content)
+        assertEquals("下一站到", LiveProgressNotificationHelper.shortCriticalTextFor(waitingState().copy(stopsRemaining = 0, etaSeconds = 90)))
+
+        val arrived = waitingState().copy(stopsRemaining = 0, etaSeconds = 30)
+        val arrivedTexts = LiveProgressNotificationHelper.buildTexts(arrived)
+        assertEquals("B612 到站了 · 科技园", arrivedTexts.title)
+        assertEquals("快去上车，上车后点「我已上车」", arrivedTexts.content)
+        assertEquals("到站了", LiveProgressNotificationHelper.shortCriticalTextFor(arrived))
     }
 
     @Test

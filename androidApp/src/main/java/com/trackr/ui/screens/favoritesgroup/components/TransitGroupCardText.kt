@@ -1,14 +1,18 @@
 package com.trackr.ui.screens.favoritesgroup.components
 
+import com.trackr.domain.arrival.ArrivalState
+import com.trackr.domain.arrival.ArrivalText
+import com.trackr.domain.arrival.ArrivalTone
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.CandidateLineRealtimeInfo
 import com.trackr.domain.model.LegPhase
+import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitGroup
+import com.trackr.service.ArrivalRules
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.ceil
-import kotlin.math.roundToInt
 
 /**
  * 收藏页卡片用到的纯文案 / 估算函数（不依赖 Compose，便于单测）。
@@ -79,12 +83,100 @@ internal fun legProgressFractions(totalLegs: Int, activeLegIndex: Int, phase: Le
         }
     }
 
-/** 由 ETA 秒数（优先）或剩余站数粗估的分钟数；都没有时返回 null */
-internal fun etaMinutesOf(etaSeconds: Int, stopsRemaining: Int): Int? = when {
-    etaSeconds > 0 -> (etaSeconds / 60.0).roundToInt().coerceAtLeast(1)
-    stopsRemaining >= 0 -> (stopsRemaining * MINUTES_PER_STOP).coerceAtLeast(1)
-    else -> null
+/** 由 ETA 秒数（优先，取整规则同 [ArrivalText.minutesOf]）或剩余站数粗估的分钟数；都没有时返回 null */
+internal fun etaMinutesOf(etaSeconds: Int, stopsRemaining: Int): Int? =
+    ArrivalText.minutesOf(etaSeconds)
+        ?: if (stopsRemaining >= 0) (stopsRemaining * MINUTES_PER_STOP).coerceAtLeast(1) else null
+
+/** 卡片主数字区的内容 */
+internal data class CardHeadline(
+    /** 大字数字；为 null 时只显示 [text] */
+    val number: String?,
+    val text: String,
+    val detail: String?,
+    /** 主数字用绿色（到站了 / ≤ 1 站 / ≤ 3 分钟，同 [ArrivalTone.Go]） */
+    val isSuccess: Boolean = false
+)
+
+/** 等车时小字里的站数：「还有 3 站」；车下一站就是上车站时写「下一站就到」 */
+private fun waitStopsText(stopsAway: Int): String =
+    if (stopsAway <= 0) "下一站就到" else "还有 $stopsAway 站"
+
+private fun isGoTone(stopsAway: Int?, minutes: Int?): Boolean =
+    ArrivalText.format(ArrivalState.OnTheWay(stopsAway, minutes)).tone == ArrivalTone.Go
+
+/**
+ * 卡片主数字区：未追踪 / 等车时是「N 分钟后到 上车站」，乘车时是「N 站后在 下车站 下车」。
+ * 「到站了」只按 [ArrivalRules] 判（等车阶段看会话，未追踪看实时信息里由同一规则算出的 [CandidateLineRealtimeInfo.isArrived]）。
+ */
+internal fun cardHeadline(
+    phase: LegPhase?,
+    session: TrackingSessionState?,
+    boardStopName: String,
+    dropStopName: String,
+    info: CandidateLineRealtimeInfo?,
+    fallbackEta: String?,
+    nextLineName: String?
+): CardHeadline {
+    val plate = info?.vehiclePlate?.takeIf { it.isNotBlank() }
+    return when (phase) {
+        LegPhase.ON_BOARD -> {
+            val s = session
+            if (s == null || s.stopsRemaining < 0) {
+                CardHeadline(null, s?.statusSummary ?: "正在连接实时公交数据…", null)
+            } else {
+                val drop = s.targetStopName.ifBlank { dropStopName }
+                val transfer = nextLineName?.let { "下车后换乘 $it" }
+                if (ArrivalRules.isSessionArrived(s)) {
+                    CardHeadline(null, "到 $drop 了，请下车", transfer, isSuccess = true)
+                } else {
+                    val minutes = ArrivalText.minutesOf(s.etaSeconds)
+                    val detail = listOfNotNull(minutes?.let { "约 $it 分钟" }, transfer)
+                        .joinToString(" · ").ifEmpty { null }
+                    CardHeadline(s.stopsRemaining.toString(), "站后在 $drop 下车", detail, isSuccess = true)
+                }
+            }
+        }
+
+        LegPhase.WAITING_BOARD -> {
+            val s = session
+            val board = s?.boardStopName?.ifBlank { null } ?: boardStopName
+            val minutes = s?.takeIf { it.stopsRemaining >= 0 }?.let { etaMinutesOf(it.etaSeconds, it.stopsRemaining) }
+            when {
+                s == null || minutes == null -> CardHeadline(null, s?.statusSummary ?: "正在连接实时公交数据…", null)
+                ArrivalRules.isSessionArrived(s) ->
+                    CardHeadline(null, "到站了 · 快去 $board 上车", plate, isSuccess = true)
+                else -> CardHeadline(
+                    number = minutes.toString(),
+                    text = "分钟后到 $board",
+                    detail = listOfNotNull(waitStopsText(s.stopsRemaining), plate).joinToString(" · "),
+                    isSuccess = isGoTone(s.stopsRemaining, minutes)
+                )
+            }
+        }
+
+        else -> {
+            val minutes = info?.knownMinutes()
+            when {
+                info != null && minutes != null && info.isArrived() ->
+                    CardHeadline(null, "到站了 · 快去 $boardStopName 上车", plate, isSuccess = true)
+                info != null && minutes != null -> CardHeadline(
+                    number = minutes.toString(),
+                    text = "分钟后到 $boardStopName",
+                    detail = listOfNotNull(waitStopsText(info.stopsAway), plate).joinToString(" · "),
+                    isSuccess = isGoTone(info.stopsAway, minutes)
+                )
+                else -> CardHeadline(null, info?.etaText?.ifBlank { null } ?: fallbackEta ?: "查询车辆中…", null)
+            }
+        }
+    }
 }
+
+/** 候选线路胶囊上「已到站」的短字（由 ViewModel 按 [ArrivalRules] 判定后写入） */
+internal const val SHORT_CHIP_ARRIVED = "已到站"
+
+/** 实时信息是否表示车已到上车站 */
+internal fun CandidateLineRealtimeInfo.isArrived(): Boolean = shortChipEta == SHORT_CHIP_ARRIVED
 
 /** 候选线路实时信息里的可用分钟数；车辆未知时为 null */
 internal fun CandidateLineRealtimeInfo.knownMinutes(): Int? =

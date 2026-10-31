@@ -19,6 +19,8 @@ import com.trackr.data.remote.amap.AmapTransitApiClient
 import com.trackr.data.remote.amap.AmapTransitSchemeResult
 import com.trackr.data.repository.IRouteGroupRepository
 import com.trackr.data.repository.ITransitRepository
+import com.trackr.domain.arrival.ArrivalState
+import com.trackr.domain.arrival.ArrivalText
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusLineDirection
@@ -64,7 +66,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.roundToInt
 
 /**
  * 高德输入提示 / 公交算路通道。
@@ -1696,18 +1697,11 @@ class FavoritesGroupViewModel(
                             val nearest = candidateBuses.maxByOrNull { it.order.toFloat() + it.segmentProgress }
                             if (nearest != null) {
                                 val stopsLeft = (targetOrder - nearest.order).coerceAtLeast(0)
-                                val isArrived = stopsLeft == 0 && (nearest.isArrived || nearest.segmentProgress >= 0.98f)
-                                val etaMinutes = if (nearest.etaSeconds > 0) {
-                                    (nearest.etaSeconds / 60.0).roundToInt().coerceAtLeast(1)
-                                } else {
-                                    (stopsLeft * 2).coerceAtLeast(1)
-                                }
-                                val etaText = if (isArrived) {
-                                    "车辆已到站"
-                                } else {
-                                    val formattedEta = RouteProjectionMath.formatEtaText(nearest.etaSeconds, isArrived)
-                                    "还有 $stopsLeft 站 · $formattedEta"
-                                }
+                                // 到站口径统一走 ArrivalRules（ETA 1..45 秒、坐标缺失不信插值），文字走 ArrivalText
+                                val arrivalState = ArrivalText.stateForBus(targetOrder, nearest)
+                                val isArrived = arrivalState is ArrivalState.Arriving
+                                val etaMinutes = ArrivalText.minutesOf(nearest.etaSeconds) ?: (stopsLeft * 2).coerceAtLeast(1)
+                                val etaText = ArrivalText.format(arrivalState).short
                                 val shortChipEta = if (isArrived) "已到站" else "${stopsLeft}站"
 
                                 CandidateLineRealtimeInfo(

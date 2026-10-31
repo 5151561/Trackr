@@ -14,8 +14,10 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.trackr.domain.math.RouteProjectionMath
+import com.trackr.domain.arrival.ArrivalText
+import com.trackr.domain.arrival.ArrivalTone
 import com.trackr.domain.model.LiveBus
+import com.trackr.ui.theme.extendedColors
 
 /**
  * 临近车辆类型别名（兼容性定义）
@@ -25,51 +27,47 @@ typealias ApproachingBus = LiveBus
 /**
  * 实时到站状态信息包装
  *
- * @param text 展示文案（如 "已到站"、"即将进站"、"还有 2 站 · 3 分钟"、"在途行驶中"、"暂无在途车辆" 等）
- * @param isHighlighted 是否高亮显示（如已到站、即将进站状态）
+ * @param text 展示文案（由 [ArrivalText] 生成，如「到站了」「8 分钟 · 还有 4 站」「还有 2 站 · 暂无到站时间」）
+ * @param isHighlighted 是否高亮显示（[ArrivalTone.Go]：到站了 / ≤ 1 站 / ≤ 3 分钟）
+ * @param tone 到站文字色调；数据源直接给的状态文字为 null
  */
 data class BusArrivalStatusInfo(
     val text: String,
-    val isHighlighted: Boolean
+    val isHighlighted: Boolean,
+    val tone: ArrivalTone? = null
 )
 
 /**
- * 计算实时公交到站状态文案与高亮状态
+ * 计算实时公交到站状态文案与高亮状态。
+ * 文字和「快到 / 已到」的判断都走 [ArrivalText]（内部用 ArrivalRules），不再单独写区间。
  */
 fun computeArrivalStatus(
     targetOrder: Int,
     approachingBus: ApproachingBus?,
     fallbackStatusText: String = "暂无在途车辆",
     statusText: String = ""
-): BusArrivalStatusInfo {
-    val text = when {
-        statusText.isNotBlank() -> statusText
-        approachingBus != null -> {
-            val busOrder = approachingBus.order
-            if (targetOrder > 0 && busOrder > 0) {
-                val remaining = targetOrder - busOrder
-                val etaPart = RouteProjectionMath.formatEtaText(approachingBus.etaSeconds)
-                when {
-                    remaining == 0 && approachingBus.isArrived -> "已到站"
-                    remaining <= 0 -> "即将进站"
-                    etaPart.isNotBlank() -> "还有 $remaining 站 · $etaPart"
-                    else -> "还有 $remaining 站"
-                }
-            } else if (approachingBus.isArrived) {
-                "已到站"
-            } else if (approachingBus.etaSeconds > 0) {
-                "即将进站 · ${RouteProjectionMath.formatEtaText(approachingBus.etaSeconds)}"
-            } else {
-                "在途行驶中"
-            }
-        }
-        else -> fallbackStatusText
+): BusArrivalStatusInfo = when {
+    statusText.isNotBlank() -> BusArrivalStatusInfo(text = statusText, isHighlighted = false)
+    approachingBus != null -> {
+        val display = ArrivalText.format(ArrivalText.stateForBus(targetOrder, approachingBus))
+        BusArrivalStatusInfo(
+            text = display.short,
+            isHighlighted = display.tone == ArrivalTone.Go,
+            tone = display.tone
+        )
     }
-    val isHighlighted = text.contains("已到站") || text.contains("即将进站")
-    return BusArrivalStatusInfo(
-        text = text,
-        isHighlighted = isHighlighted
-    )
+    else -> BusArrivalStatusInfo(text = fallbackStatusText, isHighlighted = false)
+}
+
+/**
+ * 到站文字色调对应的颜色：绿 = 快到 / 已到，正文色 = 在路上，灰 = 车都过了 / 没发车 / 加载 / 没网，橙 = 末班已过 / 停运
+ */
+@Composable
+fun arrivalToneColor(tone: ArrivalTone): Color = when (tone) {
+    ArrivalTone.Go -> MaterialTheme.extendedColors.success
+    ArrivalTone.Normal -> MaterialTheme.colorScheme.onSurface
+    ArrivalTone.Mute -> MaterialTheme.colorScheme.onSurfaceVariant
+    ArrivalTone.Warn -> MaterialTheme.extendedColors.warning
 }
 
 /**

@@ -11,6 +11,7 @@ import com.trackr.domain.model.LineOperatingState
 import com.trackr.domain.model.LiveBus
 import com.trackr.ui.screens.linedetail.components.StationArrivalContent
 import com.trackr.ui.theme.TrackrTheme
+import kotlinx.datetime.LocalTime
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -38,7 +39,7 @@ class StationArrivalContentTest {
         BusStop(stopId = "s2", name = "陕西北路", order = 5)
     )
 
-    private fun setContent(detail: BusLineDetail, selected: BusStop?) {
+    private fun setContent(detail: BusLineDetail, selected: BusStop?, now: LocalTime = LocalTime(12, 0)) {
         composeTestRule.setContent {
             TrackrTheme {
                 StationArrivalContent(
@@ -49,7 +50,8 @@ class StationArrivalContentTest {
                     onThresholdChange = {},
                     onOpenBusList = {},
                     onToggleTracking = {},
-                    onOpenScheduledReminder = {}
+                    onOpenScheduledReminder = {},
+                    now = now
                 )
             }
         }
@@ -66,8 +68,9 @@ class StationArrivalContentTest {
         )
         setContent(detail, stops[1])
 
-        composeTestRule.onNodeWithText("车辆均已过该站").assertIsDisplayed()
-        composeTestRule.onNodeWithText("下一班约 21:05 从始发站（延安东路外滩）发车").assertIsDisplayed()
+        // 车都过了：只给下一班始发发车时间，不估到站
+        composeTestRule.onNodeWithText("下一班 21:05").assertIsDisplayed()
+        composeTestRule.onNodeWithText("从 延安东路外滩 发车").assertIsDisplayed()
         composeTestRule.onNodeWithText("全线 1 辆车在途 · 查看").assertIsDisplayed()
     }
 
@@ -82,8 +85,8 @@ class StationArrivalContentTest {
         )
         setContent(detail, stops[1])
 
-        composeTestRule.onNodeWithText("车辆均已过该站").assertIsDisplayed()
-        composeTestRule.onNodeWithText("暂无下一班发车信息 · 末班 23:30").assertIsDisplayed()
+        composeTestRule.onNodeWithText("车都过了").assertIsDisplayed()
+        composeTestRule.onNodeWithText("暂无下一班发车时间 · 末班 23:30").assertIsDisplayed()
     }
 
     @Test
@@ -111,7 +114,8 @@ class StationArrivalContentTest {
             }
         }
 
-        composeTestRule.onNodeWithText("下一班约 21:40 从始发站（延安东路外滩）发车").assertIsDisplayed()
+        composeTestRule.onNodeWithText("下一班 21:40").assertIsDisplayed()
+        composeTestRule.onNodeWithText("从 延安东路外滩 发车").assertIsDisplayed()
     }
 
     @Test
@@ -124,8 +128,56 @@ class StationArrivalContentTest {
         )
         setContent(detail, stops[1])
 
-        composeTestRule.onNodeWithText("今日末班已过").assertIsDisplayed()
-        composeTestRule.onNodeWithText("末班 23:30").assertIsDisplayed()
+        composeTestRule.onNodeWithText("今天没车了").assertIsDisplayed()
+        composeTestRule.onNodeWithText("明天首班 05:30").assertIsDisplayed()
+    }
+
+    @Test
+    fun allBusesPassed_afterLastBus_showsNoMoreBusToday() {
+        val detail = BusLineDetail(
+            line = lineDirection,
+            stops = stops,
+            buses = listOf(LiveBus(busId = "b1", plateOrFleetNo = "沪A·D8866", order = 6)),
+            operatingState = LineOperatingState.RUNNING,
+            nextDepartureFromStart = null
+        )
+        setContent(detail, stops[1], now = LocalTime(23, 31))
+
+        composeTestRule.onNodeWithText("今天没车了").assertIsDisplayed()
+        composeTestRule.onNodeWithText("明天首班 05:30").assertIsDisplayed()
+    }
+
+    @Test
+    fun busOnTheWay_showsMinutesBigAndStopsSmall() {
+        val detail = BusLineDetail(
+            line = lineDirection,
+            stops = stops,
+            buses = listOf(LiveBus(busId = "b1", plateOrFleetNo = "沪A·D8866", order = 2, etaSeconds = 480)),
+            operatingState = LineOperatingState.RUNNING
+        )
+        setContent(detail, stops[1])
+
+        composeTestRule.onNodeWithText("8").assertIsDisplayed()
+        composeTestRule.onNodeWithText("分钟").assertIsDisplayed()
+        composeTestRule.onNodeWithText("还有 3 站").assertIsDisplayed()
+        composeTestRule.onNodeWithText("下一辆还有 ", substring = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun busArrived_showsArrivedWithNextBus() {
+        val detail = BusLineDetail(
+            line = lineDirection,
+            stops = stops,
+            buses = listOf(
+                LiveBus(busId = "b1", plateOrFleetNo = "沪A·D8866", order = 5, isArrived = true),
+                LiveBus(busId = "b2", plateOrFleetNo = "沪A·D8867", order = 2, etaSeconds = 540)
+            ),
+            operatingState = LineOperatingState.RUNNING
+        )
+        setContent(detail, stops[1])
+
+        composeTestRule.onNodeWithText("到站了").assertIsDisplayed()
+        composeTestRule.onNodeWithText("快去上车 · 下一辆 9 分钟").assertIsDisplayed()
     }
 
     @Test
@@ -138,8 +190,8 @@ class StationArrivalContentTest {
         )
         setContent(detail, stops[1])
 
-        composeTestRule.onNodeWithText("等待发车").assertIsDisplayed()
         composeTestRule.onNodeWithText("首班 05:30").assertIsDisplayed()
+        composeTestRule.onNodeWithText("从 延安东路外滩 发车").assertIsDisplayed()
     }
 
     @Test

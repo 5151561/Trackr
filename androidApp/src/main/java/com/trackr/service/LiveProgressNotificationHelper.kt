@@ -13,7 +13,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.trackr.R
-import com.trackr.domain.math.RouteProjectionMath
+import com.trackr.domain.arrival.ArrivalState
+import com.trackr.domain.arrival.ArrivalText
 import com.trackr.domain.model.LegPhase
 import com.trackr.domain.model.TrackingSessionState
 import com.trackr.service.vendor.LiveUpdatePromotion
@@ -244,24 +245,22 @@ class LiveProgressNotifier(
     private fun isLastLeg(state: TrackingSessionState): Boolean =
         state.currentLegIndex >= state.totalLegs - 1
 
-    private fun etaMinutesText(etaSeconds: Int): String? {
-        if (etaSeconds <= 0) return null
-        val minutes = Math.round(etaSeconds / 60.0).toInt().coerceAtLeast(1)
-        return "约 $minutes 分钟"
-    }
+    private fun etaMinutesText(etaSeconds: Int): String? =
+        ArrivalText.minutesOf(etaSeconds)?.let { "约 $it 分钟" }
 
     /**
      * 状态栏胶囊短文本（Android 16 shortCriticalText，<= 7 字符）。
-     * - 等车："B612 2站"，放不下时"等车2站"
+     * - 等车："B612 2站"，放不下时"等车2站"；车下一站就到上车站时"下一站到"
      * - 乘车："2站下车"；到换乘站"换乘"
+     * 「到站」只按 [ArrivalRules] 判（ETA 1..45 秒或已停靠），剩 0 站但没到不写「即将进站」
      */
     fun shortCriticalTextFor(state: TrackingSessionState): String {
         val isArrived = isArrivedState(state)
         return when (state.legPhase) {
             LegPhase.WAITING_BOARD -> when {
                 state.stopsRemaining < 0 -> "等车中"
-                isArrived -> "车已到"
-                state.stopsRemaining == 0 -> "即将进站"
+                isArrived -> "到站了"
+                state.stopsRemaining == 0 -> "下一站到"
                 else -> {
                     val withLine = "${state.lineName} ${state.stopsRemaining}站"
                     if (withLine.length <= MAX_SHORT_TEXT_LENGTH) withLine else "等车${state.stopsRemaining}站"
@@ -278,8 +277,8 @@ class LiveProgressNotifier(
                 val isMultiLeg = state.totalLegs > 1
                 when {
                     isArrived && isMultiLeg && !isLastLeg(state) -> "换乘中"
-                    isArrived -> "已到站"
-                    state.stopsRemaining == 0 -> "即将进站"
+                    isArrived -> "到站了"
+                    state.stopsRemaining == 0 -> "下一站到"
                     state.stopsRemaining > 0 -> "剩${state.stopsRemaining}站"
                     else -> "追踪中"
                 }
@@ -301,16 +300,21 @@ class LiveProgressNotifier(
 
         return when (state.legPhase) {
             LegPhase.WAITING_BOARD -> {
+                // 大字进标题、小字进正文，和线路页、追踪卡同一套 ArrivalText
+                val arrival = ArrivalText.stateForSession(state)
+                val display = ArrivalText.format(arrival)
                 val title = when {
-                    state.stopsRemaining < 0 -> "${state.lineName} 等车 · $boardName"
-                    isArrived -> "${state.lineName} 已到 $boardName"
-                    state.stopsRemaining == 0 -> "${state.lineName} 即将到 $boardName"
+                    arrival is ArrivalState.Loading -> "${state.lineName} 等车 · $boardName"
+                    arrival is ArrivalState.Arriving -> "${state.lineName} 到站了 · $boardName"
+                    arrival is ArrivalState.OnTheWay && arrival.minutes != null ->
+                        "${state.lineName} ${display.headline}到 $boardName"
+                    state.stopsRemaining == 0 -> "${state.lineName} 下一站就到 $boardName"
                     else -> "${state.lineName} 还有 ${state.stopsRemaining} 站到 $boardName"
                 }
-                val content = when {
-                    state.stopsRemaining < 0 -> state.statusSummary
-                    isArrived -> "车已进站，上车后点「我已上车」"
-                    else -> eta ?: "等车中"
+                val content = when (arrival) {
+                    ArrivalState.Loading -> state.statusSummary
+                    is ArrivalState.Arriving -> "快去上车，上车后点「我已上车」"
+                    else -> display.detail.ifBlank { "等车中" }
                 }
                 // 等车区间起点站名拿不到，只写目标站（已在标题中）
                 NotificationTexts(title, content, "$legLabel · 等车", shortText)
@@ -318,8 +322,8 @@ class LiveProgressNotifier(
 
             LegPhase.ON_BOARD -> {
                 val title = when {
-                    isArrived -> "已到 $dropName，请下车"
-                    state.stopsRemaining == 0 -> "即将到 $dropName，准备下车"
+                    isArrived -> "到 $dropName 了，请下车"
+                    state.stopsRemaining == 0 -> "下一站 $dropName，准备下车"
                     else -> "还有 ${state.stopsRemaining} 站在 $dropName 下车"
                 }
                 val transfer = nextLineName?.takeIf { !isLastLeg(state) && it.isNotBlank() }?.let { "下车后换乘 $it" }
@@ -350,22 +354,22 @@ class LiveProgressNotifier(
             "${state.lineName} 实时在途追踪"
         }
 
-        val etaFormatted = RouteProjectionMath.formatEtaText(state.etaSeconds, state.isBusArrivedAtStop)
+        // 到站文字走 ArrivalText：「科技园：8 分钟 · 还有 4 站」「科技园：到站了，快去上车」
+        val display = ArrivalText.format(ArrivalText.stateForSession(state))
+        val minutesPart = ArrivalText.minutesText(state.etaSeconds)?.let { "（$it）" }.orEmpty()
         val contentText = when {
             isArrived && isMultiLeg && currentLegNum < state.totalLegs ->
                 "到达换乘站 ${state.targetStopName}，自动切换下一程"
             isArrived ->
-                "目标站 ${state.targetStopName}：车辆已到达！"
+                "${state.targetStopName}：到站了，快去上车"
             state.stopsRemaining == 0 && isMultiLeg ->
-                "即将到达换乘站 ${state.targetStopName}（$etaFormatted）"
-            state.stopsRemaining == 0 ->
-                "目标站 ${state.targetStopName}：即将进站（$etaFormatted）"
+                "下一站就到换乘站 ${state.targetStopName}$minutesPart"
             state.stopsRemaining > 0 && isMultiLeg ->
-                "[$currentLegNum/${state.totalLegs}程 换乘] 距换乘站 ${state.targetStopName} 还有 ${state.stopsRemaining} 站"
-            state.stopsRemaining > 0 ->
-                "目标站 ${state.targetStopName}：剩 ${state.stopsRemaining} 站（$etaFormatted）"
+                "[$currentLegNum/${state.totalLegs}程 换乘] 距换乘站 ${state.targetStopName} 还有 ${state.stopsRemaining} 站$minutesPart"
+            state.stopsRemaining >= 0 ->
+                "${state.targetStopName}：${display.short}"
             else ->
-                "目标站 ${state.targetStopName}：${state.statusSummary}"
+                "${state.targetStopName}：${state.statusSummary}"
         }
 
         val subText = if (isMultiLeg) {

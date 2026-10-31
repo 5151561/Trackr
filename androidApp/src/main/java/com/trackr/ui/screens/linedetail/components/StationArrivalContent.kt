@@ -42,6 +42,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -49,12 +50,15 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.trackr.domain.math.RouteProjectionMath
+import com.trackr.domain.arrival.ArrivalDisplay
+import com.trackr.domain.arrival.ArrivalText
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusStop
-import com.trackr.domain.model.LineOperatingState
 import com.trackr.domain.model.sanitizePlateOrFleetNo
+import com.trackr.ui.components.common.arrivalToneColor
 import com.trackr.ui.theme.busColors
+import com.trackr.ui.theme.extendedColors
+import kotlinx.datetime.LocalTime
 
 private val ALERT_THRESHOLD_OPTIONS = listOf(1, 2, 3)
 
@@ -73,21 +77,44 @@ fun StationArrivalContent(
     onToggleTracking: () -> Unit,
     onOpenScheduledReminder: () -> Unit,
     modifier: Modifier = Modifier,
-    fallbackNextDeparture: String? = null
+    fallbackNextDeparture: String? = null,
+    /** 判「已过末班」用的本地时刻；默认取这次数据的刷新时刻 */
+    now: LocalTime? = null
 ) {
     val busColors = MaterialTheme.busColors
     val currentOrder = selectedStop?.order ?: 1
 
     // 寻找最近一辆未过本站的在途车
     val upcomingBus = remember(lineDetail.buses, currentOrder) {
-        lineDetail.buses
-            .filter { it.order <= currentOrder }
-            .maxByOrNull { it.order.toFloat() + it.segmentProgress }
+        ArrivalText.nearestBus(currentOrder, lineDetail.buses)
     }
 
     val stopsRemaining = if (upcomingBus != null) {
         currentOrder - upcomingBus.order
     } else null
+
+    // 到站大字：8 种状态统一由 ArrivalText 给出；全部车过站时只给下一班始发发车时间，不估到站
+    val nowTime = now ?: remember(lineDetail.updatedAtMillis) { ArrivalText.localTimeOf(lineDetail.updatedAtMillis) }
+    val arrival = remember(lineDetail, currentOrder, fallbackNextDeparture, nowTime) {
+        val line = lineDetail.line
+        ArrivalText.format(
+            ArrivalText.stateFor(
+                targetOrder = currentOrder,
+                buses = lineDetail.buses,
+                operatingState = lineDetail.operatingState,
+                startStop = line.startStop,
+                firstTime = line.firstTime,
+                lastTime = line.lastTime,
+                nextDeparture = lineDetail.nextDepartureFromStart?.takeIf { it.isNotBlank() }
+                    ?: fallbackNextDeparture,
+                statusDescription = lineDetail.statusDescription,
+                now = nowTime
+            ),
+            lineName = line.name,
+            stopName = selectedStop?.name.orEmpty()
+        )
+    }
+    val arrivalColor = arrivalToneColor(arrival.tone)
 
     Column(
         modifier = modifier
@@ -140,41 +167,13 @@ fun StationArrivalContent(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // 醒目到站预报大字
+        // 醒目到站预报大字：「8 分钟」+ 小字「还有 4 站」，或「到站了」+「快去上车 · 下一辆 9 分钟」
         if (upcomingBus != null) {
-            if (stopsRemaining != null && stopsRemaining > 0) {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        text = "下一辆还有 ",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "$stopsRemaining",
-                        fontSize = 34.sp,
-                        fontWeight = FontWeight.Black,
-                        color = busColors.busArrivingAmber
-                    )
-                    Text(
-                        text = " 个站，到达该站！",
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                }
-            } else {
-                Text(
-                    text = if (upcomingBus.isArrived) "车辆已到站！" else "车辆正在进站！",
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Black,
-                    color = if (upcomingBus.isArrived) busColors.busRunningGreen else busColors.busArrivingAmber
-                )
-            }
+            ArrivalHeadline(arrival = arrival, color = arrivalColor)
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 车辆信息行：车牌、倒计时、预计到达钟点、速度
+            // 车辆信息行：车牌、预计到达钟点、速度（分钟数已在大字里，不再重复）
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
@@ -199,14 +198,6 @@ fun StationArrivalContent(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = RouteProjectionMath.formatEtaText(upcomingBus.etaSeconds, upcomingBus.isArrived),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = busColors.busArrivingAmber,
-                        maxLines = 1
-                    )
-
                     if (!upcomingBus.expectedArrivalTimeText.isNullOrEmpty()) {
                         Text(
                             text = "${upcomingBus.expectedArrivalTimeText} 到",
@@ -245,50 +236,8 @@ fun StationArrivalContent(
                 strokeCap = StrokeCap.Round
             )
         } else {
-            // 无可用在途车：分运营状态给出下一班始发时间等有效信息
-            val line = lineDetail.line
-            val nextDeparture = lineDetail.nextDepartureFromStart?.takeIf { it.isNotBlank() }
-                ?: fallbackNextDeparture?.takeIf { it.isNotBlank() }
-
-            val (headline, subline) = when (lineDetail.operatingState) {
-                LineOperatingState.ENDED -> {
-                    val last = line.lastTime.ifBlank { "—" }
-                    "今日末班已过" to "末班 $last"
-                }
-                LineOperatingState.WAITING -> {
-                    val first = line.firstTime.ifBlank { "—" }
-                    "等待发车" to (nextDeparture?.let { "下一班约 $it 从始发站发车" } ?: "首班 $first")
-                }
-                LineOperatingState.SUSPENDED -> {
-                    "线路临时停运" to lineDetail.statusDescription.ifBlank { "暂无发车计划" }
-                }
-                else -> {
-                    if (nextDeparture != null) {
-                        "车辆均已过该站" to "下一班约 $nextDeparture 从始发站（${line.startStop}）发车"
-                    } else if (lineDetail.buses.isNotEmpty()) {
-                        "车辆均已过该站" to if (line.lastTime.isNotBlank()) {
-                            "暂无下一班发车信息 · 末班 ${line.lastTime}"
-                        } else {
-                            "暂无下一班发车信息"
-                        }
-                    } else {
-                        "当前暂无在途车辆" to "运营状态：${lineDetail.operatingState.defaultLabel}"
-                    }
-                }
-            }
-
-            Text(
-                text = headline,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = subline,
-                fontSize = 13.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            // 无可用在途车：车都过了 / 还没发车 / 末班已过 / 停运，给出下一班始发时间等有效信息
+            ArrivalHeadline(arrival = arrival, color = arrivalColor)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -418,6 +367,42 @@ fun StationArrivalContent(
                     fontWeight = FontWeight.Bold
                 )
             }
+        }
+    }
+}
+
+/** 到站大字 + 小字（[ArrivalText] 的输出） */
+@Composable
+private fun ArrivalHeadline(arrival: ArrivalDisplay, color: Color) {
+    Column {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                text = arrival.value,
+                fontSize = if (arrival.unit != null) 34.sp else 26.sp,
+                fontWeight = FontWeight.Black,
+                color = color
+            )
+            if (arrival.unit != null) {
+                Text(
+                    text = arrival.unit,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = color,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+                )
+            }
+        }
+        if (arrival.detail.isNotBlank()) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = arrival.detail,
+                fontSize = 13.sp,
+                color = if (arrival.detailIsWarning) {
+                    MaterialTheme.extendedColors.warning
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                }
+            )
         }
     }
 }

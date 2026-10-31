@@ -3,9 +3,13 @@ package com.trackr.ui.screens.favoritesgroup
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.CandidateLineRealtimeInfo
 import com.trackr.domain.model.LegPhase
+import com.trackr.domain.model.TrackingSessionState
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
+import com.trackr.ui.screens.favoritesgroup.components.CardHeadline
 import com.trackr.ui.screens.favoritesgroup.components.boardTimeText
+import com.trackr.ui.screens.favoritesgroup.components.cardHeadline
+import com.trackr.ui.screens.favoritesgroup.components.etaMinutesOf
 import com.trackr.ui.screens.favoritesgroup.components.boardTimeTextForLeg
 import com.trackr.ui.screens.favoritesgroup.components.estimateBoardTimeMillis
 import com.trackr.ui.screens.favoritesgroup.components.groupSummaryText
@@ -169,5 +173,86 @@ class TransitGroupCardTextTest {
     fun lineDetailNavigation_usesBoardStopOrder() {
         assertEquals(5, line("B612", 5, 9).boardStopOrderForDetail())
         assertEquals(9, line("line_1", 0, 9).boardStopOrderForDetail())
+    }
+
+    // ---------- 主数字（到站文字走 ArrivalText / ArrivalRules） ----------
+
+    private fun waitingSession(stops: Int, eta: Int, arrived: Boolean = false) = TrackingSessionState(
+        isActive = true,
+        lineName = "B612",
+        targetStopName = "深大北门",
+        boardStopName = "科技园",
+        stopsRemaining = stops,
+        etaSeconds = eta,
+        isBusArrivedAtStop = arrived,
+        legPhase = LegPhase.WAITING_BOARD
+    )
+
+    @Test
+    fun cardHeadline_waiting_minutesAndStops() {
+        val h = cardHeadline(LegPhase.WAITING_BOARD, waitingSession(3, 360), "科技园", "深大北门", null, null, null)
+        assertEquals(CardHeadline("6", "分钟后到 科技园", "还有 3 站", isSuccess = false), h)
+
+        // ≤ 3 分钟用绿色
+        assertTrue(cardHeadline(LegPhase.WAITING_BOARD, waitingSession(3, 120), "科技园", "深大北门", null, null, null).isSuccess)
+    }
+
+    @Test
+    fun cardHeadline_waiting_zeroStopsNotImminent_isNextStop() {
+        // 剩 0 站但 ETA 90 秒：还没到，主数字仍是分钟，小字写「下一站就到」
+        val h = cardHeadline(LegPhase.WAITING_BOARD, waitingSession(0, 90), "科技园", "深大北门", null, null, null)
+        assertEquals("2", h.number)
+        assertEquals("下一站就到", h.detail)
+        assertTrue(h.isSuccess)
+    }
+
+    @Test
+    fun cardHeadline_waiting_arrivedByArrivalRules() {
+        val byEta = cardHeadline(LegPhase.WAITING_BOARD, waitingSession(0, 30), "科技园", "深大北门", null, null, null)
+        assertEquals(CardHeadline(null, "到站了 · 快去 科技园 上车", null, isSuccess = true), byEta)
+
+        val byFlag = cardHeadline(LegPhase.WAITING_BOARD, waitingSession(0, -1, arrived = true), "科技园", "深大北门", null, null, null)
+        assertNull(byFlag.number)
+        assertEquals("到站了 · 快去 科技园 上车", byFlag.text)
+    }
+
+    @Test
+    fun cardHeadline_untracked_usesRealtimeInfo() {
+        val info = CandidateLineRealtimeInfo(
+            lineId = "B612", lineName = "B612", stopsAway = 4, estimatedMinutes = 8, vehiclePlate = "粤B·58921"
+        )
+        assertEquals(
+            CardHeadline("8", "分钟后到 科技园", "还有 4 站 · 粤B·58921"),
+            cardHeadline(null, null, "科技园", "深大北门", info, null, null)
+        )
+
+        val arrived = info.copy(shortChipEta = "已到站", stopsAway = 0, estimatedMinutes = 1)
+        assertEquals(
+            CardHeadline(null, "到站了 · 快去 科技园 上车", "粤B·58921", isSuccess = true),
+            cardHeadline(null, null, "科技园", "深大北门", arrived, null, null)
+        )
+    }
+
+    @Test
+    fun cardHeadline_onBoard_arrivedAtDropStop() {
+        val onBoard = waitingSession(0, 30).copy(legPhase = LegPhase.ON_BOARD)
+        assertEquals(
+            CardHeadline(null, "到 深大北门 了，请下车", "下车后换乘 M492", isSuccess = true),
+            cardHeadline(LegPhase.ON_BOARD, onBoard, "科技园", "深大北门", null, null, "M492")
+        )
+
+        val riding = waitingSession(2, 300).copy(legPhase = LegPhase.ON_BOARD)
+        assertEquals(
+            CardHeadline("2", "站后在 深大北门 下车", "约 5 分钟 · 下车后换乘 M492", isSuccess = true),
+            cardHeadline(LegPhase.ON_BOARD, riding, "科技园", "深大北门", null, null, "M492")
+        )
+    }
+
+    @Test
+    fun etaMinutesOf_prefersEtaThenStopsEstimate() {
+        assertEquals(2, etaMinutesOf(90, 3))
+        assertEquals(6, etaMinutesOf(-1, 3))
+        assertEquals(1, etaMinutesOf(0, 0))
+        assertNull(etaMinutesOf(-1, -1))
     }
 }

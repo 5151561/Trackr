@@ -172,7 +172,7 @@ fun TransitGroupCard(
 
             if (headlineLeg != null) {
                 val nextLine = selectedLines.getOrNull(activeLegIndex + 1)
-                val headline = buildHeadline(
+                val headline = cardHeadline(
                     phase = phase,
                     session = session,
                     boardStopName = headlineLeg.fromStopName,
@@ -278,68 +278,6 @@ private fun onBoardRideNote(totalStops: Int?, session: TrackingSessionState?): S
     if (totalStops == null || session == null || session.boardStopOrder <= 0) return "车上"
     val ridden = (session.currentBusOrder - session.boardStopOrder).coerceIn(0, totalStops)
     return "已坐 $ridden / $totalStops 站 · 车上"
-}
-
-/** 主数字区的内容 */
-private data class Headline(
-    /** 大字数字；为 null 时只显示 [text] */
-    val number: String?,
-    val text: String,
-    val detail: String?,
-    val isSuccess: Boolean = false
-)
-
-private fun buildHeadline(
-    phase: LegPhase?,
-    session: TrackingSessionState?,
-    boardStopName: String,
-    dropStopName: String,
-    info: CandidateLineRealtimeInfo?,
-    fallbackEta: String?,
-    nextLineName: String?
-): Headline {
-    val plate = info?.vehiclePlate?.takeIf { it.isNotBlank() }
-    return when (phase) {
-        LegPhase.ON_BOARD -> {
-            val s = session
-            if (s == null || s.stopsRemaining < 0) {
-                Headline(null, s?.statusSummary ?: "正在连接实时公交数据…", null)
-            } else {
-                val drop = s.targetStopName.ifBlank { dropStopName }
-                val minutes = if (s.etaSeconds > 0) etaMinutesOf(s.etaSeconds, s.stopsRemaining) else null
-                val detail = listOfNotNull(
-                    minutes?.let { "约 $it 分钟" },
-                    nextLineName?.let { "下车后换乘 $it" }
-                ).joinToString(" · ").ifEmpty { null }
-                Headline(s.stopsRemaining.toString(), "站后在 $drop 下车", detail, isSuccess = true)
-            }
-        }
-
-        LegPhase.WAITING_BOARD -> {
-            val s = session
-            val board = s?.boardStopName?.ifBlank { null } ?: boardStopName
-            val minutes = s?.takeIf { it.stopsRemaining >= 0 }?.let { etaMinutesOf(it.etaSeconds, it.stopsRemaining) }
-            if (s == null || minutes == null) {
-                Headline(null, s?.statusSummary ?: "正在连接实时公交数据…", null)
-            } else {
-                val detail = listOfNotNull("还有 ${s.stopsRemaining} 站", plate).joinToString(" · ")
-                Headline(minutes.toString(), "分钟后到 $board", detail)
-            }
-        }
-
-        else -> {
-            val minutes = info?.knownMinutes()
-            when {
-                info != null && minutes != null && info.shortChipEta == "已到站" ->
-                    Headline(null, "车已到 $boardStopName", plate)
-                info != null && minutes != null -> {
-                    val detail = listOfNotNull("还有 ${info.stopsAway} 站", plate).joinToString(" · ")
-                    Headline(minutes.toString(), "分钟后到 $boardStopName", detail)
-                }
-                else -> Headline(null, info?.etaText?.ifBlank { null } ?: fallbackEta ?: "查询车辆中…", null)
-            }
-        }
-    }
 }
 
 @Composable
@@ -504,7 +442,7 @@ private fun HeadlineSection(
     line: CandidateLine?,
     info: CandidateLineRealtimeInfo?,
     phase: LegPhase?,
-    headline: Headline,
+    headline: CardHeadline,
     isSignalLost: Boolean,
     actions: @Composable () -> Unit
 ) {
