@@ -1,5 +1,8 @@
 package com.trackr.data.remote.common
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.runBlocking
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
@@ -18,6 +21,9 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 @RunWith(RobolectricTestRunner::class)
 class BaseTransitApiClientTest {
@@ -167,5 +173,62 @@ class BaseTransitApiClientTest {
         } catch (e: IOException) {
             assertTrue(e.message?.contains("500") == true)
         }
+    }
+
+    @Test
+    fun testExecuteJson_errorMessageDoesNotLeakQueryParameters() = runBlocking {
+        val interceptor = Interceptor { chain ->
+            Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(403)
+                .message("Forbidden")
+                .body("".toResponseBody("application/json".toMediaType()))
+                .build()
+        }
+        val client = TestTransitApiClient(OkHttpClient.Builder().addInterceptor(interceptor).build())
+        val request = Request.Builder().url("https://example.com/v3/direction?key=SECRET_KEY&origin=1,2").build()
+
+        try {
+            client.testExecuteJson(request)
+            fail("Expected IOException for HTTP 403")
+        } catch (e: IOException) {
+            val msg = e.message.orEmpty()
+            assertTrue(msg.contains("403"))
+            assertTrue(msg.contains("https://example.com/v3/direction"))
+            assertFalse(msg.contains("SECRET_KEY"))
+            assertFalse(msg.contains("key="))
+        }
+    }
+
+    @Test
+    fun testExecuteHttpCall_coroutineCancellationCancelsOkHttpCall() = runBlocking {
+        val entered = CountDownLatch(1)
+        val sawCancel = AtomicBoolean(false)
+        val interceptor = Interceptor { chain ->
+            entered.countDown()
+            // 模拟慢请求：轮询等待 Call 被取消
+            val deadline = System.currentTimeMillis() + 5_000L
+            while (System.currentTimeMillis() < deadline) {
+                if (chain.call().isCanceled()) {
+                    sawCancel.set(true)
+                    throw IOException("Canceled")
+                }
+                Thread.sleep(10)
+            }
+            throw IOException("timeout in test")
+        }
+        val client = TestTransitApiClient(OkHttpClient.Builder().addInterceptor(interceptor).build())
+        val request = Request.Builder().url("https://example.com/slow").build()
+
+        val job = async(Dispatchers.Default) { client.testExecuteHttpCall(request) }
+        assertTrue(entered.await(2, TimeUnit.SECONDS))
+        job.cancelAndJoin()
+
+        val deadline = System.currentTimeMillis() + 2_000L
+        while (!sawCancel.get() && System.currentTimeMillis() < deadline) {
+            Thread.sleep(10)
+        }
+        assertTrue(sawCancel.get())
     }
 }

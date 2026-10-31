@@ -56,6 +56,8 @@ class TrackrApp : Application() {
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .writeTimeout(12, TimeUnit.SECONDS)
+            // 整个调用（含重定向与重试）的总时限，防止弱网下单次请求无限挂起
+            .callTimeout(20, TimeUnit.SECONDS)
             .build()
 
         chelaileClient = ChelaileApiClient(okHttpClient)
