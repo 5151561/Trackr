@@ -21,6 +21,17 @@ java {
     }
 }
 
+// Compose 编译器：稳定性配置 + 按需输出 reports/metrics（重构计划 §4.1、第 1 步；第 2 步挪进约定插件）。
+// 生成报告：./gradlew :app:compileReleaseKotlin -PcomposeReports --rerun
+// （报告目录不算编译任务的输入，编译已是最新时不加 --rerun 不会生成）
+composeCompiler {
+    stabilityConfigurationFiles.add(rootProject.layout.projectDirectory.file("compose_stability.conf"))
+    if (providers.gradleProperty("composeReports").isPresent) {
+        reportsDestination = layout.buildDirectory.dir("compose_reports")
+        metricsDestination = layout.buildDirectory.dir("compose_metrics")
+    }
+}
+
 fun localOrEnv(name: String): String =
     System.getenv(name)?.trim().orEmpty().ifBlank { localProperties.getProperty(name, "").trim() }
 
@@ -251,7 +262,9 @@ listOf("Debug", "Release").forEach { variant ->
     val checkTask = tasks.register("check${variant}16kbPageAlignment") {
         group = "verification"
         description = "校验 ${variant} 变体合并后的 .so 是否满足 16 KB 页对齐"
-        dependsOn(tasks.matching { it.name == "merge${variant}NativeLibs" })
+        // 用任务名字符串声明依赖：tasks.matching {} 在解析依赖时会实例化全部任务，
+        // 而 AGP 9.5 的 generateReleaseComposePreviewRunfiles 在 release（无单元测试）上一实例化就报错。
+        dependsOn("merge${variant}NativeLibs")
         inputs.dir(mergedDir).withPropertyName("mergedNativeLibs")
         outputs.upToDateWhen { false }
 
@@ -288,7 +301,7 @@ listOf("Debug", "Release").forEach { variant ->
             logger.lifecycle("check${variant}16kbPageAlignment: ${libs.size} 个 64 位共享库全部通过")
         }
     }
-    tasks.matching { it.name == "assemble${variant}" }.configureEach { finalizedBy(checkTask) }
+    tasks.named { it == "assemble${variant}" }.configureEach { finalizedBy(checkTask) }
 }
 
 tasks.register<JacocoReport>("jacocoTestReport") {
