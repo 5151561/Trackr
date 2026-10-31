@@ -7,9 +7,11 @@ import com.amap.api.services.help.Inputtips
 import com.amap.api.services.help.InputtipsQuery
 import com.amap.api.services.route.BusPath
 import com.amap.api.services.route.BusRouteResult
+import com.amap.api.services.route.RouteBusWalkItem
 import com.amap.api.services.route.RouteSearch
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.DataSourceType
+import com.trackr.domain.model.GeoPoint
 import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
@@ -154,20 +156,35 @@ class AmapSdkTransitService(
             val steps = path.steps ?: return null
             val legs = mutableListOf<TransitLeg>()
             var legIndex = 0
+            // 末段步行（最后一个只有 walk、busLines 为空的 step）：末站 -> 目的地 POI
+            var finalWalkPath: List<GeoPoint> = emptyList()
 
             for (step in steps) {
+                // 本 step 的 walk 是“乘车前”步行（上一段下车点/起点 -> 本段上车站）
+                val walkItem = step.walk
+                val walkingDist = walkItem?.distance?.toInt() ?: 0
+                val walkPathBefore = parseWalkItemPolyline(walkItem)
+
                 val busLines = step.busLines
-                if (busLines.isNullOrEmpty()) continue
+                if (busLines.isNullOrEmpty()) {
+                    // 纯步行 step：视为末段步行
+                    if (walkPathBefore.isNotEmpty()) {
+                        finalWalkPath = walkPathBefore
+                    }
+                    continue
+                }
 
                 val candidateLines = mutableListOf<CandidateLine>()
+                // 站名/坐标/行驶轨迹以第一条候选线路（主线路）为准，不被后续候选线路覆盖
                 var departureStopName = ""
                 var arrivalStopName = ""
                 var fromLat = 0.0
                 var fromLng = 0.0
                 var toLat = 0.0
                 var toLng = 0.0
+                var ridePath: List<GeoPoint> = emptyList()
 
-                for (lineItem in busLines) {
+                busLines.forEachIndexed { k, lineItem ->
                     val rawName = lineItem.busLineName.orEmpty()
                     val lineName = rawName.substringBefore("(").trim()
                     val lineId = lineItem.busLineId.orEmpty()
@@ -175,37 +192,55 @@ class AmapSdkTransitService(
                     val depStop = lineItem.departureBusStation
                     val arrStop = lineItem.arrivalBusStation
 
+                    var lineDepName: String
+                    var lineDepLat = 0.0
+                    var lineDepLng = 0.0
                     if (depStop != null && !depStop.busStationName.isNullOrEmpty()) {
-                        departureStopName = depStop.busStationName.orEmpty()
+                        lineDepName = depStop.busStationName.orEmpty()
                         depStop.latLonPoint?.let { pt ->
-                            fromLng = pt.longitude
-                            fromLat = pt.latitude
+                            lineDepLng = pt.longitude
+                            lineDepLat = pt.latitude
                         }
                     } else {
                         val firstStation = lineItem.busStations?.firstOrNull()
-                        departureStopName = firstStation?.busStationName?.ifBlank { null } ?: originName
+                        lineDepName = firstStation?.busStationName?.ifBlank { null } ?: originName
                         firstStation?.latLonPoint?.let { pt ->
-                            fromLng = pt.longitude
-                            fromLat = pt.latitude
+                            lineDepLng = pt.longitude
+                            lineDepLat = pt.latitude
                         }
                     }
 
+                    var lineArrName: String
+                    var lineArrLat = 0.0
+                    var lineArrLng = 0.0
                     if (arrStop != null && !arrStop.busStationName.isNullOrEmpty()) {
-                        arrivalStopName = arrStop.busStationName.orEmpty()
+                        lineArrName = arrStop.busStationName.orEmpty()
                         arrStop.latLonPoint?.let { pt ->
-                            toLng = pt.longitude
-                            toLat = pt.latitude
+                            lineArrLng = pt.longitude
+                            lineArrLat = pt.latitude
                         }
                     } else {
                         val lastStation = lineItem.busStations?.lastOrNull()
-                        arrivalStopName = lastStation?.busStationName?.ifBlank { null } ?: destName
+                        lineArrName = lastStation?.busStationName?.ifBlank { null } ?: destName
                         lastStation?.latLonPoint?.let { pt ->
-                            toLng = pt.longitude
-                            toLat = pt.latitude
+                            lineArrLng = pt.longitude
+                            lineArrLat = pt.latitude
                         }
                     }
 
                     val viaNum = lineItem.passStationNum.coerceAtLeast(1)
+
+                    // 仅以第一条候选线路（主线路）填充站名、坐标与行驶轨迹
+                    if (k == 0) {
+                        departureStopName = lineDepName
+                        arrivalStopName = lineArrName
+                        fromLat = lineDepLat
+                        fromLng = lineDepLng
+                        toLat = lineArrLat
+                        toLng = lineArrLng
+                        ridePath = lineItem.polyline?.map { GeoPoint(lat = it.latitude, lng = it.longitude) }
+                            .orEmpty()
+                    }
 
                     candidateLines.add(
                         CandidateLine(
@@ -217,15 +252,13 @@ class AmapSdkTransitService(
                             direction = 0,
                             fromStopOrder = 1,
                             toStopOrder = 1 + viaNum,
-                            startStopName = departureStopName,
-                            endStopName = arrivalStopName
+                            startStopName = lineDepName,
+                            endStopName = lineArrName
                         )
                     )
                 }
 
                 if (departureStopName.isNotEmpty() && arrivalStopName.isNotEmpty() && candidateLines.isNotEmpty()) {
-                    val walkingDist = step.walk?.distance?.toInt() ?: 0
-
                     legs.add(
                         TransitLeg(
                             legIndex = legIndex++,
@@ -238,7 +271,9 @@ class AmapSdkTransitService(
                             toStopLat = toLat,
                             toStopLng = toLng,
                             candidateLines = candidateLines,
-                            walkingDistanceMeters = walkingDist
+                            walkingDistanceMeters = walkingDist,
+                            ridePath = ridePath,
+                            walkPathBefore = walkPathBefore
                         )
                     )
                 }
@@ -269,8 +304,24 @@ class AmapSdkTransitService(
                 walkingMeters = walkingMeters,
                 costYuan = if (costYuan.isNotEmpty()) costYuan else "2.0",
                 transferCount = transferCount,
-                group = group
+                group = group,
+                finalWalkPath = finalWalkPath
             )
+        }
+
+        /**
+         * 拼接 [RouteBusWalkItem] 内各 WalkStep 的 polyline 为完整步行轨迹（GCJ-02）
+         */
+        private fun parseWalkItemPolyline(walkItem: RouteBusWalkItem?): List<GeoPoint> {
+            if (walkItem == null) return emptyList()
+            val steps = walkItem.steps ?: return emptyList()
+            val points = mutableListOf<GeoPoint>()
+            for (ws in steps) {
+                ws.polyline?.forEach { pt ->
+                    points.add(GeoPoint(lat = pt.latitude, lng = pt.longitude))
+                }
+            }
+            return points
         }
     }
 }

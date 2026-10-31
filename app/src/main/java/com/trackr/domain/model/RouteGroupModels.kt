@@ -60,7 +60,19 @@ data class CandidateLineRealtimeInfo(
 )
 
 /**
+ * 地理坐标点（GCJ-02 火星坐标系，与高德地图渲染一致）
+ */
+@Serializable
+data class GeoPoint(
+    val lat: Double,
+    val lng: Double
+)
+
+/**
  * 串联行程中的单程段（例如：第一程、换乘第二程）
+ *
+ * @param ridePath 主线路（第一条候选线路）的实际乘车行驶轨迹点序列（GCJ-02）
+ * @param walkPathBefore 上车前（上一段下车点/起点 POI -> 本段上车站）的步行轨迹点序列（GCJ-02）
  */
 @Serializable
 data class TransitLeg(
@@ -74,7 +86,9 @@ data class TransitLeg(
     val toStopLat: Double = 0.0,
     val toStopLng: Double = 0.0,
     val candidateLines: List<CandidateLine> = emptyList(),
-    val walkingDistanceMeters: Int = 0
+    val walkingDistanceMeters: Int = 0,
+    val ridePath: List<GeoPoint> = emptyList(),
+    val walkPathBefore: List<GeoPoint> = emptyList()
 ) {
     val primaryLine: CandidateLine?
         get() = candidateLines.firstOrNull()

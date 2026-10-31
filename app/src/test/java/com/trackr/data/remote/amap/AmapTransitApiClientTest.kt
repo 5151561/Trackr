@@ -94,6 +94,121 @@ class AmapTransitApiClientTest {
     }
 
     @Test
+    fun parseTransitsToSchemes_parsesPolylineAndFinalWalk() {
+        // 一程公交（带 polyline）+ 末段步行（segments 最后一段只有 walking，bus.buslines 空）
+        val sampleJson = """
+        [
+          {
+            "cost": "2.0",
+            "duration": 1800,
+            "walking_distance": 300,
+            "segments": [
+              {
+                "walking": {
+                  "steps": [
+                    { "polyline": "121.100,31.100;121.101,31.101" }
+                  ]
+                },
+                "bus": {
+                  "buslines": [
+                    {
+                      "name": "100路",
+                      "id": "b100",
+                      "departure_stop": { "name": "起点站", "location": "121.102,31.102" },
+                      "arrival_stop": { "name": "终点站", "location": "121.110,31.110" },
+                      "via_num": 5,
+                      "polyline": "121.102,31.102;121.105,31.105;121.110,31.110"
+                    }
+                  ]
+                }
+              },
+              {
+                "walking": {
+                  "steps": [
+                    { "polyline": "121.110,31.110;121.111,31.111;121.112,31.112" }
+                  ]
+                },
+                "bus": { "buslines": [] }
+              }
+            ]
+          }
+        ]
+        """.trimIndent()
+
+        val schemes = client.parseTransitsToSchemes(
+            transitsArray = JSONArray(sampleJson),
+            originName = "家",
+            destName = "公司",
+            cityName = "上海"
+        )
+
+        assertEquals(1, schemes.size)
+        val scheme = schemes[0]
+        val leg = scheme.group.legs[0]
+
+        // 乘车轨迹 ridePath 被解析（3 个点）
+        assertEquals(3, leg.ridePath.size)
+        assertEquals(31.102, leg.ridePath.first().lat, 1e-6)
+        assertEquals(121.102, leg.ridePath.first().lng, 1e-6)
+
+        // 上车前步行轨迹被解析（2 个点）
+        assertEquals(2, leg.walkPathBefore.size)
+
+        // 末段步行（末站 -> 目的地）被解析（3 个点）
+        assertEquals(3, scheme.finalWalkPath.size)
+        assertEquals(31.112, scheme.finalWalkPath.last().lat, 1e-6)
+    }
+
+    @Test
+    fun parseTransitsToSchemes_multiCandidate_usesMainLineStation() {
+        // 同一程多条候选线路：站名/坐标应以第一条（主线路）为准，不被最后一条覆盖
+        val sampleJson = """
+        [
+          {
+            "cost": "2.0",
+            "duration": 1200,
+            "walking_distance": 0,
+            "segments": [
+              {
+                "bus": {
+                  "buslines": [
+                    {
+                      "name": "1路",
+                      "id": "l1",
+                      "departure_stop": { "name": "主线上车站", "location": "120.0,30.0" },
+                      "arrival_stop": { "name": "主线下车站", "location": "120.1,30.1" },
+                      "via_num": 3
+                    },
+                    {
+                      "name": "2路",
+                      "id": "l2",
+                      "departure_stop": { "name": "备选上车站", "location": "120.5,30.5" },
+                      "arrival_stop": { "name": "备选下车站", "location": "120.6,30.6" },
+                      "via_num": 4
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+        """.trimIndent()
+
+        val schemes = client.parseTransitsToSchemes(
+            transitsArray = JSONArray(sampleJson),
+            originName = "起",
+            destName = "终",
+            cityName = "杭州"
+        )
+
+        val leg = schemes[0].group.legs[0]
+        assertEquals("主线上车站", leg.fromStopName)
+        assertEquals("主线下车站", leg.toStopName)
+        assertEquals(30.0, leg.fromStopLat, 1e-6)
+        assertEquals(2, leg.candidateLines.size)
+    }
+
+    @Test
     fun parseTransitsToSchemes_directBus_parsesCorrectly() {
         val sampleJson = """
         [

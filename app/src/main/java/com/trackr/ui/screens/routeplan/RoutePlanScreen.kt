@@ -2045,6 +2045,21 @@ fun AmapRealVectorMapView(
             val boundsBuilder = LatLngBounds.builder()
             var validPointsCount = 0
 
+            // 步行灰色虚线复用的绘制逻辑
+            fun drawWalk(points: List<LatLng>) {
+                if (points.size < 2) return
+                val opts = PolylineOptions()
+                    .color(0xFF78909C.toInt())
+                    .width(12f)
+                    .setDottedLine(true)
+                points.forEach { opts.add(it) }
+                aMap.addPolyline(opts)
+                points.forEach {
+                    boundsBuilder.include(it)
+                    validPointsCount++
+                }
+            }
+
             var prevLegToLatLng: LatLng? = null
 
             legs.forEachIndexed { index, leg ->
@@ -2054,20 +2069,26 @@ fun AmapRealVectorMapView(
                 val fromLatLng = if (hasFrom) LatLng(leg.fromStopLat, leg.fromStopLng) else null
                 val toLatLng = if (hasTo) LatLng(leg.toStopLat, leg.toStopLng) else null
 
-                // 若与上一段换乘站坐标不同，绘制步行换乘虚线
-                if (prevLegToLatLng != null && fromLatLng != null && prevLegToLatLng != fromLatLng) {
-                    aMap.addPolyline(
-                        PolylineOptions()
-                            .add(prevLegToLatLng, fromLatLng)
-                            .color(0xFF78909C.toInt())
-                            .width(12f)
-                            .setDottedLine(true)
-                    )
+                // 上车前步行轨迹：优先用解析出的真实 walkPathBefore，否则回落到换乘两站直连虚线
+                val walkBefore = leg.walkPathBefore.map { LatLng(it.lat, it.lng) }
+                if (walkBefore.size >= 2) {
+                    drawWalk(walkBefore)
+                } else if (prevLegToLatLng != null && fromLatLng != null && prevLegToLatLng != fromLatLng) {
+                    drawWalk(listOf(prevLegToLatLng!!, fromLatLng))
                 }
 
-                // 绘制当前公交段折线
-                if (fromLatLng != null && toLatLng != null) {
-                    val legColor = if (index == 0) 0xFF0061A4.toInt() else 0xFF7C4DFF.toInt()
+                // 绘制当前公交段折线：优先用真实行驶轨迹 ridePath，为空时回落到起终两点直线
+                val legColor = if (index == 0) 0xFF0061A4.toInt() else 0xFF7C4DFF.toInt()
+                val ridePoints = leg.ridePath.map { LatLng(it.lat, it.lng) }
+                if (ridePoints.size >= 2) {
+                    val opts = PolylineOptions().color(legColor).width(18f)
+                    ridePoints.forEach { opts.add(it) }
+                    aMap.addPolyline(opts)
+                    ridePoints.forEach {
+                        boundsBuilder.include(it)
+                        validPointsCount++
+                    }
+                } else if (fromLatLng != null && toLatLng != null) {
                     aMap.addPolyline(
                         PolylineOptions()
                             .add(fromLatLng, toLatLng)
@@ -2079,13 +2100,7 @@ fun AmapRealVectorMapView(
                 if (fromLatLng != null) {
                     boundsBuilder.include(fromLatLng)
                     validPointsCount++
-                    if (index == 0) {
-                        aMap.addMarker(
-                            MarkerOptions()
-                                .position(fromLatLng)
-                                .title("起点: ${leg.fromStopName}")
-                        )
-                    } else {
+                    if (index != 0) {
                         aMap.addMarker(
                             MarkerOptions()
                                 .position(fromLatLng)
@@ -2098,14 +2113,44 @@ fun AmapRealVectorMapView(
                     boundsBuilder.include(toLatLng)
                     validPointsCount++
                     prevLegToLatLng = toLatLng
-                    if (index == legs.lastIndex) {
-                        aMap.addMarker(
-                            MarkerOptions()
-                                .position(toLatLng)
-                                .title("终点: ${leg.toStopName}")
-                        )
-                    }
                 }
+            }
+
+            // 末段步行（末站 -> 目的地 POI）
+            val finalWalk = selectedScheme.finalWalkPath.map { LatLng(it.lat, it.lng) }
+            if (finalWalk.size >= 2) {
+                drawWalk(finalWalk)
+            } else if (prevLegToLatLng != null && selectedScheme.destinationPoint != null) {
+                val dest = LatLng(selectedScheme.destinationPoint!!.lat, selectedScheme.destinationPoint!!.lng)
+                if (prevLegToLatLng != dest) drawWalk(listOf(prevLegToLatLng!!, dest))
+            }
+
+            // 起点 marker：优先用户选择的出发地 POI，否则回落首段上车站
+            val originLatLng = selectedScheme.originPoint?.let { LatLng(it.lat, it.lng) }
+                ?: legs.firstOrNull()?.takeIf { it.fromStopLat > 0.0 && it.fromStopLng > 0.0 }
+                    ?.let { LatLng(it.fromStopLat, it.fromStopLng) }
+            if (originLatLng != null) {
+                boundsBuilder.include(originLatLng)
+                validPointsCount++
+                aMap.addMarker(
+                    MarkerOptions()
+                        .position(originLatLng)
+                        .title("起点")
+                )
+            }
+
+            // 终点 marker：优先用户选择的目的地 POI，否则回落末段下车站
+            val destLatLng = selectedScheme.destinationPoint?.let { LatLng(it.lat, it.lng) }
+                ?: legs.lastOrNull()?.takeIf { it.toStopLat > 0.0 && it.toStopLng > 0.0 }
+                    ?.let { LatLng(it.toStopLat, it.toStopLng) }
+            if (destLatLng != null) {
+                boundsBuilder.include(destLatLng)
+                validPointsCount++
+                aMap.addMarker(
+                    MarkerOptions()
+                        .position(destLatLng)
+                        .title("终点")
+                )
             }
 
             if (validPointsCount > 0) {

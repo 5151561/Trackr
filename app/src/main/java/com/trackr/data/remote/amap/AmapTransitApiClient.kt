@@ -3,6 +3,7 @@ package com.trackr.data.remote.amap
 import com.trackr.data.remote.common.BaseTransitApiClient
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.DataSourceType
+import com.trackr.domain.model.GeoPoint
 import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.TransitGroup
 import com.trackr.domain.model.TransitLeg
@@ -138,20 +139,36 @@ class AmapTransitApiClient(
             val segmentsArray = transitObj.optJSONArray("segments") ?: continue
             val legs = mutableListOf<TransitLeg>()
             var legIndex = 0
+            // 末段步行（最后一段只有 walking、bus.buslines 为空）：从末站步行到目的地 POI
+            var finalWalkPath: List<GeoPoint> = emptyList()
 
             for (j in 0 until segmentsArray.length()) {
                 val segObj = segmentsArray.optJSONObject(j) ?: continue
-                val busObj = segObj.optJSONObject("bus") ?: continue
-                val buslinesArray = busObj.optJSONArray("buslines") ?: continue
-                if (buslinesArray.length() == 0) continue
+
+                // 本段“乘车前”步行轨迹（起点 POI/上一段下车点 -> 本段上车站）
+                val segWalking = segObj.optJSONObject("walking")
+                val walkingDist = segWalking?.optInt("distance", 0) ?: 0
+                val walkPathBefore = parseWalkingPolyline(segWalking)
+
+                val busObj = segObj.optJSONObject("bus")
+                val buslinesArray = busObj?.optJSONArray("buslines")
+                if (busObj == null || buslinesArray == null || buslinesArray.length() == 0) {
+                    // 纯步行段：若无公交线路，视为末段步行（末站 -> 目的地）
+                    if (walkPathBefore.isNotEmpty()) {
+                        finalWalkPath = walkPathBefore
+                    }
+                    continue
+                }
 
                 val candidateLines = mutableListOf<CandidateLine>()
+                // 站名/坐标/行驶轨迹以第一条候选线路（主线路）为准，不被后续候选线路覆盖
                 var departureStopName = ""
                 var arrivalStopName = ""
                 var fromLat = 0.0
                 var fromLng = 0.0
                 var toLat = 0.0
                 var toLng = 0.0
+                var ridePath: List<GeoPoint> = emptyList()
 
                 for (k in 0 until buslinesArray.length()) {
                     val lineObj = buslinesArray.optJSONObject(k) ?: continue
@@ -162,31 +179,40 @@ class AmapTransitApiClient(
                     val depStop = lineObj.optJSONObject("departure_stop")
                     val arrStop = lineObj.optJSONObject("arrival_stop")
 
-                    if (depStop != null) {
-                        departureStopName = depStop.optString("name")
-                        val loc = depStop.optString("location").split(",")
+                    var lineDepName = depStop?.optString("name").orEmpty()
+                    var lineDepLat = 0.0
+                    var lineDepLng = 0.0
+                    depStop?.optString("location")?.split(",")?.let { loc ->
                         if (loc.size == 2) {
-                            fromLng = loc[0].toDoubleOrNull() ?: 0.0
-                            fromLat = loc[1].toDoubleOrNull() ?: 0.0
+                            lineDepLng = loc[0].toDoubleOrNull() ?: 0.0
+                            lineDepLat = loc[1].toDoubleOrNull() ?: 0.0
                         }
                     }
-                    if (departureStopName.isEmpty()) {
-                        departureStopName = originName
-                    }
+                    if (lineDepName.isEmpty()) lineDepName = originName
 
-                    if (arrStop != null) {
-                        arrivalStopName = arrStop.optString("name")
-                        val loc = arrStop.optString("location").split(",")
+                    var lineArrName = arrStop?.optString("name").orEmpty()
+                    var lineArrLat = 0.0
+                    var lineArrLng = 0.0
+                    arrStop?.optString("location")?.split(",")?.let { loc ->
                         if (loc.size == 2) {
-                            toLng = loc[0].toDoubleOrNull() ?: 0.0
-                            toLat = loc[1].toDoubleOrNull() ?: 0.0
+                            lineArrLng = loc[0].toDoubleOrNull() ?: 0.0
+                            lineArrLat = loc[1].toDoubleOrNull() ?: 0.0
                         }
                     }
-                    if (arrivalStopName.isEmpty()) {
-                        arrivalStopName = destName
-                    }
+                    if (lineArrName.isEmpty()) lineArrName = destName
 
                     val viaNum = lineObj.optInt("via_num", 1)
+
+                    // 仅以第一条候选线路（主线路）填充站名、坐标与行驶轨迹
+                    if (k == 0) {
+                        departureStopName = lineDepName
+                        arrivalStopName = lineArrName
+                        fromLat = lineDepLat
+                        fromLng = lineDepLng
+                        toLat = lineArrLat
+                        toLng = lineArrLng
+                        ridePath = parsePolyline(lineObj.optString("polyline"))
+                    }
 
                     candidateLines.add(
                         CandidateLine(
@@ -198,16 +224,13 @@ class AmapTransitApiClient(
                             direction = 0,
                             fromStopOrder = 1,
                             toStopOrder = 1 + viaNum,
-                            startStopName = departureStopName,
-                            endStopName = arrivalStopName
+                            startStopName = lineDepName,
+                            endStopName = lineArrName
                         )
                     )
                 }
 
                 if (departureStopName.isNotEmpty() && arrivalStopName.isNotEmpty() && candidateLines.isNotEmpty()) {
-                    val segWalking = segObj.optJSONObject("walking")
-                    val walkingDist = segWalking?.optInt("distance", 0) ?: 0
-
                     legs.add(
                         TransitLeg(
                             legIndex = legIndex++,
@@ -220,7 +243,9 @@ class AmapTransitApiClient(
                             toStopLat = toLat,
                             toStopLng = toLng,
                             candidateLines = candidateLines,
-                            walkingDistanceMeters = walkingDist
+                            walkingDistanceMeters = walkingDist,
+                            ridePath = ridePath,
+                            walkPathBefore = walkPathBefore
                         )
                     )
                 }
@@ -251,12 +276,41 @@ class AmapTransitApiClient(
                         walkingMeters = walkingMeters,
                         costYuan = if (costStr.isNotEmpty() && costStr != "[]") costStr else "2.0",
                         transferCount = transferCount,
-                        group = group
+                        group = group,
+                        finalWalkPath = finalWalkPath
                     )
                 )
             }
         }
 
         return schemeResults
+    }
+
+    /**
+     * 解析高德 Web 公交 polyline 字符串 "lng,lat;lng,lat;..." 为 GCJ-02 坐标点序列
+     */
+    private fun parsePolyline(raw: String?): List<GeoPoint> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return raw.split(";").mapNotNull { pair ->
+            val parts = pair.split(",")
+            if (parts.size != 2) return@mapNotNull null
+            val lng = parts[0].trim().toDoubleOrNull() ?: return@mapNotNull null
+            val lat = parts[1].trim().toDoubleOrNull() ?: return@mapNotNull null
+            GeoPoint(lat = lat, lng = lng)
+        }
+    }
+
+    /**
+     * 解析 walking 段内 steps[].polyline，拼接为完整步行轨迹
+     */
+    private fun parseWalkingPolyline(walkingObj: JSONObject?): List<GeoPoint> {
+        if (walkingObj == null) return emptyList()
+        val stepsArray = walkingObj.optJSONArray("steps") ?: return emptyList()
+        val points = mutableListOf<GeoPoint>()
+        for (i in 0 until stepsArray.length()) {
+            val step = stepsArray.optJSONObject(i) ?: continue
+            points.addAll(parsePolyline(step.optString("polyline")))
+        }
+        return points
     }
 }

@@ -23,6 +23,7 @@ import com.trackr.domain.model.CandidateLineRealtimeInfo
 import com.trackr.domain.model.DataSourceType
 import com.trackr.domain.model.EngineMode
 import com.trackr.domain.model.FavoriteGroup
+import com.trackr.domain.model.GeoPoint
 import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.GroupTrackingSessionState
 import com.trackr.domain.model.NearbyStop
@@ -550,6 +551,13 @@ class FavoritesGroupViewModel(
                 schemes = planLocalTransitRoute(effectiveOrigin, effectiveDest, city)
             }
 
+            // 将用户选择的起终点 POI 坐标（GCJ-02 "lng,lat"）注入方案，供地图起终点 marker 使用
+            val originPoint = parseLngLatToGeoPoint(effectiveOrigin.location)
+            val destPoint = parseLngLatToGeoPoint(effectiveDest.location)
+            if (originPoint != null || destPoint != null) {
+                schemes = schemes.map { it.copy(originPoint = originPoint, destinationPoint = destPoint) }
+            }
+
             if (schemes.isNotEmpty()) {
                 _plannedSchemes.value = schemes
                 onComplete?.invoke(true)
@@ -564,6 +572,15 @@ class FavoritesGroupViewModel(
 
             _isPlanningRoute.value = false
         }
+    }
+
+    /** 解析高德 "lng,lat" 字符串为 GeoPoint（GCJ-02） */
+    private fun parseLngLatToGeoPoint(lngLat: String): GeoPoint? {
+        val parts = lngLat.split(",")
+        if (parts.size != 2) return null
+        val lng = parts[0].trim().toDoubleOrNull() ?: return null
+        val lat = parts[1].trim().toDoubleOrNull() ?: return null
+        return GeoPoint(lat = lat, lng = lng)
     }
 
     private suspend fun alignAmapSchemesWithRealtimeSource(
