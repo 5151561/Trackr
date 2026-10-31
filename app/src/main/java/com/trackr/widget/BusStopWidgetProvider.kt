@@ -16,19 +16,20 @@ import com.trackr.TrackrApp
 import com.trackr.MainActivity
 import com.trackr.R
 import com.trackr.domain.math.RouteProjectionMath
+import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.FavoriteStationLine
 import com.trackr.domain.model.TransitCity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class BusStopWidgetProvider : AppWidgetProvider() {
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onUpdate(
         context: Context,
@@ -36,9 +37,7 @@ class BusStopWidgetProvider : AppWidgetProvider() {
         appWidgetIds: IntArray
     ) {
         super.onUpdate(context, appWidgetManager, appWidgetIds)
-        for (appWidgetId in appWidgetIds) {
-            updateAppWidget(context, appWidgetManager, appWidgetId)
-        }
+        updateAppWidgets(context, appWidgetManager, appWidgetIds)
     }
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -47,17 +46,20 @@ class BusStopWidgetProvider : AppWidgetProvider() {
             val appWidgetManager = AppWidgetManager.getInstance(context)
             val componentName = ComponentName(context, BusStopWidgetProvider::class.java)
             val appWidgetIds = appWidgetManager.getAppWidgetIds(componentName)
-            for (appWidgetId in appWidgetIds) {
-                updateAppWidget(context, appWidgetManager, appWidgetId)
-            }
+            updateAppWidgets(context, appWidgetManager, appWidgetIds)
         }
     }
 
-    private fun updateAppWidget(
+    /**
+     * 刷新全部小组件实例：所有实例展示同一条收藏，只请求一次实时数据再分发给各实例。
+     * 使用 goAsync() 让广播在后台请求完成前保持存活，并以 [FETCH_TIMEOUT_MS] 兜底，确保在系统 10 秒限制内结束。
+     */
+    private fun updateAppWidgets(
         context: Context,
         appWidgetManager: AppWidgetManager,
-        appWidgetId: Int
+        appWidgetIds: IntArray?
     ) {
+        if (appWidgetIds == null || appWidgetIds.isEmpty()) return
         try {
             val app = context.applicationContext as? TrackrApp ?: TrackrApp.instance
             val repository = try { app.repository } catch (e: Exception) { null }
@@ -65,73 +67,86 @@ class BusStopWidgetProvider : AppWidgetProvider() {
             val favorite = favorites.firstOrNull()
 
             // 1. 同步构建并立即推送初始视图，确保启动器在添加微件瞬间获得有效布局，避免出现超时或空白
-            val views = buildBaseRemoteViews(context, appWidgetId, favorite)
-            appWidgetManager.updateAppWidget(appWidgetId, views)
+            for (appWidgetId in appWidgetIds) {
+                appWidgetManager.updateAppWidget(appWidgetId, buildBaseRemoteViews(context, appWidgetId, favorite))
+            }
 
-            // 2. 如果存在收藏，异步在后台拉取实时到站并更新视图
-            if (favorite != null && repository != null) {
-                scope.launch {
-                    try {
-                        val city = TransitCity(cityId = favorite.cityId, cityName = favorite.cityName)
-                        val result = repository.getLineDetail(
-                            city = city,
-                            lineId = favorite.lineId,
-                            targetOrder = favorite.targetOrder,
-                            stationId = favorite.targetStopId,
-                            source = favorite.source,
-                            lineNameHint = favorite.lineName,
-                            directionHint = favorite.direction
+            // 2. 如果存在收藏，后台拉取一次实时到站并更新所有实例
+            if (favorite == null || repository == null) return
+            val pendingResult = goAsync()
+            widgetScope.launch {
+                try {
+                    val (etaText, progressPercent) = try {
+                        val city = TransitCity(
+                            cityId = favorite.cityId,
+                            cityName = favorite.cityName,
+                            mygolbsCityCode = favorite.mygolbsCityCode.takeIf { it.isNotBlank() }
                         )
-                        val detail = result.getOrNull()
-                        val updatedViews = buildBaseRemoteViews(context, appWidgetId, favorite)
-                        var etaText = "点击刷新同步数据"
-                        var progressPercent = 0
-
-                        if (detail != null) {
-                            val approachingBuses = detail.buses
-                                .filter { it.order <= favorite.targetOrder }
-                                .sortedByDescending { it.order }
-
-                            val nearestBus = approachingBuses.firstOrNull()
-                            if (nearestBus != null) {
-                                val stopsRemaining = favorite.targetOrder - nearestBus.order
-                                if (stopsRemaining == 0 && nearestBus.isArrived) {
-                                    etaText = "已到达 ${favorite.targetStopName}"
-                                    progressPercent = 100
-                                } else if (stopsRemaining == 0) {
-                                    etaText = "即将进站"
-                                    progressPercent = 92
-                                } else {
-                                    val etaFormatted = RouteProjectionMath.formatEtaText(nearestBus.etaSeconds)
-                                    etaText = "还有 $stopsRemaining 站 · $etaFormatted"
-                                    val totalToTarget = favorite.targetOrder.coerceAtLeast(1)
-                                    val currentSegment = (nearestBus.order - 1).coerceAtLeast(0) + nearestBus.segmentProgress
-                                    progressPercent = ((currentSegment / totalToTarget) * 100).toInt().coerceIn(5, 95)
-                                }
-                            } else {
-                                etaText = detail.statusDescription.ifBlank {
-                                    if (detail.operatingState.defaultLabel.isNotEmpty()) {
-                                        detail.operatingState.defaultLabel
-                                    } else {
-                                        "暂无在途车辆"
-                                    }
-                                }
-                                progressPercent = 0
-                            }
+                        val detail = withTimeoutOrNull(FETCH_TIMEOUT_MS) {
+                            repository.getLineDetail(
+                                city = city,
+                                lineId = favorite.lineId,
+                                targetOrder = favorite.targetOrder,
+                                stationId = favorite.targetStopId,
+                                source = favorite.source,
+                                lineNameHint = favorite.lineName,
+                                directionHint = favorite.direction
+                            ).getOrNull()
                         }
-
-                        updatedViews.setTextViewText(R.id.widget_eta_large, etaText)
-                        updatedViews.setProgressBar(R.id.widget_progress_bar, 100, progressPercent, false)
-                        appWidgetManager.updateAppWidget(appWidgetId, updatedViews)
+                        buildEta(favorite, detail)
+                    } catch (e: CancellationException) {
+                        throw e
                     } catch (e: Exception) {
+                        "网络连接异常，点击刷新" to null
+                    }
+
+                    for (appWidgetId in appWidgetIds) {
                         val updatedViews = buildBaseRemoteViews(context, appWidgetId, favorite)
-                        updatedViews.setTextViewText(R.id.widget_eta_large, "网络连接异常，点击刷新")
+                        updatedViews.setTextViewText(R.id.widget_eta_large, etaText)
+                        if (progressPercent != null) {
+                            updatedViews.setProgressBar(R.id.widget_progress_bar, 100, progressPercent, false)
+                        }
                         appWidgetManager.updateAppWidget(appWidgetId, updatedViews)
                     }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                } finally {
+                    pendingResult.finish()
                 }
             }
         } catch (e: Exception) {
             e.printStackTrace()
+        }
+    }
+
+    /**
+     * 根据线路详情计算小组件主文案与进度（进度为 null 表示保持默认）。
+     * 最近车按 order + segmentProgress 选取，与其他页面口径一致。
+     */
+    private fun buildEta(favorite: FavoriteStationLine, detail: BusLineDetail?): Pair<String, Int?> {
+        if (detail == null) return "点击刷新同步数据" to 0
+
+        val nearestBus = detail.buses
+            .filter { it.order <= favorite.targetOrder }
+            .maxByOrNull { it.order + it.segmentProgress }
+            ?: return detail.statusDescription.ifBlank {
+                if (detail.operatingState.defaultLabel.isNotEmpty()) {
+                    detail.operatingState.defaultLabel
+                } else {
+                    "暂无在途车辆"
+                }
+            } to 0
+
+        val stopsRemaining = favorite.targetOrder - nearestBus.order
+        return if (stopsRemaining == 0 && nearestBus.isArrived) {
+            "已到达 ${favorite.targetStopName}" to 100
+        } else if (stopsRemaining == 0) {
+            "即将进站" to 92
+        } else {
+            val etaFormatted = RouteProjectionMath.formatEtaText(nearestBus.etaSeconds)
+            val totalToTarget = favorite.targetOrder.coerceAtLeast(1)
+            val currentSegment = (nearestBus.order - 1).coerceAtLeast(0) + nearestBus.segmentProgress
+            "还有 $stopsRemaining 站 · $etaFormatted" to ((currentSegment / totalToTarget) * 100).toInt().coerceIn(5, 95)
         }
     }
 
@@ -197,6 +212,12 @@ class BusStopWidgetProvider : AppWidgetProvider() {
 
     companion object {
         const val ACTION_WIDGET_REFRESH = "com.trackr.action.WIDGET_REFRESH"
+
+        /** 实时请求超时：goAsync 的广播需在 10 秒内 finish，留出更新视图的余量 */
+        private const val FETCH_TIMEOUT_MS = 7_000L
+
+        /** 进程级作用域：BroadcastReceiver 实例每次广播都会重建，不能把作用域放在实例字段里 */
+        private val widgetScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
         /**
          * 触发所有桌面小组件刷新
