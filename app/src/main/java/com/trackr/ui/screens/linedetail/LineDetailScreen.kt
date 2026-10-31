@@ -253,7 +253,6 @@ fun LineDetailScreen(
                                     alertThreshold = uiState.alertThresholdStops,
                                     onThresholdChange = { viewModel.setAlertThreshold(it) },
                                     onOpenBusList = { viewModel.openBusList() },
-                                    onSwitchOpposite = { viewModel.switchOppositeDirection() },
                                     onToggleTracking = {
                                         if (isCurrentStationTracking) {
                                             BusTrackingService.stopTracking(context)

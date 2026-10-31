@@ -75,9 +75,9 @@ fun TopLineHeader(
             DataSourceBadge(source = line.source)
         }
 
-        // 开往方向副标题
+        // 方向副标题：始发 → 终点
         Text(
-            text = "开往  ${line.endStop} （始发：${line.startStop}）",
+            text = "${line.startStop}  →  ${line.endStop}",
             fontSize = 14.sp,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 48.dp)
@@ -93,8 +93,7 @@ fun TopLineHeader(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            CapsuleBadge("首 ${line.firstTime.ifEmpty { "—" }}")
-            CapsuleBadge("末 ${line.lastTime.ifEmpty { "—" }}")
+            CapsuleBadge("运营 ${line.firstTime.ifEmpty { "—" }}–${line.lastTime.ifEmpty { "—" }}")
             if (line.price.isNotEmpty()) CapsuleBadge("票价 ${line.price}")
             CapsuleBadge("共 ${lineDetail.stops.size} 站")
 

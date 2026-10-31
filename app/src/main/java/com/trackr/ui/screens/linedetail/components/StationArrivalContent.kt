@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.sp
 import com.trackr.domain.math.RouteProjectionMath
 import com.trackr.domain.model.BusLineDetail
 import com.trackr.domain.model.BusStop
+import com.trackr.domain.model.LineOperatingState
 import com.trackr.domain.model.sanitizePlateOrFleetNo
 import com.trackr.ui.theme.busColors
 
@@ -69,7 +70,6 @@ fun StationArrivalContent(
     alertThreshold: Int,
     onThresholdChange: (Int) -> Unit,
     onOpenBusList: () -> Unit,
-    onSwitchOpposite: () -> Unit,
     onToggleTracking: () -> Unit,
     onOpenScheduledReminder: () -> Unit,
     modifier: Modifier = Modifier
@@ -244,15 +244,42 @@ fun StationArrivalContent(
                 strokeCap = StrokeCap.Round
             )
         } else {
+            // 无可用在途车：分运营状态给出下一班始发时间等有效信息
+            val line = lineDetail.line
+            val nextDeparture = lineDetail.nextDepartureFromStart?.takeIf { it.isNotBlank() }
+
+            val (headline, subline) = when (lineDetail.operatingState) {
+                LineOperatingState.ENDED -> {
+                    val last = line.lastTime.ifBlank { "—" }
+                    "今日末班已过" to "末班 $last"
+                }
+                LineOperatingState.WAITING -> {
+                    val first = line.firstTime.ifBlank { "—" }
+                    "等待发车" to (nextDeparture?.let { "下一班约 $it 从始发站发车" } ?: "首班 $first")
+                }
+                LineOperatingState.SUSPENDED -> {
+                    "线路临时停运" to lineDetail.statusDescription.ifBlank { "暂无发车计划" }
+                }
+                else -> {
+                    if (nextDeparture != null) {
+                        "车辆均已过该站" to "下一班约 $nextDeparture 从始发站（${line.startStop}）发车"
+                    } else if (lineDetail.buses.isNotEmpty()) {
+                        "车辆均已过该站" to "等待下一班车调度"
+                    } else {
+                        "当前暂无在途车辆" to "运营状态：${lineDetail.operatingState.defaultLabel}"
+                    }
+                }
+            }
+
             Text(
-                text = if (lineDetail.buses.isNotEmpty()) "当前车辆均已过该站" else "当前暂无在途车辆",
+                text = headline,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "运营状态：${lineDetail.operatingState.defaultLabel}",
+                text = subline,
                 fontSize = 13.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -260,35 +287,17 @@ fun StationArrivalContent(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // 快捷入口按钮行
-        Row(
+        // 快捷入口按钮行（换向功能已在底部悬浮栏提供，此处不再重复）
+        OutlinedButton(
+            onClick = onOpenBusList,
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            shape = RoundedCornerShape(12.dp)
         ) {
-            OutlinedButton(
-                onClick = onOpenBusList,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(
-                    text = "查看全线车辆 (${lineDetail.buses.size})",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-
-            OutlinedButton(
-                onClick = onSwitchOpposite,
-                enabled = lineDetail.reverseDirection != null,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(12.dp)
-            ) {
-                Text(
-                    text = "切换反向同名站",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
+            Text(
+                text = "查看全线车辆 (${lineDetail.buses.size})",
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+            )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
