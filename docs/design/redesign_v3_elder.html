@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>追客 设计稿 v3 · 长辈版</title>
+<style>
+:root{
+  --primary:#0B47B8; --on-primary:#fff; --primary-c:#D6E2FF; --on-primary-c:#001A4D;
+  --bg:#F2F3F5; --card:#FFFFFF; --variant:#E6E9EE; --outline:#8A929D;
+  --text:#000000; --text2:#33383F;
+  --go:#0A6B39; --go-c:#D2F2DF; --warn:#8A4500; --warn-c:#FFE2BF; --err:#B3261E;
+  --page:#E4E7EC; --doc:#1C2027;
+}
+html.dark{
+  --primary:#A8C4FF; --on-primary:#001A4D; --primary-c:#173A80; --on-primary-c:#FFFFFF;
+  --bg:#000000; --card:#14171C; --variant:#252A32; --outline:#9AA3AF;
+  --text:#FFFFFF; --text2:#D5DAE1;
+  --go:#6BE3A0; --go-c:#0E3A22; --warn:#FFC266; --warn-c:#3D2A00; --err:#FF9C94;
+  --page:#0A0C10; --doc:#E7EAEE;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;background:var(--page);color:var(--doc);line-height:1.5;padding:32px 24px 80px}
+.wrap{max-width:1480px;margin:0 auto}
+h1{font-size:30px;margin-bottom:4px}
+h2{font-size:22px;margin:44px 0 16px;padding-top:16px;border-top:1px solid var(--variant)}
+h3{font-size:16px;margin:18px 0 8px}
+p.lead{color:var(--doc);opacity:.75;margin-bottom:12px}
+.toggle{position:fixed;top:16px;right:16px;z-index:9;background:var(--primary);color:var(--on-primary);border:0;border-radius:999px;padding:10px 18px;font-size:14px;cursor:pointer}
+table.doc{border-collapse:collapse;width:100%;background:var(--card);color:var(--text);border-radius:12px;overflow:hidden;font-size:14px}
+table.doc th,table.doc td{padding:9px 12px;border-bottom:1px solid var(--variant);text-align:left;vertical-align:top}
+table.doc th{background:var(--variant)}
+code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--variant);color:var(--text);padding:1px 5px;border-radius:4px}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px}
+.box{background:var(--card);color:var(--text);border-radius:16px;padding:16px 18px}
+.box ul{padding-left:18px}.box li{margin:3px 0}
+
+.screens{display:grid;grid-template-columns:repeat(auto-fill,minmax(344px,1fr));gap:28px 20px}
+.shot figcaption{font-size:13px;margin-top:10px;padding:0 4px}
+.shot figcaption b{display:block;font-size:15px;margin-bottom:2px}
+.shot figcaption span{opacity:.75}
+.phone{width:340px;height:720px;border-radius:36px;background:var(--bg);color:var(--text);position:relative;overflow:hidden;border:8px solid #111;box-shadow:0 10px 30px #0003;font-size:20px}
+.sb{height:28px;display:flex;justify-content:space-between;align-items:center;padding:0 18px;font-size:13px;font-weight:600}
+.scroll{position:absolute;top:28px;left:0;right:0;bottom:0;overflow:hidden}
+.ic{width:28px;height:28px;fill:currentColor;flex:none;vertical-align:middle}
+.ic.s{width:24px;height:24px}
+.top{display:flex;align-items:center;justify-content:space-between;padding:8px 12px 8px 18px;min-height:72px}
+.top .city{font-size:28px;font-weight:700;display:flex;align-items:center}
+.lbtn{min-height:64px;min-width:64px;border-radius:16px;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:16px;font-weight:600;color:var(--text);gap:0}
+.back{display:flex;align-items:center;gap:6px;font-size:22px;font-weight:600;min-height:64px;padding:0 12px}
+.search{margin:0 12px 14px;min-height:64px;border-radius:16px;background:var(--card);border:2px solid var(--outline);display:flex;align-items:center;gap:12px;padding:0 6px 0 16px;font-size:20px;color:var(--text2)}
+.search .mic{margin-left:auto;width:56px;height:52px;border-radius:12px;background:var(--primary-c);color:var(--on-primary-c);display:grid;place-items:center}
+.h{font-size:22px;font-weight:700;padding:6px 18px 10px}
+.card{background:var(--card);border-radius:20px;margin:0 12px 12px;padding:16px;border:2px solid var(--variant)}
+.lr{display:flex;align-items:center;gap:12px}
+.badge{min-width:72px;height:44px;padding:0 10px;border-radius:10px;background:var(--primary);color:var(--on-primary);font-weight:800;font-size:24px;display:inline-grid;place-items:center;flex:none;font-variant-numeric:tabular-nums}
+.stop{font-size:20px;font-weight:600}
+.to{font-size:18px;color:var(--text2)}
+.eta{font-size:56px;font-weight:800;line-height:1.05;font-variant-numeric:tabular-nums;margin-top:10px}
+.eta small{font-size:26px;font-weight:700}
+.sub{font-size:20px;color:var(--text2);margin-top:2px}
+.go{color:var(--go)!important}.warn{color:var(--warn)!important}
+.btns{display:flex;gap:10px;margin-top:14px}
+.btn{min-height:64px;border-radius:16px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:20px;font-weight:700;padding:0 14px;flex:1;text-align:center}
+.btn.f{background:var(--primary);color:var(--on-primary)}
+.btn.o{border:2px solid var(--primary);color:var(--primary);background:var(--card)}
+.btn.tn{background:var(--primary-c);color:var(--on-primary-c)}
+.btn.xl{min-height:72px;font-size:22px}
+.btn.err{border:2px solid var(--err);color:var(--err);background:var(--card)}
+.qr{position:absolute;left:0;right:0;bottom:0;padding:10px 12px 18px;background:var(--bg);border-top:2px solid var(--variant)}
+.qr .btn{background:var(--go);color:#fff;min-height:72px;font-size:22px}
+html.dark .qr .btn{color:#001a0c}
+.row{display:flex;align-items:center;gap:12px;min-height:72px;padding:8px 16px}
+.row+.row{border-top:2px solid var(--variant)}
+.row .m{flex:1;min-width:0;white-space:nowrap}
+.row .r{text-align:right;font-variant-numeric:tabular-nums}
+.row .r b{font-size:26px;display:block;line-height:1.1}
+.row .r span{font-size:16px;color:var(--text2)}
+.list{background:var(--card);border-radius:20px;margin:0 12px 12px;border:2px solid var(--variant);overflow:hidden}
+.st{display:flex;align-items:center;gap:14px;min-height:64px;padding:0 16px;font-size:20px}
+.st+.st{border-top:2px solid var(--variant)}
+.st .dot{width:16px;height:16px;border-radius:50%;border:4px solid var(--primary);flex:none}
+.st.past{color:var(--text2)}.st.past .dot{border-color:var(--outline)}
+.st.sel{background:var(--primary-c);color:var(--on-primary-c);font-weight:800}
+.st.sel .dot{background:var(--primary)}
+.st .tag{margin-left:auto;font-size:16px;font-weight:700}
+.st .bus{margin-left:auto;font-size:16px;font-weight:700;background:var(--go-c);color:var(--go);border-radius:10px;padding:4px 10px}
+.scrim{position:absolute;inset:0;background:#000a}
+.dialog{position:absolute;left:14px;right:14px;top:120px;background:var(--card);border-radius:28px;padding:24px 20px}
+.dialog .t{font-size:26px;font-weight:800;margin-bottom:8px}
+.dialog .d{font-size:20px;color:var(--text2);margin-bottom:18px}
+.sample{display:flex;gap:10px;margin-bottom:18px}
+.sample div{flex:1;border-radius:14px;background:var(--variant);padding:10px;text-align:center}
+.sample .a{font-size:13px}.sample .b{font-size:28px;font-weight:800}
+.alert{position:absolute;inset:28px 0 0 0;background:var(--go);color:#fff;display:flex;flex-direction:column;padding:40px 20px 24px}
+html.dark .alert{color:#001a0c}
+.alert .k{font-size:22px;font-weight:600;opacity:.9}
+.alert .t{font-size:52px;font-weight:900;line-height:1.1;margin:12px 0}
+.alert .d{font-size:24px}
+.alert .btn{background:#fff;color:var(--go)}
+.alert .btn.o2{background:transparent;border:3px solid #fff;color:inherit}
+.set{display:flex;align-items:center;gap:12px;min-height:76px;padding:8px 16px}
+.set+.set{border-top:2px solid var(--variant)}
+.set .m{flex:1;font-size:21px;font-weight:600}
+.set .m small{display:block;font-size:16px;font-weight:400;color:var(--text2)}
+.set .v{font-size:18px;color:var(--primary);font-weight:700}
+.sw{width:64px;height:38px;border-radius:999px;background:var(--primary);position:relative;flex:none}
+.sw:after{content:"";position:absolute;right:4px;top:4px;width:30px;height:30px;border-radius:50%;background:var(--on-primary)}
+.sw.off{background:var(--outline)}.sw.off:after{left:4px;right:auto}
+.pulse{display:inline-block;width:12px;height:12px;border-radius:50%;background:currentColor;margin-right:8px;animation:p 1.6s infinite}
+@keyframes p{50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.pulse{animation:none}}
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.documentElement.classList.toggle('dark')">切换深色 / 浅色</button>
+
+<svg width="0" height="0" style="position:absolute">
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></symbol>
+<symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm5.3-3c0 3-2.54 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c3.28-.48 6-3.3 6-6.72h-1.7z"/></symbol>
+<symbol id="i-qr" viewBox="0 0 24 24"><path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zM13 3v8h8V3h-8zm6 6h-4V5h4v4zM13 13h2v2h-2zM15 15h2v2h-2zM13 17h2v2h-2zM17 17h2v2h-2zM19 19h2v2h-2zM15 19h2v2h-2zM17 13h2v2h-2zM19 15h2v2h-2z"/></symbol>
+<symbol id="i-speak" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><path d="M19.14 12.94a7.07 7.07 0 000-1.88l2.03-1.58a.5.5 0 00.12-.61l-1.92-3.32a.5.5 0 00-.59-.22l-2.39.96a7.03 7.03 0 00-1.62-.94l-.36-2.54a.5.5 0 00-.5-.42h-3.84a.5.5 0 00-.49.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 00-.59.22L2.71 8.87a.5.5 0 00.12.61l2.03 1.58a7.07 7.07 0 000 1.88l-2.03 1.58a.5.5 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.25.42.49.42h3.84c.24 0 .45-.18.49-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.5.5 0 00-.12-.61l-2.01-1.58zM12 15.6a3.6 3.6 0 110-7.2 3.6 3.6 0 010 7.2z"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></symbol>
+<symbol id="i-swap" viewBox="0 0 24 24"><path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/></symbol>
+<symbol id="i-star" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></symbol>
+<symbol id="i-loc" viewBox="0 0 24 24"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 110-5 2.5 2.5 0 010 5z"/></symbol>
+</svg>
+
+<div class="wrap">
+<h1>追客 设计稿 v3 · 长辈版</h1>
+<p class="lead">和标准版 <code>docs/design/redesign_v3.html</code> 用同一套数据和功能，只换界面。字更大、按钮更大、步骤更少。右上角可切深色（高对比）。</p>
+
+<h2>1. 原则</h2>
+<div class="cols">
+  <div class="box"><h3>看得清</h3><ul><li>最小的字 18sp，正文 20sp，到站时间 56sp。</li><li>黑字白底，对比度 ≥ 7:1。</li><li>颜色不单独表意，都配文字。</li></ul></div>
+  <div class="box"><h3>点得准</h3><ul><li>能点的地方都 ≥ 64dp 高。</li><li>按钮都有字，不只放图标。</li><li>没有长按、滑动删除、双指。</li></ul></div>
+  <div class="box"><h3>不迷路</h3><ul><li>没有底部页签，只有一层返回。</li><li>每页左上角都是「← 返回」大按钮。</li><li>不用会自己消失的提示条，改成要点「知道了」的对话框。</li></ul></div>
+  <div class="box"><h3>听得到</h3><ul><li>每张车卡都有「读给我听」。</li><li>车快到时响铃加震动，声音比标准版大。</li><li>搜索可以说话。</li></ul></div>
+</div>
+
+<h2>2. 和标准版的差别</h2>
+<table class="doc">
+<tr><th>项</th><th>标准版</th><th>长辈版</th></tr>
+<tr><td>导航</td><td>底部 3 个页签</td><td>没有页签；首页 → 详情，一层返回</td></tr>
+<tr><td>到站大字</td><td>40sp</td><td>56sp</td></tr>
+<tr><td>正文 / 最小字</td><td>14sp / 12sp</td><td>20sp / 18sp</td></tr>
+<tr><td>按钮高度</td><td>48dp</td><td>64dp，主按钮 72dp</td></tr>
+<tr><td>线路号</td><td>浅蓝底</td><td>深蓝底白字，更醒目</td></tr>
+<tr><td>乘车码</td><td>右下角悬浮按钮</td><td>每页底部固定「出示乘车码」长条按钮</td></tr>
+<tr><td>路线规划（地图）</td><td>有 Key 时显示</td><td>不显示</td></tr>
+<tr><td>收藏分组、编辑收藏</td><td>有</td><td>没有；卡片上直接「不再显示」</td></tr>
+<tr><td>一起等多条线</td><td>有</td><td>没有，一次只等一辆，最简单</td></tr>
+<tr><td>时刻表、单车跟随</td><td>有</td><td>没有；只说「下一班几点几分发车」</td></tr>
+<tr><td>文字写法</td><td>白石洲 → 科技园；07:20；22:30</td><td>开往 科技园（和车身牌子一样）；7点20分；晚上10点半</td></tr>
+<tr><td>朗读</td><td>无</td><td>「读给我听」用系统 TTS（文字转语音）</td></tr>
+<tr><td>车到站</td><td>通知</td><td>通知 + 应用在前台时整屏变绿提醒</td></tr>
+</table>
+
+<h3>朗读的句子</h3>
+<table class="doc">
+<tr><th>情况</th><th>读出来</th></tr>
+<tr><td>在路上</td><td>325路，开往科技园，还有2站，大约4分钟到科技园站。</td></tr>
+<tr><td>到站了</td><td>325路到科技园站了，请准备上车。</td></tr>
+<tr><td>车都过了</td><td>325路下一班7点20分从白石洲发车。</td></tr>
+<tr><td>末班已过</td><td>325路今天没有车了，明天早上6点30分首班。</td></tr>
+</table>
+
+<h2>3. 页面</h2>
+<div class="screens">
+
+<!-- 开启 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="top"><div class="city">深圳</div></div>
+  <div class="scrim"></div>
+  <div class="dialog">
+    <div class="t">字太小看不清？</div>
+    <div class="d">试试长辈版：字更大，按钮更大，还能读给你听。</div>
+    <div class="sample"><div><div class="a">现在</div><div class="b" style="font-size:18px">4 分钟</div></div><div style="background:var(--primary-c);color:var(--on-primary-c)"><div class="a">长辈版</div><div class="b">4 分钟</div></div></div>
+    <div class="btn f xl" style="margin-bottom:10px">打开长辈版</div>
+    <div class="btn o">先不用</div>
+  </div>
+</div>
+</div>
+<figcaption><b>开启入口</b><span>系统字体调大（≥ 1.3 倍）时，第一次打开弹一次。之后在「我的」里随时开关。</span></figcaption>
+</figure>
+
+<!-- 首页 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="top"><div class="city">深圳<svg class="ic"><use href="#i-down"/></svg></div><div class="lbtn"><svg class="ic"><use href="#i-gear"/></svg>设置</div></div>
+  <div class="search"><svg class="ic s"><use href="#i-search"/></svg>找线路、车站<span class="mic"><svg class="ic"><use href="#i-mic"/></svg></span></div>
+  <div class="h">我常坐的车</div>
+  <div class="card">
+    <div class="lr"><span class="badge">325</span><div><div class="stop">科技园站上车</div><div class="to">开往 科技园</div></div></div>
+    <div class="eta">4 <small>分钟</small></div>
+    <div class="sub">还有 2 站</div>
+    <div class="btns"><div class="btn tn" style="padding:0 8px">读给我听</div><div class="btn f" style="padding:0 8px">车快到叫我</div></div>
+  </div>
+  <div class="card">
+    <div class="lr"><span class="badge">26</span><div><div class="stop">南头站上车</div><div class="to">开往 福田口岸</div></div></div>
+    <div class="eta" style="font-size:38px">7点20分 <small>发车</small></div>
+  </div>
+</div>
+<div class="qr"><div class="btn"><svg class="ic"><use href="#i-qr"/></svg>出示乘车码</div></div>
+</div>
+<figcaption><b>首页</b><span>一张卡一辆车，往下滑看更多。卡上两个大按钮：读、提醒。底部「出示乘车码」一直在。</span></figcaption>
+</figure>
+
+<!-- 首页 附近 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="top"><div class="city">深圳<svg class="ic"><use href="#i-down"/></svg></div><div class="lbtn"><svg class="ic"><use href="#i-gear"/></svg>设置</div></div>
+  <div class="search"><svg class="ic s"><use href="#i-search"/></svg>找线路、车站<span class="mic"><svg class="ic"><use href="#i-mic"/></svg></span></div>
+  <div class="h" style="display:flex;align-items:center;gap:6px"><svg class="ic s"><use href="#i-loc"/></svg>离你最近：科技园站</div>
+  <div class="list">
+    <div class="row"><span class="badge">325</span><div class="m"><div class="to" style="color:var(--text)">开往 科技园</div></div><div class="r"><b>4分钟</b><span>2 站</span></div></div>
+    <div class="row"><span class="badge">19</span><div class="m"><div class="to" style="color:var(--text)">开往 蛇口港</div></div><div class="r"><b class="go">到站了</b><span>快上车</span></div></div>
+    <div class="row"><span class="badge">M194</span><div class="m"><div class="to" style="color:var(--text)">开往 西丽</div></div><div class="r"><b style="font-size:20px">7点35分</b><span>发车</span></div></div>
+  </div>
+  <div class="card" style="font-size:18px;color:var(--text2)">点一辆车，再点「收藏」，它就会放到最上面。</div>
+</div>
+<div class="qr"><div class="btn"><svg class="ic"><use href="#i-qr"/></svg>出示乘车码</div></div>
+</div>
+<figcaption><b>首页 · 还没收藏</b><span>直接列出最近一个站的车。想看别的站点「离你最近」那行换站。</span></figcaption>
+</figure>
+
+<!-- 线路 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="back"><svg class="ic"><use href="#i-back"/></svg>返回</div>
+  <div style="padding:0 18px 10px" class="lr"><span class="badge">325</span><div><div style="font-size:22px;font-weight:700">开往 科技园</div><div class="to">早上6点半 到 晚上10点半</div></div></div>
+  <div class="card" style="border-color:var(--primary)">
+    <div class="lr" style="justify-content:space-between"><div class="stop">在 科技园站 上车</div><div class="btn o" style="flex:none;min-height:52px;font-size:18px;padding:0 12px">换站</div></div>
+    <div class="eta">4 <small>分钟</small></div>
+    <div class="sub">还有 2 站 · 下一辆 12 分钟</div>
+    <div class="btns"><div class="btn tn"><svg class="ic s"><use href="#i-speak"/></svg>读给我听</div></div>
+  </div>
+  <div style="padding:0 12px"><div class="btn f xl"><svg class="ic"><use href="#i-bell"/></svg>车快到时叫我</div></div>
+  <div class="btns" style="padding:0 12px"><div class="btn o"><svg class="ic s"><use href="#i-swap"/></svg>换方向</div><div class="btn o"><svg class="ic s"><use href="#i-star"/></svg>收藏</div></div>
+</div>
+<div class="qr"><div class="btn"><svg class="ic"><use href="#i-qr"/></svg>出示乘车码</div></div>
+</div>
+<figcaption><b>线路</b><span>只回答「车还有多久来」。一个主按钮「车快到时叫我」。沿途车站放到「换站」里。</span></figcaption>
+</figure>
+
+<!-- 换站 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="back"><svg class="ic"><use href="#i-back"/></svg>返回</div>
+  <div class="h" style="font-size:26px">在哪一站上车？</div>
+  <div class="list">
+    <div class="st past"><span class="dot"></span>大冲<span class="tag">车已过</span></div>
+    <div class="st"><span class="dot"></span>高新园<span class="bus">车在这</span></div>
+    <div class="st"><span class="dot"></span>深大</div>
+    <div class="st sel"><span class="dot"></span>科技园<span class="tag">离你最近</span></div>
+    <div class="st"><span class="dot"></span>科技中一路</div>
+    <div class="st"><span class="dot"></span>海岸城</div>
+    <div class="st"><span class="dot"></span>后海</div>
+  </div>
+</div>
+<div class="qr"><div class="btn"><svg class="ic"><use href="#i-qr"/></svg>出示乘车码</div></div>
+</div>
+<figcaption><b>换站</b><span>一行一个站，点一下就选好并返回。默认选离你最近的站。车的位置用文字「车在这」标出。</span></figcaption>
+</figure>
+
+<!-- 提醒中 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:05</span><span>5G 85%</span></div>
+<div class="scroll">
+  <div class="back"><svg class="ic"><use href="#i-back"/></svg>返回</div>
+  <div class="card" style="background:var(--primary);color:var(--on-primary);border:0">
+    <div style="font-size:20px;font-weight:600"><span class="pulse"></span>车快到时会叫你</div>
+    <div class="lr" style="margin-top:12px"><span class="badge" style="background:var(--on-primary);color:var(--primary)">325</span><div style="font-size:20px">科技园站上车</div></div>
+    <div class="eta">2 <small>分钟</small></div>
+    <div style="font-size:20px">还有 1 站</div>
+  </div>
+  <div class="card" style="font-size:19px">还有 2 站时会<b>响铃</b>和<b>震动</b>。锁屏也能看到。</div>
+  <div style="padding:0 12px"><div class="btn f xl"><svg class="ic"><use href="#i-check"/></svg>我上车了</div></div>
+  <div class="btns" style="padding:0 12px"><div class="btn tn"><svg class="ic s"><use href="#i-speak"/></svg>读给我听</div><div class="btn err">不用叫了</div></div>
+</div>
+<div class="qr"><div class="btn"><svg class="ic"><use href="#i-qr"/></svg>出示乘车码</div></div>
+</div>
+<figcaption><b>提醒中</b><span>点「我上车了」就结束，不再追下车站，最简单。「不用叫了」先弹确认框。</span></figcaption>
+</figure>
+
+<!-- 到站 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:07</span><span>5G 85%</span></div>
+<div class="alert">
+  <div class="k">325 路 · 开往 科技园</div>
+  <div class="t">车到站了！</div>
+  <div class="d">快去科技园站上车</div>
+  <div style="flex:1"></div>
+  <div class="btn xl" style="margin-bottom:12px"><svg class="ic"><use href="#i-qr"/></svg>出示乘车码</div>
+  <div class="btn o2">我上车了</div>
+</div>
+</div>
+<figcaption><b>车到站</b><span>应用开着时整屏变绿，同时响铃、震动、自动朗读。应用没开时只靠通知（系统不让普通应用弹整屏）。</span></figcaption>
+</figure>
+
+<!-- 搜索 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="back"><svg class="ic"><use href="#i-back"/></svg>返回</div>
+  <div class="search" style="border-color:var(--primary);color:var(--text)">325<span class="mic"><svg class="ic"><use href="#i-mic"/></svg></span></div>
+  <div class="h">找到的线路</div>
+  <div class="list">
+    <div class="row"><span class="badge">325</span><div class="m"><div style="font-size:20px">开往 科技园</div></div><svg class="ic"><use href="#i-chev"/></svg></div>
+    <div class="row"><span class="badge">325</span><div class="m"><div style="font-size:20px">开往 白石洲</div></div><svg class="ic"><use href="#i-chev"/></svg></div>
+  </div>
+  <div class="h">找到的车站</div>
+  <div class="list">
+    <div class="row"><div class="m"><div style="font-size:20px;font-weight:600">325 公交总站</div></div><svg class="ic"><use href="#i-chev"/></svg></div>
+  </div>
+</div>
+<div class="qr"><div class="btn"><svg class="ic"><use href="#i-qr"/></svg>出示乘车码</div></div>
+</div>
+<figcaption><b>找线路</b><span>点话筒就打开系统的语音输入，说「325」或「科技园站」。每个方向一行，写「开往 X」。</span></figcaption>
+</figure>
+
+<!-- 设置 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="back"><svg class="ic"><use href="#i-back"/></svg>返回</div>
+  <div class="h" style="font-size:26px">设置</div>
+  <div class="list">
+    <div class="set"><div class="m">长辈版<small>大字、大按钮</small></div><div class="sw"></div></div>
+    <div class="set"><div class="m">乘车码用</div><div class="v">支付宝 ›</div></div>
+    <div class="set"><div class="m">提前几站叫我</div><div class="v">2 站 ›</div></div>
+    <div class="set"><div class="m">车到站自动朗读</div><div class="sw"></div></div>
+    <div class="set"><div class="m">锁屏显示</div><div class="sw"></div></div>
+  </div>
+  <div class="card" style="font-size:18px;color:var(--text2)">数据来源、定时提醒、高德 Key 等在标准版里设置。</div>
+</div>
+<div class="qr"><div class="btn"><svg class="ic"><use href="#i-qr"/></svg>出示乘车码</div></div>
+</div>
+<figcaption><b>设置</b><span>只放 5 项。关掉第一项就回标准版，收藏都还在。</span></figcaption>
+</figure>
+
+</div>
+
+<h2>4. 要你定的</h2>
+<table class="doc">
+<tr><th>点</th><th>我的选择</th><th>另一种</th></tr>
+<tr><td>一起等多条线</td><td>长辈版不做</td><td>做，但卡片会变复杂</td></tr>
+<tr><td>上车后</td><td>点「我上车了」就结束</td><td>继续提醒下车站（要多选一个下车站）</td></tr>
+<tr><td>文字写法</td><td>「开往 科技园」「7点20分」</td><td>和标准版一样用箭头和 07:20</td></tr>
+<tr><td>乘车码按钮颜色</td><td>绿色长条，和支付宝乘车码颜色接近</td><td>品牌蓝</td></tr>
+<tr><td>朗读</td><td>系统 TTS，不加新依赖</td><td>接第三方语音（更好听，要联网和费用）</td></tr>
+</table>
+</div>
+</body>
+</html>

@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>追客 设计稿 v2</title>
+<style>
+:root{
+  --primary:#1F5FD6; --on-primary:#fff; --primary-c:#DCE6FF; --on-primary-c:#0A2A6B;
+  --bg:#F5F6F8; --card:#FFFFFF; --variant:#EDF0F4; --outline:#D6DBE2;
+  --text:#15181D; --text2:#5B6470; --text3:#8A929D;
+  --go:#12924F; --go-c:#DDF5E7;
+  --warn:#B45F00; --warn-c:#FFEBCC;
+  --err:#D93025; --err-c:#FDE3E1;
+  --map:#E9EEF3; --road:#FFFFFF; --water:#CFE0F2;
+  --page:#E4E7EC; --doc:#1C2027;
+  --r-s:8px; --r-m:16px; --r-l:28px;
+}
+html.dark{
+  --primary:#8AB0FF; --on-primary:#082561; --primary-c:#1D3B80; --on-primary-c:#DCE6FF;
+  --bg:#0F1115; --card:#181B21; --variant:#22262E; --outline:#343A44;
+  --text:#E7EAEE; --text2:#9AA3AF; --text3:#6B7380;
+  --go:#4CD38A; --go-c:#13361F;
+  --warn:#FFB547; --warn-c:#3D2A00;
+  --err:#FF8A80; --err-c:#4A1612;
+  --map:#1B2028; --road:#2A313C; --water:#1A2B40;
+  --page:#0A0C10; --doc:#E7EAEE;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;background:var(--page);color:var(--doc);line-height:1.5;padding:32px 24px 80px}
+.wrap{max-width:1480px;margin:0 auto}
+h1{font-size:30px;margin-bottom:4px}
+h2{font-size:22px;margin:48px 0 16px;padding-top:16px;border-top:1px solid var(--outline)}
+h3{font-size:16px;margin:20px 0 8px}
+p.lead{color:var(--text2);margin-bottom:12px}
+.toggle{position:fixed;top:16px;right:16px;z-index:9;background:var(--primary);color:var(--on-primary);border:0;border-radius:999px;padding:10px 18px;font-size:14px;cursor:pointer;box-shadow:0 2px 8px #0003}
+table.doc{border-collapse:collapse;width:100%;background:var(--card);color:var(--text);border-radius:12px;overflow:hidden;font-size:14px}
+table.doc th,table.doc td{padding:9px 12px;border-bottom:1px solid var(--outline);text-align:left;vertical-align:top}
+table.doc th{background:var(--variant);font-weight:600}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.box{background:var(--card);color:var(--text);border-radius:16px;padding:16px 18px}
+.box ul{padding-left:18px}.box li{margin:3px 0}
+.sw{display:flex;flex-wrap:wrap;gap:10px}
+.sw div{width:120px;border-radius:12px;overflow:hidden;background:var(--card);color:var(--text);font-size:12px}
+.sw b{display:block;height:56px}
+.sw span{display:block;padding:6px 8px}
+code{font-family:ui-monospace,Menlo,monospace;font-size:12px;background:var(--variant);color:var(--text);padding:1px 5px;border-radius:4px}
+
+/* ===== phones ===== */
+.screens{display:grid;grid-template-columns:repeat(auto-fill,minmax(344px,1fr));gap:28px 20px}
+.shot figcaption{font-size:13px;color:var(--doc);margin-top:10px;padding:0 4px}
+.shot figcaption b{display:block;font-size:15px;margin-bottom:2px}
+.shot figcaption span{opacity:.75}
+.phone{width:340px;height:720px;border-radius:36px;background:var(--bg);color:var(--text);position:relative;overflow:hidden;border:8px solid #111;box-shadow:0 10px 30px #0003;font-size:14px}
+.sb{height:28px;display:flex;justify-content:space-between;align-items:center;padding:0 18px;font-size:12px;font-weight:600}
+.scroll{position:absolute;top:28px;left:0;right:0;bottom:0;overflow:hidden}
+.ic{width:22px;height:22px;fill:currentColor;flex:none;vertical-align:middle}
+.ic.s{width:16px;height:16px}.ic.xs{width:14px;height:14px}
+.bar{height:56px;display:flex;align-items:center;gap:4px;padding:0 6px}
+.bar .t{flex:1;font-size:20px;font-weight:600;padding-left:6px;white-space:nowrap;overflow:hidden}
+.iconbtn{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;color:var(--text)}
+.iconbtn.on{color:var(--primary)}
+.search{margin:4px 16px 12px;height:48px;border-radius:999px;background:var(--variant);display:flex;align-items:center;gap:10px;padding:0 16px;color:var(--text2)}
+.sec{display:flex;align-items:center;justify-content:space-between;padding:14px 18px 8px;font-size:15px;font-weight:600}
+.sec a{font-size:13px;font-weight:500;color:var(--primary)}
+.chips{display:flex;gap:8px;padding:0 16px 10px;overflow:hidden}
+.chip{height:32px;padding:0 14px;border-radius:var(--r-s);border:1px solid var(--outline);display:inline-flex;align-items:center;gap:4px;font-size:13px;white-space:nowrap;color:var(--text)}
+.chip.on{background:var(--primary-c);color:var(--on-primary-c);border-color:transparent;font-weight:600}
+.card{background:var(--card);border-radius:var(--r-m);margin:0 12px 8px;overflow:hidden}
+.row{display:flex;align-items:center;gap:12px;padding:12px 14px;min-height:60px}
+.row+.row{border-top:1px solid var(--variant)}
+.row .m{flex:1;min-width:0}
+.row .m .a{font-size:15px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .m .b{font-size:12px;color:var(--text2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{min-width:44px;height:28px;padding:0 6px;border-radius:var(--r-s);background:var(--primary-c);color:var(--on-primary-c);font-weight:700;font-size:14px;display:inline-grid;place-items:center;flex:none;font-variant-numeric:tabular-nums}
+.badge.sm{min-width:34px;height:22px;font-size:12px;border-radius:6px}
+.badge.off{background:var(--variant);color:var(--text2)}
+.eta{text-align:right;flex:none;font-variant-numeric:tabular-nums}
+.eta .n{font-size:17px;font-weight:700}
+.eta .n small{font-size:12px;font-weight:500}
+.eta .u{font-size:12px;color:var(--text2)}
+.go{color:var(--go)!important}.warn{color:var(--warn)!important}.mute{color:var(--text2)!important}
+.nav{position:absolute;left:0;right:0;bottom:0;height:72px;background:var(--card);display:flex;justify-content:space-around;align-items:center;border-top:1px solid var(--variant)}
+.nav div{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:12px;color:var(--text2);width:96px}
+.nav div i,.nav div svg{width:56px;height:30px;border-radius:999px;padding:4px 16px}
+.nav div.on{color:var(--text);font-weight:600}
+.nav div.on svg{background:var(--primary-c);color:var(--on-primary-c)}
+.btn{height:48px;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;gap:6px;font-size:15px;font-weight:600;padding:0 22px;white-space:nowrap}
+.btn.f{background:var(--primary);color:var(--on-primary)}
+.btn.o{border:1px solid var(--outline);color:var(--primary)}
+.btn.t{color:var(--primary);padding:0 12px}
+.btn.tn{background:var(--primary-c);color:var(--on-primary-c)}
+.btn.d{color:var(--err)}
+.bottom{position:absolute;left:0;right:0;bottom:0;padding:12px 16px 20px;background:linear-gradient(transparent,var(--bg) 22%);display:flex;gap:10px;align-items:center}
+.bottom .btn.f{flex:1}
+.track{background:var(--primary);color:var(--on-primary);border-radius:var(--r-m);margin:0 12px 4px;padding:12px 14px}
+.track .k{font-size:12px;opacity:.85;display:flex;align-items:center;gap:6px}
+.dot{width:8px;height:8px;border-radius:50%;background:currentColor;display:inline-block;animation:p 1.6s infinite}
+@keyframes p{50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){.dot{animation:none}}
+.big{font-size:40px;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:-.5px}
+.big small{font-size:18px;font-weight:600;letter-spacing:0}
+.hero{background:var(--card);border-radius:var(--r-m);margin:0 12px 10px;padding:16px}
+.hero .pick{display:inline-flex;align-items:center;gap:2px;font-size:13px;color:var(--text2);background:var(--variant);border-radius:999px;padding:4px 10px 4px 12px}
+.hero .sub{font-size:14px;color:var(--text2);margin-top:2px}
+.hero hr{border:0;border-top:1px solid var(--variant);margin:12px 0}
+.hero .line{display:flex;justify-content:space-between;font-size:13px;color:var(--text2)}
+.hero .line a{color:var(--primary);font-weight:500}
+.dir{padding:0 18px 10px}
+.dir .ft{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600}
+.dir .meta{font-size:12px;color:var(--text2);margin-top:2px}
+.dir .meta a{color:var(--primary)}
+.swapbtn{height:30px;border-radius:999px;background:var(--variant);display:inline-flex;align-items:center;gap:2px;padding:0 10px;font-size:12px;font-weight:500;color:var(--text)}
+/* rail */
+.rail{background:var(--card);border-radius:var(--r-m);margin:0 12px;padding:6px 0}
+.st{display:flex;align-items:center;height:40px;padding:0 14px;gap:12px;font-size:14px;position:relative}
+.st .ln{width:20px;align-self:stretch;position:relative;display:flex;justify-content:center}
+.st .ln:before{content:"";position:absolute;top:0;bottom:0;width:4px;background:var(--primary);opacity:.9}
+.st.past .ln:before{background:var(--outline)}
+.st:first-child .ln:before{top:50%}.st:last-child .ln:before{bottom:50%}
+.st .ln b{position:relative;margin-top:14px;width:12px;height:12px;border-radius:50%;background:var(--card);border:3px solid var(--primary)}
+.st.past .ln b{border-color:var(--outline)}
+.st.past{color:var(--text3)}
+.st.sel{background:var(--primary-c);color:var(--on-primary-c);font-weight:700}
+.st.sel .ln b{width:16px;height:16px;margin-top:12px;background:var(--primary)}
+.st .bus{margin-left:auto;font-size:11px;font-weight:600;background:var(--go-c);color:var(--go);border-radius:999px;padding:2px 8px;display:flex;align-items:center;gap:3px}
+.st .tag{margin-left:auto;font-size:11px}
+/* timeline */
+.tl{background:var(--card);border-radius:var(--r-m);margin:0 12px;padding:10px 14px}
+.tn{display:flex;gap:12px}
+.tn .g{width:16px;display:flex;flex-direction:column;align-items:center;flex:none}
+.tn .g b{width:14px;height:14px;border-radius:50%;border:3px solid var(--primary);background:var(--card);margin-top:3px;flex:none}
+.tn .g b.end{background:var(--text);border-color:var(--text)}
+.tn .g i{flex:1;width:4px;background:var(--primary);margin:2px 0;border-radius:2px}
+.tn .g i.walk{background:none;border-left:3px dotted var(--text3);width:0}
+.tn .g i.done{background:var(--outline)}
+.tn .c{flex:1;padding-bottom:12px;min-width:0}
+.tn .c .s{font-size:15px;font-weight:600}
+.tn .c .h{font-size:12px;color:var(--text2)}
+.opts{display:flex;gap:6px;margin:8px 0 4px;flex-wrap:wrap}
+.opt{border:1px solid var(--outline);border-radius:var(--r-s);padding:4px 8px;font-size:12px;display:flex;align-items:center;gap:6px}
+.opt.on{border:2px solid var(--primary);padding:3px 7px}
+.legcur{background:var(--primary-c);border-radius:12px;margin:0 -8px;padding:8px}
+/* sheet */
+.scrim{position:absolute;inset:0;background:#0007}
+.sheet{position:absolute;left:0;right:0;bottom:0;background:var(--card);border-radius:var(--r-l) var(--r-l) 0 0;padding:10px 18px 24px}
+.handle{width:32px;height:4px;border-radius:2px;background:var(--outline);margin:0 auto 14px}
+.field{border:1px solid var(--outline);border-radius:var(--r-s);height:48px;display:flex;align-items:center;padding:0 12px;font-size:15px;margin:6px 0 14px;position:relative}
+.field label{position:absolute;top:-9px;left:10px;background:var(--card);padding:0 4px;font-size:11px;color:var(--text2)}
+/* settings */
+.set{display:flex;align-items:center;gap:12px;padding:0 16px;min-height:58px}
+.set+.set{border-top:1px solid var(--variant)}
+.set .m{flex:1}.set .m .a{font-size:15px}.set .m .b{font-size:12px;color:var(--text2)}
+.set .v{font-size:13px;color:var(--text2);display:flex;align-items:center}
+.seg{display:flex;border:1px solid var(--outline);border-radius:999px;overflow:hidden;font-size:13px}
+.seg span{padding:6px 12px}.seg span.on{background:var(--primary-c);color:var(--on-primary-c);font-weight:600}
+.sw2{width:44px;height:26px;border-radius:999px;background:var(--primary);position:relative}
+.sw2:after{content:"";position:absolute;right:3px;top:3px;width:20px;height:20px;border-radius:50%;background:var(--on-primary)}
+.grp{font-size:13px;color:var(--primary);font-weight:600;padding:16px 18px 6px}
+/* map */
+.map{position:absolute;inset:0;background:var(--map)}
+.plan{position:absolute;top:8px;left:12px;right:12px;background:var(--card);border-radius:var(--r-m);box-shadow:0 2px 10px #0002;display:flex;padding:6px 6px 6px 14px;gap:8px;align-items:center}
+.plan .ps{flex:1}
+.plan .pp{display:flex;align-items:center;gap:10px;height:40px;font-size:14px}
+.plan .pp+.pp{border-top:1px solid var(--variant)}
+.plan .o{width:10px;height:10px;border-radius:50%;border:2px solid var(--go)}
+.plan .x{width:10px;height:10px;border-radius:2px;background:var(--err)}
+.fab{position:absolute;right:14px;width:48px;height:48px;border-radius:16px;background:var(--card);display:grid;place-items:center;box-shadow:0 2px 8px #0002;color:var(--text)}
+.tabs{display:flex;gap:8px;margin-bottom:12px}
+.tab{flex:1;border-radius:12px;background:var(--variant);padding:8px 10px}
+.tab.on{background:var(--primary-c);color:var(--on-primary-c)}
+.tab .k{font-size:12px}.tab .n{font-size:18px;font-weight:700}
+.segbar{display:flex;height:28px;border-radius:8px;overflow:hidden;gap:2px;margin:10px 0 6px;font-size:12px;font-weight:700}
+.segbar div{display:grid;place-items:center}
+.segbar .w{background:var(--variant);color:var(--text2)}
+.segbar .b{background:var(--primary);color:var(--on-primary)}
+/* lock */
+.lock{background:linear-gradient(160deg,#1b2a4a,#0c1220 60%,#251a36);color:#fff}
+.lock .clock{text-align:center;font-size:64px;font-weight:300;margin-top:40px;letter-spacing:-1px}
+.lock .date{text-align:center;font-size:14px;opacity:.8}
+.noti{margin:28px 10px 0;background:#ffffffe8;color:#15181D;border-radius:22px;padding:12px 14px}
+.noti .hd{display:flex;align-items:center;gap:6px;font-size:12px;color:#5B6470}
+.noti .tt{font-size:16px;font-weight:700;margin-top:6px}
+.noti .bd{font-size:13px;color:#3a4049}
+.prog{height:6px;border-radius:3px;background:#DCE6FF;margin:10px 0 4px;position:relative}
+.prog b{position:absolute;left:0;top:0;bottom:0;width:66%;background:#1F5FD6;border-radius:3px}
+.prog i{position:absolute;top:-3px;width:12px;height:12px;border-radius:50%;background:#1F5FD6;border:2px solid #fff}
+.noti .ac{display:flex;gap:8px;margin-top:10px}
+.noti .ac span{flex:1;text-align:center;background:#EDF0F4;border-radius:999px;padding:7px 0;font-size:13px;font-weight:600;color:#1F5FD6}
+.pill{position:absolute;top:6px;left:50%;transform:translateX(-50%);background:#000;color:#fff;border-radius:999px;height:24px;padding:0 12px;display:flex;align-items:center;gap:6px;font-size:12px;font-weight:600}
+.pill b{color:#4CD38A}
+.state{background:var(--card);color:var(--text);border-radius:16px;padding:14px 16px}
+.state .lb{font-size:11px;color:var(--text3);margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px}
+.statesgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+.snack{position:absolute;left:12px;right:12px;bottom:84px;background:#2B3038;color:#fff;border-radius:8px;padding:12px 14px;font-size:14px;display:flex;justify-content:space-between}
+.snack a{color:#8AB0FF;font-weight:600}
+</style>
+</head>
+<body>
+<button class="toggle" onclick="document.documentElement.classList.toggle('dark')">切换深色 / 浅色</button>
+
+<svg width="0" height="0" style="position:absolute">
+<symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></symbol>
+<symbol id="i-star" viewBox="0 0 24 24"><path d="M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z"/></symbol>
+<symbol id="i-starf" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></symbol>
+<symbol id="i-swap" viewBox="0 0 24 24"><path d="M6.99 11L3 15l3.99 4v-3H14v-2H6.99v-3zM21 9l-3.99-4v3H10v2h7.01v3L21 9z"/></symbol>
+<symbol id="i-swapv" viewBox="0 0 24 24"><path d="M16 17.01V10h-2v7.01h-3L15 21l4-3.99h-3zM9 3L5 6.99h3V14h2V6.99h3L9 3z"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><path d="M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></symbol>
+<symbol id="i-qr" viewBox="0 0 24 24"><path d="M3 11h8V3H3v8zm2-6h4v4H5V5zM3 21h8v-8H3v8zm2-6h4v4H5v-4zM13 3v8h8V3h-8zm6 6h-4V5h4v4zM13 13h2v2h-2zM15 15h2v2h-2zM13 17h2v2h-2zM17 17h2v2h-2zM19 19h2v2h-2zM15 19h2v2h-2zM17 13h2v2h-2zM19 15h2v2h-2z"/></symbol>
+<symbol id="i-bus" viewBox="0 0 24 24"><path d="M4 16c0 .88.39 1.67 1 2.22V20c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h8v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1.78c.61-.55 1-1.34 1-2.22V6c0-3.5-3.58-4-8-4s-8 .5-8 4v10zm3.5 1a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm9 0a1.5 1.5 0 110-3 1.5 1.5 0 010 3zm1.5-6H6V6h12v5z"/></symbol>
+<symbol id="i-route" viewBox="0 0 24 24"><path d="M21.71 11.29l-9-9a1 1 0 00-1.41 0l-9 9a1 1 0 000 1.41l9 9c.39.39 1.02.39 1.41 0l9-9a1 1 0 000-1.41zM14 14.5V12h-4v3H8v-4c0-.55.45-1 1-1h5V7.5l3.5 3.5-3.5 3.5z"/></symbol>
+<symbol id="i-person" viewBox="0 0 24 24"><path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5z"/></symbol>
+<symbol id="i-close" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></symbol>
+<symbol id="i-walk" viewBox="0 0 24 24"><path d="M13.5 5.5c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zM9.8 8.9L7 23h2.1l1.8-8 2.1 2v6h2v-7.5l-2.1-2 .6-3C14.8 12 16.8 13 19 13v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1L6 8.3V13h2V9.6l1.8-.7"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></symbol>
+<symbol id="i-drag" viewBox="0 0 24 24"><path d="M20 9H4v2h16V9zM4 15h16v-2H4v2z"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+<symbol id="i-loc" viewBox="0 0 24 24"><path d="M12 8a4 4 0 100 8 4 4 0 000-8zm8.94 3A8.99 8.99 0 0013 3.06V1h-2v2.06A8.99 8.99 0 003.06 11H1v2h2.06A8.99 8.99 0 0011 20.94V23h2v-2.06A8.99 8.99 0 0020.94 13H23v-2h-2.06zM12 19c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/></symbol>
+<symbol id="i-play" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></symbol>
+<symbol id="i-edit" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></symbol>
+<symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></symbol>
+<symbol id="i-del" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></symbol>
+</svg>
+
+<div class="wrap">
+<h1>追客 设计稿 v2</h1>
+<p class="lead">依据 <code>docs/spec/app_spec_as_is.md</code>（现状 + §8 已定决策）。固定品牌主色，不跟壁纸。右上角可切深色。</p>
+
+<!-- ============ 1 原则 ============ -->
+<h2>1. 设计原则</h2>
+<div class="cols">
+  <div class="box"><h3>一眼看到车</h3><ul><li>每屏最大的字是「几分钟 / 几站」。</li><li>没车时写下一班发车时间，不写空话。</li></ul></div>
+  <div class="box"><h3>一件事一个入口</h3><ul><li>收藏只有一处：首页。</li><li>设置只有一处：「我的」。</li><li>不用长按藏功能。</li></ul></div>
+  <div class="box"><h3>一屏一个主按钮</h3><ul><li>页面底部只有一个实心按钮。</li><li>其他操作放顶栏或「⋮」。</li></ul></div>
+  <div class="box"><h3>说人话</h3><ul><li>用「起点 → 终点」箭头。</li><li>不用 emoji，不写营销语。</li><li>同一个东西只用一个叫法。</li></ul></div>
+</div>
+
+<!-- ============ 2 结构 ============ -->
+<h2>2. 页面结构</h2>
+<table class="doc">
+<tr><th>现在（4 个页签）</th><th>新版（3 个页签，没有 Key 时 2 个）</th><th>说明</th></tr>
+<tr><td>首页：追踪横幅、搜索、乘车码卡、常用候车站、附近</td><td><b>公交</b>：搜索、追踪卡、<b>收藏</b>（站和路线放一起）、附近</td><td>乘车码卡改成顶栏一个图标</td></tr>
+<tr><td>路线规划</td><td><b>路线</b>：地图规划（只在填了高德 Key 时出现）</td><td>决策 D2，删掉内置示意图</td></tr>
+<tr><td>收藏：路线组卡片 + 分组</td><td>并进「公交」页；新增<b>路线详情</b>页</td><td>两种收藏不再分在两处</td></tr>
+<tr><td>更多</td><td><b>我的</b>：所有设置 + 定时提醒 + 高德 Key + 关于</td><td>提醒能改，不只是删</td></tr>
+</table>
+
+<h3>统一叫法</h3>
+<table class="doc">
+<tr><th>东西</th><th>新叫法</th><th>不再用</th></tr>
+<tr><td><code>FavoriteStationLine</code> 一条线 + 上车站</td><td>收藏的<b>车</b>，卡片写「325 · 科技园站上车」</td><td>常用候车站、收藏此线路站台</td></tr>
+<tr><td><code>TransitGroup</code> 多程路线</td><td><b>路线</b>，卡片写「家 → 公司」</td><td>路线组、路线分组、同达方案、换乘组合</td></tr>
+<tr><td><code>FavoriteGroup</code></td><td><b>分组</b></td><td>收藏分组、所属场景（<code>GroupCategory</code> 不再给用户选）</td></tr>
+<tr><td><code>CandidateLine</code></td><td>「也能坐」的线</td><td>备选、同达线路、换乘线路</td></tr>
+<tr><td><code>ScheduledReminder</code></td><td><b>定时提醒</b></td><td>定时通勤、定时通勤提醒、定时通知</td></tr>
+<tr><td><code>TrackingSessionState</code></td><td><b>追踪</b></td><td>实时追踪、跟车、持续跟车</td></tr>
+</table>
+
+<!-- ============ 3 Token ============ -->
+<h2>3. 视觉规范</h2>
+<h3>颜色（替换 M3 静态色、BusSemanticColors、ExtendedColors 三套）</h3>
+<div class="sw">
+  <div><b style="background:var(--primary)"></b><span>primary 品牌蓝<br><code>#1F5FD6</code></span></div>
+  <div><b style="background:var(--primary-c)"></b><span>primaryContainer<br><code>#DCE6FF</code></span></div>
+  <div><b style="background:var(--go)"></b><span>go 快到 / 已到<br><code>#12924F</code></span></div>
+  <div><b style="background:var(--warn)"></b><span>warn 末班 / 停运<br><code>#B45F00</code></span></div>
+  <div><b style="background:var(--err)"></b><span>error 结束 / 删除<br><code>#D93025</code></span></div>
+  <div><b style="background:var(--bg);border-bottom:1px solid var(--outline)"></b><span>background<br><code>#F5F6F8</code></span></div>
+  <div><b style="background:var(--card);border-bottom:1px solid var(--outline)"></b><span>surface 卡片<br><code>#FFFFFF</code></span></div>
+  <div><b style="background:var(--variant)"></b><span>surfaceVariant<br><code>#EDF0F4</code></span></div>
+  <div><b style="background:var(--text2)"></b><span>onSurfaceVariant<br><code>#5B6470</code></span></div>
+</div>
+<p class="lead" style="margin-top:10px">只有 5 个有意思的颜色。蓝 = 可点 / 品牌；绿 = 车快到了；橙 = 今天坐不上了；红 = 结束和删除；灰 = 已过站、步行。不同程不再用不同颜色，用「第 1 程」文字区分。<code>dynamicColor</code> 关掉。</p>
+
+<h3>到站数字怎么上色</h3>
+<table class="doc">
+<tr><th>情况</th><th>大字</th><th>小字</th><th>颜色</th></tr>
+<tr><td>已到站 / ≤ 1 站 / ≤ 3 分钟</td><td>到站了 · 2 分钟</td><td>1 站</td><td>go 绿</td></tr>
+<tr><td>在路上</td><td>8 分钟</td><td>4 站</td><td>正文色</td></tr>
+<tr><td>车都过了、还有下一班</td><td>下一班 07:20</td><td>从 白石洲 发车</td><td>灰（不估算到站）</td></tr>
+<tr><td>今天末班已过</td><td>今天没车了</td><td>明天首班 06:30</td><td>warn 橙</td></tr>
+<tr><td>停运 / 没数据</td><td>暂停运营</td><td>数据来自 车来了</td><td>warn 橙</td></tr>
+</table>
+
+<h3>字号、圆角、间距</h3>
+<table class="doc">
+<tr><th>名字</th><th>值</th><th>用在</th></tr>
+<tr><td>eta</td><td>40sp / Bold / 等宽数字</td><td>线路页、追踪卡的大数字</td></tr>
+<tr><td>title</td><td>20sp / SemiBold</td><td>顶栏标题</td></tr>
+<tr><td>item</td><td>15sp / SemiBold</td><td>列表主行</td></tr>
+<tr><td>body</td><td>14sp</td><td>正文</td></tr>
+<tr><td>caption</td><td>12sp</td><td>副行、说明</td></tr>
+<tr><td>圆角</td><td>8 / 16 / 28 dp</td><td>线路号、chip / 卡片 / 底部弹层；按钮和胶囊全圆</td></tr>
+<tr><td>间距</td><td>4 / 8 / 12 / 16 / 24 dp</td><td>页面左右 12dp，卡片内 14–16dp</td></tr>
+</table>
+<p class="lead" style="margin-top:8px">页面里不再写死 <code>fontSize</code> 和 <code>RoundedCornerShape(n.dp)</code>，全部走 Typography 和 Shapes。</p>
+
+<!-- ============ 4 页面 ============ -->
+<h2>4. 页面</h2>
+<div class="screens">
+
+<!-- 公交 首页 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="t" style="display:flex;align-items:center;gap:2px">深圳<i data-i="down"></i></div><div class="iconbtn"><i data-i="qr"></i></div></div>
+  <div class="search"><i data-i="search"></i>搜线路、车站</div>
+  <div class="track">
+    <div class="k"><span class="dot"></span>正在追踪 · 325 白石洲 → 科技园</div>
+    <div style="display:flex;align-items:flex-end;justify-content:space-between;margin-top:4px">
+      <div><div class="big" style="font-size:32px">4 <small>分钟</small></div><div style="font-size:13px;opacity:.9">还有 2 站到 科技园站</div></div>
+      <span class="btn" style="height:36px;background:#fff3;padding:0 14px;font-size:13px">结束</span>
+    </div>
+  </div>
+  <div class="sec">收藏<a>编辑</a></div>
+  <div class="chips"><span class="chip on">全部</span><span class="chip">上班</span><span class="chip">回家</span></div>
+  <div class="card">
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">科技园站上车</div><div class="b">白石洲 → 科技园</div></div><div class="eta"><div class="n">4<small> 分钟</small></div><div class="u">2 站</div></div></div>
+    <div class="row"><span class="badge">M194</span><div class="m"><div class="a">深大北门上车</div><div class="b">西丽 → 蛇口港</div></div><div class="eta"><div class="n go">到站了</div><div class="u">0 站</div></div></div>
+    <div class="row"><span class="badge off" style="min-width:44px"><i data-i="route" class="s"></i></span><div class="m"><div class="a">家 → 公司</div><div class="b">325 › 19 · 换乘 1 次</div></div><div class="eta"><div class="n">6<small> 分钟</small></div><div class="u">后上车</div></div></div>
+    <div class="row"><span class="badge">26</span><div class="m"><div class="a">南头站上车</div><div class="b">南头 → 福田口岸</div></div><div class="eta"><div class="n mute" style="font-size:15px">下一班 07:20</div><div class="u">始发站发车</div></div></div>
+  </div>
+  <div class="sec">附近<a style="color:var(--text2)">120 米 · 科技园站</a></div>
+  <div class="card">
+    <div class="row"><span class="badge">19</span><div class="m"><div class="a">→ 蛇口港</div></div><div class="eta"><div class="n">9<small> 分钟</small></div></div></div>
+  </div>
+</div>
+<div class="nav"><div class="on"><i data-i="bus"></i>公交</div><div><i data-i="route"></i>路线</div><div><i data-i="person"></i>我的</div></div>
+</div>
+<figcaption><b>公交（首页）</b><span>追踪卡点开：单线去线路页，路线去路线详情页。车和路线都放在「收藏」，用分组筛选。乘车码只留顶栏一个图标。</span></figcaption>
+</figure>
+
+<!-- 首页 附近展开 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="t" style="display:flex;align-items:center;gap:2px">深圳<i data-i="down"></i></div><div class="iconbtn"><i data-i="qr"></i></div></div>
+  <div class="search"><i data-i="search"></i>搜线路、车站</div>
+  <div class="sec">收藏</div>
+  <div class="card" style="padding:18px 16px;color:var(--text2);font-size:13px;display:flex;gap:10px;align-items:center"><i data-i="star"></i>在线路页点 ☆，常坐的车会出现在这里</div>
+  <div class="sec">附近</div>
+  <div class="card">
+    <div class="row" style="min-height:48px;background:var(--variant)"><div class="m"><div class="a">科技园站</div><div class="b">120 米 · 8 条线</div></div><i data-i="chev" class="mute"></i></div>
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">→ 科技园</div></div><div class="eta"><div class="n">4<small> 分钟</small></div><div class="u">2 站</div></div></div>
+    <div class="row"><span class="badge">19</span><div class="m"><div class="a">→ 蛇口港</div></div><div class="eta"><div class="n go">2<small> 分钟</small></div><div class="u">1 站</div></div></div>
+    <div class="row"><span class="badge">M194</span><div class="m"><div class="a">→ 西丽</div></div><div class="eta"><div class="n mute" style="font-size:15px">下一班 07:35</div><div class="u">始发站发车</div></div></div>
+  </div>
+  <div class="card">
+    <div class="row" style="min-height:48px;background:var(--variant)"><div class="m"><div class="a">高新园地铁站</div><div class="b">340 米 · 5 条线 · 地铁 1 号线</div></div><i data-i="chev" class="mute"></i></div>
+    <div class="row"><span class="badge">204</span><div class="m"><div class="a">→ 南山中心</div></div><div class="eta"><div class="n">11<small> 分钟</small></div><div class="u">5 站</div></div></div>
+  </div>
+</div>
+<div class="nav"><div class="on"><i data-i="bus"></i>公交</div><div><i data-i="route"></i>路线</div><div><i data-i="person"></i>我的</div></div>
+</div>
+<figcaption><b>公交（没收藏、没在追踪）</b><span>空状态一句话。附近每站显示 3 条最快的线，点站名进站点页。附近站数量固定 6 个，不再给设置。</span></figcaption>
+</figure>
+
+<!-- 线路详情 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="back"></i></div><div class="t">325路</div><div class="iconbtn on"><i data-i="starf"></i></div></div>
+  <div class="dir">
+    <div class="ft">白石洲 → 科技园 <span class="swapbtn"><i data-i="swap" class="s"></i>换向</span></div>
+    <div class="meta">06:30–22:30 · 2 元 · 24 站 · <a>时刻表 ›</a></div>
+  </div>
+  <div class="hero">
+    <span class="pick">科技园站上车<i data-i="down" class="s"></i></span>
+    <div class="big" style="margin-top:10px">4 <small>分钟</small></div>
+    <div class="sub">还有 2 站 · 粤B·58921</div>
+    <hr>
+    <div class="line"><span>下一辆 12 分钟 · 5 站</span><a>全部 6 辆 ›</a></div>
+  </div>
+  <div class="rail">
+    <div class="st past"><div class="ln"><b></b></div>大冲</div>
+    <div class="st"><div class="ln"><b></b></div>高新园<span class="bus"><i data-i="bus" class="xs"></i>2 站</span></div>
+    <div class="st"><div class="ln"><b></b></div>深大</div>
+    <div class="st sel"><div class="ln"><b></b></div>科技园<span class="tag">上车</span></div>
+    <div class="st"><div class="ln"><b></b></div>科技中一路</div>
+    <div class="st"><div class="ln"><b></b></div>海岸城</div>
+    <div class="st"><div class="ln"><b></b></div>后海</div>
+  </div>
+</div>
+<div class="bottom"><span class="btn f"><i data-i="play" class="s"></i>追踪这班车</span><span class="btn tn" style="width:48px;padding:0"><i data-i="clock"></i></span></div>
+</div>
+<figcaption><b>线路详情</b><span>换向贴在起终点旁；时刻表放在运营信息里。底部 5 个图标改成 1 个主按钮 + 定时提醒。刷新自动进行，下拉也能刷。走向条只留竖向。</span></figcaption>
+</figure>
+
+<!-- 线路详情 追踪中 + 收藏 snackbar -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:06</span><span>5G 85%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="back"></i></div><div class="t">325路</div><div class="iconbtn on"><i data-i="starf"></i></div></div>
+  <div class="dir">
+    <div class="ft">白石洲 → 科技园 <span class="swapbtn"><i data-i="swap" class="s"></i>换向</span></div>
+    <div class="meta">06:30–22:30 · 2 元 · 24 站 · <a>时刻表 ›</a></div>
+  </div>
+  <div class="hero" style="outline:2px solid var(--primary)">
+    <div style="display:flex;justify-content:space-between;align-items:center"><span class="pick">科技园站上车<i data-i="down" class="s"></i></span><span style="font-size:12px;color:var(--primary);font-weight:600;display:flex;align-items:center;gap:6px"><span class="dot"></span>追踪中</span></div>
+    <div class="big go" style="margin-top:10px">1 <small>分钟</small></div>
+    <div class="sub">还有 1 站 · 到站前 2 站已震动提醒</div>
+    <hr>
+    <div class="line"><span>下一辆 9 分钟 · 4 站</span><a>全部 6 辆 ›</a></div>
+  </div>
+  <div class="rail">
+    <div class="st past"><div class="ln"><b></b></div>高新园</div>
+    <div class="st"><div class="ln"><b></b></div>深大<span class="bus"><i data-i="bus" class="xs"></i>1 站</span></div>
+    <div class="st sel"><div class="ln"><b></b></div>科技园<span class="tag">上车</span></div>
+    <div class="st"><div class="ln"><b></b></div>科技中一路</div>
+  </div>
+</div>
+<div class="snack">已收藏到「上班」<a>换分组</a></div>
+<div class="bottom"><span class="btn o" style="flex:1;color:var(--err)">结束追踪</span></div>
+</div>
+<figcaption><b>线路详情 · 追踪中</b><span>点 ☆ 直接收藏，弹出提示条，可点「换分组」。追踪时主按钮变成「结束追踪」。「提前几站提醒」移到「我的」统一设一次。</span></figcaption>
+</figure>
+
+<!-- 主卡片状态 -->
+<figure class="shot" style="grid-column:span 2;min-width:0">
+<div class="statesgrid">
+  <div class="state"><div class="lb">在路上</div><div class="big">8 <small>分钟</small></div><div style="color:var(--text2)">还有 4 站</div></div>
+  <div class="state"><div class="lb">快到 / 已到</div><div class="big go">到站了</div><div style="color:var(--text2)">快去上车 · 下一辆 9 分钟</div></div>
+  <div class="state"><div class="lb">车都过了</div><div class="big mute" style="font-size:30px">下一班 07:20</div><div style="color:var(--text2)">从 白石洲 发车</div></div>
+  <div class="state"><div class="lb">还没发车</div><div class="big mute" style="font-size:30px">首班 06:30</div><div style="color:var(--text2)">从 白石洲 发车</div></div>
+  <div class="state"><div class="lb">末班已过</div><div class="big warn" style="font-size:30px">今天没车了</div><div style="color:var(--text2)">明天首班 06:30</div></div>
+  <div class="state"><div class="lb">停运 / 无数据</div><div class="big warn" style="font-size:30px">暂停运营</div><div style="color:var(--text2)">数据来自 车来了 · 下拉重试</div></div>
+  <div class="state"><div class="lb">加载中</div><div class="big mute" style="font-size:30px">— <small>分钟</small></div><div style="color:var(--text2)">正在查车…</div></div>
+  <div class="state"><div class="lb">没网</div><div class="big mute" style="font-size:30px">4 <small>分钟</small></div><div style="color:var(--warn)">没网，显示的是 1 分钟前</div></div>
+</div>
+<figcaption><b>到站大字的 8 种状态</b><span>首页行、线路页、追踪卡、通知用同一套文字。替换现在的「下一辆还有 N 个站，到达该站！」等写法。</span></figcaption>
+</figure>
+
+<!-- 站点详情 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="back"></i></div><div class="t">科技园站<div style="font-size:12px;font-weight:400;color:var(--text2)">120 米 · 8 条线</div></div></div>
+  <div class="chips"><span class="chip on">全部</span><span class="chip">往北</span><span class="chip">往南</span></div>
+  <div class="card">
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">→ 科技园</div><div class="b">06:30–22:30</div></div><div class="eta"><div class="n">4<small> 分钟</small></div><div class="u">2 站</div></div><i data-i="starf" style="color:var(--primary)"></i></div>
+    <div class="row"><span class="badge">19</span><div class="m"><div class="a">→ 蛇口港</div><div class="b">06:00–23:00</div></div><div class="eta"><div class="n go">2<small> 分钟</small></div><div class="u">1 站</div></div><i data-i="star" class="mute"></i></div>
+    <div class="row"><span class="badge">M194</span><div class="m"><div class="a">→ 西丽</div><div class="b">06:40–22:00</div></div><div class="eta"><div class="n mute" style="font-size:15px">下一班 07:35</div><div class="u">始发站发车</div></div><i data-i="star" class="mute"></i></div>
+    <div class="row"><span class="badge">204</span><div class="m"><div class="a">→ 南山中心</div><div class="b">06:00–22:30</div></div><div class="eta"><div class="n">11<small> 分钟</small></div><div class="u">5 站</div></div><i data-i="star" class="mute"></i></div>
+    <div class="row"><span class="badge">B796</span><div class="m"><div class="a">→ 深圳湾</div><div class="b">07:00–20:00</div></div><div class="eta"><div class="n warn" style="font-size:15px">今天没车了</div><div class="u">明天 07:00</div></div><i data-i="star" class="mute"></i></div>
+  </div>
+  <div class="sec" style="font-size:13px;color:var(--text2);font-weight:500">可换乘：地铁 1 号线 · 高新园站 340 米</div>
+</div>
+</div>
+<figcaption><b>站点详情</b><span>「站台 1 / 站台 2」改成方向名。整行点开线路页，删掉重复的「查看全线 →」。刷新按钮去掉，改下拉。</span></figcaption>
+</figure>
+
+<!-- 搜索 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="back"></i></div><div class="search" style="flex:1;margin:0 8px 0 0;height:44px;color:var(--text)">325<span style="margin-left:auto;color:var(--text2)"><i data-i="close" class="s"></i></span></div></div>
+  <div class="sec" style="font-size:13px;color:var(--text2)">线路</div>
+  <div class="card">
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">白石洲 → 科技园</div><div class="b">06:30–22:30</div></div><i data-i="chev" class="mute"></i></div>
+    <div class="row"><span class="badge">325</span><div class="m"><div class="a">科技园 → 白石洲</div><div class="b">06:50–23:00</div></div><i data-i="chev" class="mute"></i></div>
+    <div class="row"><span class="badge">M325</span><div class="m"><div class="a">宝安中心 → 西乡</div><div class="b">07:00–21:00</div></div><i data-i="chev" class="mute"></i></div>
+  </div>
+  <div class="sec" style="font-size:13px;color:var(--text2)">车站</div>
+  <div class="card">
+    <div class="row"><div class="m"><div class="a">325 公交总站</div><div class="b">325 · B612 · 79</div></div><i data-i="chev" class="mute"></i></div>
+  </div>
+  <div class="sec" style="font-size:13px;color:var(--text2)">没输入时</div>
+  <div class="chips" style="flex-wrap:wrap"><span class="chip">19</span><span class="chip">科技园站</span><span class="chip">M194</span><span class="chip" style="color:var(--text2)">清空</span></div>
+</div>
+</div>
+<figcaption><b>搜索</b><span>每个方向一行，直接进对应方向。没输入只显示最近搜过的词。删掉写死的「常用搜索推荐」和「双引擎」说明卡（决策 D1）。</span></figcaption>
+</figure>
+
+<!-- 路线详情 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="back"></i></div><div class="t">家 → 公司</div><div class="iconbtn"><i data-i="more"></i></div></div>
+  <div class="dir"><div class="meta" style="font-size:13px">约 38 分钟 · 换乘 1 次 · 步行 120 米 · 上班</div></div>
+  <div class="tl">
+    <div class="tn"><div class="g"><b></b><i></i></div><div class="c">
+      <div class="s">深大北门 上车</div>
+      <div class="opts"><span class="opt on"><b>325</b>4 分钟</span><span class="opt"><b>M194</b>9 分钟</span><span class="opt" style="color:var(--text2)"><i data-i="plus" class="xs"></i></span></div>
+      <div class="h">坐 6 站，到 高新园 下车</div>
+    </div></div>
+    <div class="tn"><div class="g"><i class="walk"></i></div><div class="c" style="padding:4px 0 12px"><div class="h" style="display:flex;align-items:center;gap:4px"><i data-i="walk" class="s"></i>步行 120 米，约 2 分钟</div></div></div>
+    <div class="tn"><div class="g"><b></b><i></i></div><div class="c">
+      <div class="s">高新园 上车</div>
+      <div class="opts"><span class="opt on"><b>19</b>下一班 07:35</span><span class="opt"><b>204</b>12 分钟</span><span class="opt" style="color:var(--text2)"><i data-i="plus" class="xs"></i></span></div>
+      <div class="h">坐 4 站，到 腾讯大厦 下车</div>
+    </div></div>
+    <div class="tn"><div class="g"><b class="end"></b></div><div class="c" style="padding-bottom:2px"><div class="s">腾讯大厦</div></div></div>
+  </div>
+  <div class="sec" style="font-size:12px;color:var(--text2);font-weight:400">点线路号看那条线；带框的是会追踪的那条。⋮ 里有：改分组、生成返程、编辑、删除。</div>
+</div>
+<div class="bottom"><span class="btn f"><i data-i="play" class="s"></i>开始追踪</span></div>
+</div>
+<figcaption><b>路线详情（新页面）</b><span>首页路线卡点进来。每程的线路平铺，默认框住最快的那条。卡片上不再堆 3 个按钮。</span></figcaption>
+</figure>
+
+<!-- 路线追踪中 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:09</span><span>5G 84%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="back"></i></div><div class="t">家 → 公司</div><div class="iconbtn"><i data-i="more"></i></div></div>
+  <div class="track" style="margin-bottom:10px">
+    <div class="k"><span class="dot"></span>第 1 程 · 等车</div>
+    <div class="big" style="margin-top:4px">2 <small>分钟</small></div>
+    <div style="font-size:13px;opacity:.9">325 还有 1 站到 深大北门</div>
+  </div>
+  <div class="tl">
+    <div class="tn"><div class="g"><b></b><i></i></div><div class="c"><div class="legcur">
+      <div class="s">深大北门 上车</div>
+      <div class="opts"><span class="opt on" style="background:var(--card)"><b>325</b>2 分钟</span><span class="opt" style="background:var(--card)"><b>M194</b>7 分钟</span></div>
+      <div class="h">坐 6 站，到 高新园 下车</div>
+    </div></div></div>
+    <div class="tn"><div class="g"><i class="walk"></i></div><div class="c" style="padding:4px 0 12px"><div class="h">步行 120 米</div></div></div>
+    <div class="tn"><div class="g"><b></b><i></i></div><div class="c"><div class="s">高新园 上车</div><div class="h">19 · 下一班 07:35</div></div></div>
+    <div class="tn"><div class="g"><b class="end"></b></div><div class="c" style="padding-bottom:2px"><div class="s">腾讯大厦</div></div></div>
+  </div>
+  <div class="sec" style="font-size:12px;color:var(--text2);font-weight:400">上车后：大字变成「还有 5 站在 高新园 下车」，主按钮变「结束」。到换乘站自动跳下一程，⋮ 里可以手动跳。</div>
+</div>
+<div class="bottom"><span class="btn f"><i data-i="check" class="s"></i>我上车了</span><span class="btn t d">结束</span></div>
+</div>
+<figcaption><b>路线详情 · 追踪中</b><span>状态放顶部大卡，当前这一程高亮。只有一个主按钮，「结束」是文字按钮。</span></figcaption>
+</figure>
+
+<!-- 规划 -->
+<figure class="shot">
+<div class="phone"><div class="sb" style="position:relative;z-index:2"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="map">
+    <svg width="100%" height="100%" viewBox="0 0 324 664" preserveAspectRatio="none">
+      <path d="M-10 420 Q 120 380 340 460 L340 520 Q 140 440 -10 480Z" fill="var(--water)"/>
+      <g stroke="var(--road)" stroke-width="10" fill="none"><path d="M0 150 H324"/><path d="M0 300 H324"/><path d="M90 0 V664"/><path d="M230 0 V664"/><path d="M0 40 L324 260"/></g>
+      <path d="M70 120 L90 150" stroke="var(--text3)" stroke-width="3" stroke-dasharray="4 4" fill="none"/>
+      <path d="M90 150 H230 V300" stroke="var(--primary)" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M230 300 L250 320" stroke="var(--text3)" stroke-width="3" stroke-dasharray="4 4" fill="none"/>
+      <path d="M250 320 V380 H300" stroke="var(--primary)" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity=".7"/>
+      <circle cx="70" cy="120" r="9" fill="var(--go)" stroke="#fff" stroke-width="3"/>
+      <circle cx="240" cy="310" r="7" fill="var(--card)" stroke="var(--primary)" stroke-width="3"/>
+      <circle cx="300" cy="380" r="9" fill="var(--err)" stroke="#fff" stroke-width="3"/>
+    </svg>
+  </div>
+  <div class="plan">
+    <div class="ps"><div class="pp"><span class="o"></span>我的位置</div><div class="pp"><span class="x"></span>腾讯大厦</div></div>
+    <div class="iconbtn"><i data-i="swapv"></i></div>
+  </div>
+  <div class="fab" style="bottom:400px"><i data-i="loc"></i></div>
+  <div class="sheet" style="bottom:72px;padding-bottom:14px">
+    <div class="handle"></div>
+    <div class="tabs"><div class="tab on"><div class="k">最快</div><div class="n">38 分</div></div><div class="tab"><div class="k">少换乘</div><div class="n">42 分</div></div><div class="tab"><div class="k">少走路</div><div class="n">45 分</div></div></div>
+    <div style="font-size:16px;font-weight:600">08:04 出发 · 08:42 到</div>
+    <div class="segbar"><div class="w" style="width:12%"><i data-i="walk" class="xs"></i></div><div class="b" style="flex:3">325</div><div class="w" style="width:10%"><i data-i="walk" class="xs"></i></div><div class="b" style="flex:2">19</div></div>
+    <div style="font-size:12px;color:var(--text2)">换乘 1 次 · 步行 320 米 · 4 元 · 325 也可坐 M194</div>
+    <div style="display:flex;gap:10px;margin-top:12px"><span class="btn o" style="flex:1"><i data-i="star" class="s"></i>收藏</span><span class="btn f" style="flex:1.4"><i data-i="play" class="s"></i>开始追踪</span></div>
+  </div>
+</div>
+<div class="nav"><div><i data-i="bus"></i>公交</div><div class="on"><i data-i="route"></i>路线</div><div><i data-i="person"></i>我的</div></div>
+</div>
+<figcaption><b>路线（规划）</b><span>只在填了高德 Key 时出现。搜索框下的「配置Key」胶囊移到「我的」。方案页签固定 3 个，名字写清楚。</span></figcaption>
+</figure>
+
+<!-- 收藏弹层 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="map" style="opacity:.6"></div>
+  <div class="scrim"></div>
+  <div class="sheet">
+    <div class="handle"></div>
+    <div style="font-size:18px;font-weight:600;margin-bottom:14px">收藏路线</div>
+    <div class="field"><label>名字</label>家 → 公司</div>
+    <div style="font-size:13px;color:var(--text2);margin-bottom:8px">放到哪个分组</div>
+    <div class="chips" style="padding:0;flex-wrap:wrap;margin-bottom:18px"><span class="chip">不分组</span><span class="chip on"><i data-i="check" class="xs"></i>上班</span><span class="chip">回家</span><span class="chip" style="color:var(--primary)"><i data-i="plus" class="xs"></i>新分组</span></div>
+    <span class="btn f" style="width:100%">收藏</span>
+  </div>
+</div>
+</div>
+<figcaption><b>收藏路线（弹层）</b><span>只问名字和分组。去掉「所属场景」。收藏后留在规划页，提示条可点「去看看」，不再自动跳页。</span></figcaption>
+</figure>
+
+<!-- 管理收藏 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="iconbtn"><i data-i="close"></i></div><div class="t">编辑收藏</div><span class="btn t">完成</span></div>
+  <div class="grp">分组</div>
+  <div class="card">
+    <div class="set"><i data-i="drag" class="mute"></i><div class="m"><div class="a">上班</div></div><i data-i="edit" class="mute"></i></div>
+    <div class="set"><i data-i="drag" class="mute"></i><div class="m"><div class="a">回家</div></div><i data-i="edit" class="mute"></i></div>
+    <div class="set" style="color:var(--primary)"><i data-i="plus"></i><div class="m"><div class="a">新建分组</div></div></div>
+  </div>
+  <div class="grp">收藏</div>
+  <div class="card">
+    <div class="set"><i data-i="drag" class="mute"></i><span class="badge sm">325</span><div class="m"><div class="a">科技园站上车</div><div class="b">上班</div></div><i data-i="del" class="mute"></i></div>
+    <div class="set"><i data-i="drag" class="mute"></i><span class="badge sm">M194</span><div class="m"><div class="a">深大北门上车</div><div class="b">不分组</div></div><i data-i="del" class="mute"></i></div>
+    <div class="set"><i data-i="drag" class="mute"></i><span class="badge sm off"><i data-i="route" class="xs"></i></span><div class="m"><div class="a">家 → 公司</div><div class="b">上班</div></div><i data-i="del" class="mute"></i></div>
+  </div>
+  <div class="sec" style="font-size:12px;color:var(--text2);font-weight:400">删分组时，里面的收藏变成「不分组」。点一条收藏可改分组。</div>
+</div>
+</div>
+<figcaption><b>编辑收藏</b><span>首页「编辑」进来。分组和收藏都在这一页管：拖动排序、改名、删除。替换现在的 3 个分组入口和「管理收藏分组」弹层。</span></figcaption>
+</figure>
+
+<!-- 我的 -->
+<figure class="shot">
+<div class="phone"><div class="sb"><span>08:02</span><span>5G 86%</span></div>
+<div class="scroll">
+  <div class="bar"><div class="t">我的</div></div>
+  <div class="grp">出行</div>
+  <div class="card">
+    <div class="set"><div class="m"><div class="a">数据来源</div></div><div class="seg"><span class="on">车来了</span><span>掌上公交</span></div></div>
+    <div class="set"><div class="m"><div class="a">乘车码</div></div><div class="v">支付宝<i data-i="chev"></i></div></div>
+    <div class="set"><div class="m"><div class="a">到站前提醒</div></div><div class="v">提前 2 站<i data-i="chev"></i></div></div>
+    <div class="set"><div class="m"><div class="a">定时提醒</div><div class="b">工作日 07:50 · 325</div></div><div class="v">2 个<i data-i="chev"></i></div></div>
+  </div>
+  <div class="grp">通知</div>
+  <div class="card">
+    <div class="set"><div class="m"><div class="a">锁屏显示追踪</div></div><div class="sw2"></div></div>
+    <div class="set"><div class="m"><div class="a">状态栏胶囊</div><div class="b">小米焦点通知</div></div><div class="v" style="color:var(--warn)">去开启<i data-i="chev"></i></div></div>
+  </div>
+  <div class="grp">地图</div>
+  <div class="card">
+    <div class="set"><div class="m"><div class="a">高德 Key</div><div class="b">填了才有「路线」页</div></div><div class="v">未填<i data-i="chev"></i></div></div>
+  </div>
+  <div class="grp">关于</div>
+  <div class="card">
+    <div class="set"><div class="m"><div class="a">版本 0.0.3</div></div><div class="v">检查更新<i data-i="chev"></i></div></div>
+  </div>
+</div>
+<div class="nav"><div><i data-i="bus"></i>公交</div><div class="on"><i data-i="person"></i>我的</div></div>
+</div>
+<figcaption><b>我的（没填 Key，只有 2 个页签）</b><span>所有设置在这一页。删掉「附近站点数」步进器和「测试打开乘车码」。定时提醒点进去能改能删。</span></figcaption>
+</figure>
+
+<!-- 锁屏 -->
+<figure class="shot">
+<div class="phone lock"><div class="sb"><span></span><span>5G 84%</span></div>
+<div class="pill"><i data-i="bus" class="xs"></i>325 <b>2 站</b></div>
+<div class="scroll">
+  <div class="clock">08:06</div>
+  <div class="date">10月31日 星期六</div>
+  <div class="noti">
+    <div class="hd"><i data-i="bus" class="xs"></i>追客 · 追踪中</div>
+    <div class="tt">325 · 4 分钟到 科技园站</div>
+    <div class="bd">还有 2 站 · 白石洲 → 科技园</div>
+    <div class="prog"><b></b><i style="left:62%"></i></div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:#5B6470"><span>高新园</span><span>科技园</span></div>
+    <div class="ac"><span>我上车了</span><span>乘车码</span><span style="color:#D93025">结束</span></div>
+  </div>
+  <div class="noti" style="margin-top:10px;opacity:.95">
+    <div class="hd"><i data-i="bus" class="xs"></i>追客 · 第 1 程 · 乘车</div>
+    <div class="tt">还有 3 站在 高新园 下车</div>
+    <div class="bd">下车后步行 120 米，换 19 路</div>
+    <div class="prog"><b style="width:50%"></b><i style="left:46%"></i></div>
+    <div class="ac"><span style="color:#D93025">结束</span></div>
+  </div>
+</div>
+</div>
+<figcaption><b>锁屏 + 状态栏胶囊（决策 D3）</b><span>锁屏能看全内容。标题永远是「线路 · 时间 · 站」。快到站时多一个「乘车码」按钮。通知、实时活动、焦点通知、流体云用同一套文字。</span></figcaption>
+</figure>
+
+</div>
+
+<!-- ============ 5 问题对照 ============ -->
+<h2>5. 现状问题 → 新设计（对应 as-is §7）</h2>
+<table class="doc">
+<tr><th>#</th><th>问题</th><th>新设计</th></tr>
+<tr><td>1</td><td>收藏有两套，分在两处</td><td>车和路线都在首页「收藏」</td></tr>
+<tr><td>2</td><td>一个东西多种叫法</td><td>统一叫法表（第 2 节）</td></tr>
+<tr><td>3</td><td>分组和场景两套分类</td><td>只留分组；<code>GroupCategory</code> 不给用户选</td></tr>
+<tr><td>4</td><td>「新建」有歧义</td><td>只有「新建分组」；新建路线走规划页或路线详情「编辑」</td></tr>
+<tr><td>5</td><td>乘车码 5 个入口</td><td>首页顶栏图标 + 快到站时通知按钮 + 系统快捷方式</td></tr>
+<tr><td>6</td><td>分组管理 3 个入口</td><td>只有首页「编辑」</td></tr>
+<tr><td>7</td><td>定时提醒只能删</td><td>「我的」里能改能删；线路页时钟按钮新建</td></tr>
+<tr><td>8</td><td>追踪横幅总跳线路页</td><td>单线去线路页，路线去路线详情</td></tr>
+<tr><td>9</td><td>工具栏 5 图标 + 长按</td><td>1 个主按钮 + 定时；其余进顶栏和信息行</td></tr>
+<tr><td>10</td><td>站点卡挤了三类操作</td><td>提醒站数移到「我的」；定时成独立按钮</td></tr>
+<tr><td>11</td><td>路线卡按钮跳位置</td><td>按钮固定在页面底部，最多一个实心</td></tr>
+<tr><td>12</td><td>站点卡重复入口</td><td>整行可点，删「查看全线」</td></tr>
+<tr><td>13</td><td>emoji 和营销语</td><td>全删</td></tr>
+<tr><td>14</td><td>说明小字冗余</td><td>全删；只留空状态一句话</td></tr>
+<tr><td>15</td><td>首页标题和应用名不一致</td><td>首页标题改成城市名</td></tr>
+<tr><td>16</td><td>没有品牌色，三套色重叠</td><td>固定蓝 + 4 个语义色</td></tr>
+<tr><td>17</td><td>字号圆角写死</td><td>5 级字号、3 级圆角</td></tr>
+<tr><td>18</td><td>规划页常驻 Key 胶囊</td><td>移到「我的」；没 Key 不显示路线页</td></tr>
+<tr><td>19</td><td>设置里有调试项</td><td>删附近站数、测试打开</td></tr>
+</table>
+
+<!-- ============ 6 待定 ============ -->
+<h2>6. 我替你定了、你可以改的</h2>
+<table class="doc">
+<tr><th>点</th><th>我的选择</th><th>另一种</th></tr>
+<tr><td>页签</td><td>公交 / 路线 / 我的</td><td>保留独立「收藏」页签</td></tr>
+<tr><td>主色</td><td>蓝 <code>#1F5FD6</code></td><td>沿用墨绿 <code>#006C4C</code>（会和「快到」的绿撞）</td></tr>
+<tr><td>走向条</td><td>只留竖向</td><td>保留横竖切换</td></tr>
+<tr><td>提醒站数</td><td>「我的」里全局设一次</td><td>每条线单独设</td></tr>
+<tr><td>附近站数</td><td>固定 6 个</td><td>留设置</td></tr>
+<tr><td>站台名</td><td>按方向「往北 / 往南」</td><td>沿用「站台 1 / 2」（数据里不一定有方向）</td></tr>
+</table>
+</div>
+
+<script>
+document.querySelectorAll('i[data-i]').forEach(function(el){
+  var cls = 'ic ' + el.className;
+  var st = el.getAttribute('style');
+  el.outerHTML = '<svg class="' + cls + '"' + (st ? ' style="' + st + '"' : '') + '><use href="#i-' + el.dataset.i + '"/></svg>';
+});
+</script>
+</body>
+</html>
