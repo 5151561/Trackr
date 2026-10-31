@@ -81,6 +81,19 @@ class AmapSdkManagerTest {
     }
 
     @Test
+    fun readAndroidKey_doesNotFallBackToWebSlot() {
+        val storePrefs = AmapKeyStore.prefs(context)
+        storePrefs?.edit()?.clear()?.commit()
+        // 只配置了 Web 服务 Key（或旧版本单输入框留下的值）
+        AmapKeyStore.writeWebKey(context, "web_only_key")
+
+        assertNull(AmapKeyStore.readAndroidKey(context))
+        assertEquals("web_only_key", AmapKeyStore.readWebKey(context))
+
+        storePrefs?.edit()?.clear()?.commit()
+    }
+
+    @Test
     fun mapUnavailableReason_isNullWhenKeyAndAbiAvailable() {
         if (AmapSdkManager.isRuntimeAbiSupported()) {
             assertNull(AmapSdkManager.mapUnavailableReason("dummy_key_1234567890abcdef"))

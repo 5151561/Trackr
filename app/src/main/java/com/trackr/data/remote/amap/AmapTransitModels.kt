@@ -18,7 +18,9 @@ data class AmapTipItem(
     val name: String,
     val district: String = "",
     val address: String = "",
-    val location: String = "" // "lng,lat"
+    val location: String = "", // "lng,lat"
+    /** 区县级 adcode（6 位），用于判断起终点是否跨城；拿不到时为空 */
+    val adcode: String = ""
 )
 
 @Serializable

@@ -12,6 +12,8 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
 import java.net.URLEncoder
+import java.util.Calendar
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -25,6 +27,78 @@ class AmapTransitApiClient(
 
     companion object {
         private const val BASE_URL_AMAP = "https://restapi.amap.com/v3"
+
+        /** 夜班车时段：22:00 ~ 次日 05:00 */
+        fun nightFlagFor(hourOfDay: Int): Int = if (hourOfDay >= 22 || hourOfDay < 5) 1 else 0
+
+        /** 按设备当前时间计算 nightflag */
+        fun currentNightFlag(): Int = nightFlagFor(Calendar.getInstance().get(Calendar.HOUR_OF_DAY))
+
+        /**
+         * 把 "lng,lat" 规整为高德要求的 6 位小数格式（Locale.ROOT，避免部分语言环境用逗号做小数点）。
+         * 格式非法时返回 null。
+         */
+        fun formatLngLat(lngLat: String): String? {
+            val parts = lngLat.split(",")
+            if (parts.size != 2) return null
+            val lng = parts[0].trim().toDoubleOrNull() ?: return null
+            val lat = parts[1].trim().toDoubleOrNull() ?: return null
+            return String.format(Locale.ROOT, "%.6f,%.6f", lng, lat)
+        }
+
+        /** 6 位区县 adcode 归一到地级市 adcode（如 330106 -> 330100），非法时返回 null */
+        fun cityAdcodeOf(adcode: String): String? {
+            val code = adcode.trim()
+            if (code.length != 6 || !code.all { it.isDigit() }) return null
+            return code.take(4) + "00"
+        }
+
+        private fun encode(value: String): String = URLEncoder.encode(value, "UTF-8")
+
+        /** 构造输入提示 URL（city 非空时附带 citylimit=true，只返回本城结果） */
+        fun buildInputTipsUrl(
+            keyword: String,
+            city: String,
+            key: String,
+            location: String? = null
+        ): String {
+            val sb = StringBuilder("$BASE_URL_AMAP/assistant/inputtips?keywords=")
+                .append(encode(keyword.trim()))
+            val cityTrimmed = city.trim()
+            if (cityTrimmed.isNotEmpty()) {
+                sb.append("&city=").append(encode(cityTrimmed)).append("&citylimit=true")
+            }
+            location?.let { formatLngLat(it) }?.let { sb.append("&location=").append(encode(it)) }
+            sb.append("&key=").append(encode(key))
+            return sb.toString()
+        }
+
+        /**
+         * 构造公交算路 URL。坐标统一 6 位小数并做 URL 编码；
+         * [cityd] 非空时表示跨城，传给高德；[nightFlag] 为 1 时计算夜班车。
+         */
+        fun buildTransitIntegratedUrl(
+            originLngLat: String,
+            destinationLngLat: String,
+            city: String,
+            key: String,
+            cityd: String? = null,
+            nightFlag: Int = 0
+        ): String {
+            val origin = formatLngLat(originLngLat)
+                ?: throw IllegalArgumentException("起点经纬度格式错误")
+            val destination = formatLngLat(destinationLngLat)
+                ?: throw IllegalArgumentException("终点经纬度格式错误")
+            val sb = StringBuilder("$BASE_URL_AMAP/direction/transit/integrated?origin=")
+                .append(encode(origin))
+                .append("&destination=").append(encode(destination))
+                .append("&city=").append(encode(city.trim()))
+            cityd?.trim()?.ifBlank { null }?.let { sb.append("&cityd=").append(encode(it)) }
+            sb.append("&strategy=0")
+                .append("&nightflag=").append(if (nightFlag == 1) 1 else 0)
+                .append("&key=").append(encode(key))
+            return sb.toString()
+        }
     }
 
     /**
@@ -33,13 +107,14 @@ class AmapTransitApiClient(
     suspend fun searchPoiTips(
         keyword: String,
         city: String = "",
-        apiKey: String? = null
+        apiKey: String? = null,
+        location: String? = null
     ): Result<List<AmapTipItem>> = runCatching {
         if (keyword.isBlank()) return@runCatching emptyList()
 
         val key = apiKey?.trim()?.ifBlank { null }
             ?: throw IllegalStateException("未配置高德 Web 服务 Key，请在设置中配置自备 Key")
-        val url = "$BASE_URL_AMAP/assistant/inputtips?keywords=${URLEncoder.encode(keyword.trim(), "UTF-8")}&city=${URLEncoder.encode(city.trim(), "UTF-8")}&key=$key"
+        val url = buildInputTipsUrl(keyword, city, key, location)
 
         val request = Request.Builder()
             .url(url)
@@ -62,6 +137,8 @@ class AmapTransitApiClient(
             val location = tip.optString("location").trim()
             val district = tip.optString("district").trim()
             val address = tip.optString("address").trim()
+            // 无值时高德会返回空数组 []，只认 6 位数字
+            val adcode = tip.optString("adcode").trim().takeIf { cityAdcodeOf(it) != null }.orEmpty()
 
             // 过滤没有经纬度或名称为空的无效项
             if (name.isNotEmpty() && location.contains(",")) {
@@ -70,7 +147,8 @@ class AmapTransitApiClient(
                         name = name,
                         district = district,
                         address = address,
-                        location = location
+                        location = location,
+                        adcode = adcode
                     )
                 )
             }
@@ -85,6 +163,8 @@ class AmapTransitApiClient(
      * @param originName 起点名称
      * @param destName 终点名称
      * @param city 城市名称或城市编码
+     * @param cityd 跨城时的终点城市（adcode / 名称），同城传 null
+     * @param nightFlag 是否计算夜班车（1 计算，0 不计算）
      */
     suspend fun planTransit(
         originLngLat: String,
@@ -92,11 +172,20 @@ class AmapTransitApiClient(
         originName: String = "起点",
         destName: String = "终点",
         city: String,
-        apiKey: String? = null
+        apiKey: String? = null,
+        cityd: String? = null,
+        nightFlag: Int = currentNightFlag()
     ): Result<List<AmapTransitSchemeResult>> = runCatching {
         val key = apiKey?.trim()?.ifBlank { null }
             ?: throw IllegalStateException("未配置高德 Web 服务 Key，请在设置中配置自备 Key")
-        val url = "$BASE_URL_AMAP/direction/transit/integrated?origin=$originLngLat&destination=$destinationLngLat&city=${URLEncoder.encode(city.trim(), "UTF-8")}&strategy=0&key=$key"
+        val url = buildTransitIntegratedUrl(
+            originLngLat = originLngLat,
+            destinationLngLat = destinationLngLat,
+            city = city,
+            key = key,
+            cityd = cityd,
+            nightFlag = nightFlag
+        )
 
         val request = Request.Builder()
             .url(url)

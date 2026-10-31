@@ -30,11 +30,13 @@ class AmapSdkTransitService(
 
     /**
      * POI 输入关键字联想与提示
+     * @param location 当前位置 "lng,lat"（GCJ-02），用于让结果按距离排序；可为空
      */
     suspend fun searchPoiTips(
         keyword: String,
         city: String = "",
-        customApiKey: String? = null
+        customApiKey: String? = null,
+        location: String? = null
     ): Result<List<AmapTipItem>> = withContext(Dispatchers.IO) {
         runCatching {
             val kw = keyword.trim()
@@ -46,8 +48,11 @@ class AmapSdkTransitService(
                 throw IllegalStateException("未配置有效的高德 Android Key，请在弹窗中配置自备 Key")
             }
 
-            val query = InputtipsQuery(kw, city.trim())
-            query.cityLimit = false
+            val cityTrimmed = city.trim()
+            val query = InputtipsQuery(kw, cityTrimmed)
+            // 只返回当前城市的结果，避免跨城同名 POI 导致算路空结果再触发回落
+            query.cityLimit = cityTrimmed.isNotEmpty()
+            parseLatLonPoint(location)?.let { query.location = it }
             val inputtips = Inputtips(context, query)
             val tips = inputtips.requestInputtips() ?: return@runCatching emptyList()
 
@@ -56,13 +61,16 @@ class AmapSdkTransitService(
                 val name = tip.name?.trim().orEmpty()
                 val point = tip.point
                 if (name.isNotEmpty() && point != null) {
-                    val location = "${point.longitude},${point.latitude}"
+                    val tipLocation = "${point.longitude},${point.latitude}"
                     result.add(
                         AmapTipItem(
                             name = name,
                             district = tip.district?.trim().orEmpty(),
                             address = tip.address?.trim().orEmpty(),
-                            location = location
+                            location = tipLocation,
+                            adcode = tip.adcode?.trim()
+                                ?.takeIf { AmapTransitApiClient.cityAdcodeOf(it) != null }
+                                .orEmpty()
                         )
                     )
                 }
@@ -75,6 +83,8 @@ class AmapSdkTransitService(
      * 高德公交路径规划
      * @param originLngLat 起点坐标 "lng,lat"
      * @param destinationLngLat 终点坐标 "lng,lat"
+     * @param cityd 跨城时的终点城市（adcode / 名称），同城传 null
+     * @param nightFlag 是否计算夜班车（1 计算，0 不计算）
      */
     suspend fun planTransit(
         originLngLat: String,
@@ -82,7 +92,9 @@ class AmapSdkTransitService(
         originName: String = "起点",
         destName: String = "终点",
         city: String,
-        customApiKey: String? = null
+        customApiKey: String? = null,
+        cityd: String? = null,
+        nightFlag: Int = AmapTransitApiClient.currentNightFlag()
     ): Result<List<AmapTransitSchemeResult>> = withContext(Dispatchers.IO) {
         runCatching {
             val hasKey = AmapSdkManager.applyApiKey(context, customApiKey)
@@ -109,8 +121,9 @@ class AmapSdkTransitService(
                 fromAndTo,
                 RouteSearch.BUS_DEFAULT,
                 city.trim(),
-                0
+                if (nightFlag == 1) 1 else 0
             )
+            cityd?.trim()?.ifBlank { null }?.let { busRouteQuery.cityd = it }
 
             val routeSearch = RouteSearch(context)
             val busRouteResult = routeSearch.calculateBusRoute(busRouteQuery)
@@ -121,6 +134,15 @@ class AmapSdkTransitService(
     }
 
     companion object {
+        /** 解析 "lng,lat" 为 SDK 坐标；格式非法时返回 null */
+        internal fun parseLatLonPoint(lngLat: String?): LatLonPoint? {
+            val parts = lngLat?.split(",") ?: return null
+            if (parts.size != 2) return null
+            val lng = parts[0].trim().toDoubleOrNull() ?: return null
+            val lat = parts[1].trim().toDoubleOrNull() ?: return null
+            return LatLonPoint(lat, lng)
+        }
+
         /**
          * 将 SDK 返回的 [BusRouteResult] 转换为统一的 [AmapTransitSchemeResult]
          */

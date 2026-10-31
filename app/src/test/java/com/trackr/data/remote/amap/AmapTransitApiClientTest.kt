@@ -4,11 +4,14 @@ import okhttp3.OkHttpClient
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.util.Locale
 
 @RunWith(RobolectricTestRunner::class)
 class AmapTransitApiClientTest {
@@ -251,5 +254,74 @@ class AmapTransitApiClientTest {
         assertEquals(1, scheme.group.legs.size)
         assertEquals("老西门", scheme.group.legs[0].fromStopName)
         assertEquals("静安寺", scheme.group.legs[0].toStopName)
+    }
+
+    @Test
+    fun buildTransitIntegratedUrl_formatsCoordinatesToSixDecimalsAndEncodes() {
+        val url = AmapTransitApiClient.buildTransitIntegratedUrl(
+            originLngLat = "120.12345678, 30.1",
+            destinationLngLat = "121.5,31.23456789",
+            city = "杭州",
+            key = "k",
+            cityd = "310100",
+            nightFlag = 1
+        )
+        assertTrue(url.contains("origin=120.123457%2C30.100000"))
+        assertTrue(url.contains("destination=121.500000%2C31.234568"))
+        assertTrue(url.contains("&cityd=310100"))
+        assertTrue(url.contains("&nightflag=1"))
+        assertTrue(url.contains("&city=%E6%9D%AD%E5%B7%9E"))
+    }
+
+    @Test
+    fun buildTransitIntegratedUrl_sameCity_omitsCityd() {
+        val url = AmapTransitApiClient.buildTransitIntegratedUrl(
+            originLngLat = "120.1,30.1",
+            destinationLngLat = "120.2,30.2",
+            city = "杭州",
+            key = "k"
+        )
+        assertFalse(url.contains("cityd="))
+        assertTrue(url.contains("&nightflag=0"))
+    }
+
+    @Test
+    fun formatLngLat_usesDotDecimalSeparatorRegardlessOfLocale() {
+        val previous = Locale.getDefault()
+        try {
+            Locale.setDefault(Locale.GERMANY)
+            assertEquals("120.100000,30.200000", AmapTransitApiClient.formatLngLat("120.1,30.2"))
+        } finally {
+            Locale.setDefault(previous)
+        }
+        assertNull(AmapTransitApiClient.formatLngLat("bad"))
+    }
+
+    @Test
+    fun buildInputTipsUrl_limitsToCity() {
+        val url = AmapTransitApiClient.buildInputTipsUrl("人民广场", "上海", "k", location = "121.47,31.23")
+        assertTrue(url.contains("&citylimit=true"))
+        assertTrue(url.contains("&location=121.470000%2C31.230000"))
+
+        val noCity = AmapTransitApiClient.buildInputTipsUrl("人民广场", "", "k")
+        assertFalse(noCity.contains("citylimit"))
+    }
+
+    @Test
+    fun nightFlagFor_isOneBetween22And5() {
+        assertEquals(1, AmapTransitApiClient.nightFlagFor(22))
+        assertEquals(1, AmapTransitApiClient.nightFlagFor(23))
+        assertEquals(1, AmapTransitApiClient.nightFlagFor(0))
+        assertEquals(1, AmapTransitApiClient.nightFlagFor(4))
+        assertEquals(0, AmapTransitApiClient.nightFlagFor(5))
+        assertEquals(0, AmapTransitApiClient.nightFlagFor(12))
+        assertEquals(0, AmapTransitApiClient.nightFlagFor(21))
+    }
+
+    @Test
+    fun cityAdcodeOf_normalizesDistrictToCity() {
+        assertEquals("330100", AmapTransitApiClient.cityAdcodeOf("330106"))
+        assertNull(AmapTransitApiClient.cityAdcodeOf("[]"))
+        assertNull(AmapTransitApiClient.cityAdcodeOf(""))
     }
 }
