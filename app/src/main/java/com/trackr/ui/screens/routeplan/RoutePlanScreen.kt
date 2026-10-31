@@ -99,6 +99,7 @@ import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.withTransform
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -133,6 +134,7 @@ import com.trackr.domain.model.GroupCategory
 import com.trackr.domain.model.ProvinceCityCatalog
 import com.trackr.domain.model.TransitGroup
 import com.trackr.ui.screens.favoritesgroup.FavoritesGroupViewModel
+import com.trackr.ui.theme.extendedColors
 import com.trackr.util.CoordTransform
 import com.trackr.util.SignatureUtils
 import kotlinx.coroutines.delay
@@ -389,7 +391,7 @@ fun RoutePlanScreen(
                             Box(
                                 modifier = Modifier
                                     .size(10.dp)
-                                    .background(Color(0xFF00875A), CircleShape)
+                                    .background(MaterialTheme.extendedColors.success, CircleShape)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             BasicTextField(
@@ -459,7 +461,7 @@ fun RoutePlanScreen(
                             Box(
                                 modifier = Modifier
                                     .size(10.dp)
-                                    .background(Color(0xFFE53935), CircleShape)
+                                    .background(MaterialTheme.colorScheme.error, CircleShape)
                             )
                             Spacer(modifier = Modifier.width(10.dp))
                             BasicTextField(
@@ -1139,22 +1141,23 @@ fun RoutePlanVectorMapCanvas(
     onTransform: (pan: Offset, zoom: Float) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val isDark = isSystemInDarkTheme()
     val textMeasurer = rememberTextMeasurer()
 
-    // 调色盘规范
-    val bgColor = if (isDark) Color(0xFF1B1E22) else Color(0xFFE8ECEF)
-    val gridColor = if (isDark) Color(0xFF282C34) else Color(0xFFD3D9DE)
-    val arterialRoadColor = if (isDark) Color(0xFF242830) else Color(0xFFFFFFFF)
-    val arterialCasingColor = if (isDark) Color(0xFF1E2126) else Color(0xFFD8DEE4)
+    // 调色盘：全部取自主题，随深浅色切换
+    val colorScheme = MaterialTheme.colorScheme
+    val extendedColors = MaterialTheme.extendedColors
+    val bgColor = colorScheme.surfaceContainerHigh
+    val gridColor = colorScheme.outlineVariant.copy(alpha = 0.5f)
+    val arterialRoadColor = colorScheme.surface
+    val arterialCasingColor = colorScheme.outlineVariant
 
-    val transitLeg1Color = Color(0xFF0061A4)
-    val transitLeg2Color = Color(0xFF7C4DFF)
-    val walkingColor = Color(0xFF78909C)
+    val transitLeg1Color = colorScheme.primary
+    val transitLeg2Color = extendedColors.legSecondary
+    val walkingColor = extendedColors.walk
 
-    val originColor = Color(0xFF00875A)
-    val transferColor = Color(0xFF7C4DFF)
-    val destColor = Color(0xFFE53935)
+    val originColor = extendedColors.success
+    val transferColor = extendedColors.legSecondary
+    val destColor = colorScheme.error
 
     Canvas(
         modifier = modifier
@@ -1308,7 +1311,7 @@ private fun DrawScope.drawMarkerBadge(
 
     // 徽标阴影与实体背景
     drawRoundRect(
-        color = Color(0x33000000),
+        color = Color.Black.copy(alpha = 0.2f),
         topLeft = badgeTopLeft.copy(y = badgeTopLeft.y + 2.dp.toPx()),
         size = Size(badgeWidth, badgeHeight),
         cornerRadius = CornerRadius(badgeHeight / 2, badgeHeight / 2)
@@ -2034,9 +2037,14 @@ fun AmapRealVectorMapView(
         }
     }
 
-    // 绘制层：只在「方案变化 / 用户点重置」时重绘，不能把 myLocation 作为 key——
+    // 折线颜色取自主题（高德 SDK 需要 ARGB Int）
+    val leg1ColorArgb = MaterialTheme.colorScheme.primary.toArgb()
+    val leg2ColorArgb = MaterialTheme.extendedColors.legSecondary.toArgb()
+    val walkColorArgb = MaterialTheme.extendedColors.walk.toArgb()
+
+    // 绘制层：只在「方案变化 / 用户点重置 / 主题色变化」时重绘，不能把 myLocation 作为 key——
     // 定位每 60 秒刷新一次，否则用户拖动的视角会被反复 fit bounds 拉回去。
-    LaunchedEffect(selectedScheme, aMap, isMapLoaded, recenterTrigger) {
+    LaunchedEffect(selectedScheme, aMap, isMapLoaded, recenterTrigger, leg1ColorArgb, leg2ColorArgb, walkColorArgb) {
         if (aMap == null || !isMapLoaded) return@LaunchedEffect
         aMap.clear()
 
@@ -2049,7 +2057,7 @@ fun AmapRealVectorMapView(
             fun drawWalk(points: List<LatLng>) {
                 if (points.size < 2) return
                 val opts = PolylineOptions()
-                    .color(0xFF78909C.toInt())
+                    .color(walkColorArgb)
                     .width(12f)
                     .setDottedLine(true)
                 points.forEach { opts.add(it) }
@@ -2078,7 +2086,7 @@ fun AmapRealVectorMapView(
                 }
 
                 // 绘制当前公交段折线：优先用真实行驶轨迹 ridePath，为空时回落到起终两点直线
-                val legColor = if (index == 0) 0xFF0061A4.toInt() else 0xFF7C4DFF.toInt()
+                val legColor = if (index == 0) leg1ColorArgb else leg2ColorArgb
                 val ridePoints = leg.ridePath.map { LatLng(it.lat, it.lng) }
                 if (ridePoints.size >= 2) {
                     val opts = PolylineOptions().color(legColor).width(18f)

@@ -10,9 +10,14 @@ import com.trackr.core.designsystem.theme.BusSemanticColors as CoreBusSemanticCo
 import com.trackr.core.designsystem.theme.DarkBusSemanticColors as CoreDarkBusSemanticColors
 import com.trackr.core.designsystem.theme.LightBusSemanticColors as CoreLightBusSemanticColors
 import com.trackr.core.designsystem.theme.LocalBusSemanticColors as CoreLocalBusSemanticColors
+import com.trackr.core.designsystem.theme.ExtendedColors as CoreExtendedColors
+import com.trackr.core.designsystem.theme.DarkExtendedColors as CoreDarkExtendedColors
+import com.trackr.core.designsystem.theme.LightExtendedColors as CoreLightExtendedColors
+import com.trackr.core.designsystem.theme.LocalExtendedColors as CoreLocalExtendedColors
 import com.trackr.core.designsystem.theme.TrackrTheme as CoreTrackrTheme
 import com.trackr.core.designsystem.theme.busChipSpringSpec as coreBusChipSpringSpec
 import com.trackr.core.designsystem.theme.busColors as coreBusColors
+import com.trackr.core.designsystem.theme.extendedColors as coreExtendedColors
 import com.trackr.core.designsystem.theme.expressiveRotateSpringSpec as coreExpressiveRotateSpringSpec
 import com.trackr.core.designsystem.theme.expressiveSpringSpec as coreExpressiveSpringSpec
 
@@ -22,6 +27,12 @@ val LightBusSemanticColors = CoreLightBusSemanticColors
 val DarkBusSemanticColors = CoreDarkBusSemanticColors
 val LocalBusSemanticColors = CoreLocalBusSemanticColors
 
+typealias ExtendedColors = CoreExtendedColors
+
+val LightExtendedColors = CoreLightExtendedColors
+val DarkExtendedColors = CoreDarkExtendedColors
+val LocalExtendedColors = CoreLocalExtendedColors
+
 /**
  * 快捷获取当前主题的公交语义色彩
  */
@@ -29,6 +40,14 @@ val MaterialTheme.busColors: BusSemanticColors
     @Composable
     @ReadOnlyComposable
     get() = coreBusColors
+
+/**
+ * 快捷获取当前主题的扩展语义色（success / warning / legSecondary / walk）
+ */
+val MaterialTheme.extendedColors: ExtendedColors
+    @Composable
+    @ReadOnlyComposable
+    get() = coreExtendedColors
 
 /**
  * 通用 M3E 弹性物理动画规格辅助函数

@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.sp
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.CandidateLineRealtimeInfo
 import com.trackr.domain.model.TransitLeg
+import com.trackr.ui.theme.extendedColors
 
 /**
  * 换乘卡片中单程段走向展示
@@ -135,7 +136,7 @@ fun LegTimelineItem(
                             Text(
                                 text = candidate.lineName,
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
+                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
                                 modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                             )
                         }
@@ -172,7 +173,7 @@ fun LegTimelineItem(
                         text = displayedEta,
                         style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                         color = if (candidateInfo?.stopsAway != null && candidateInfo.stopsAway <= 2) {
-                            Color(0xFF00875A)
+                            MaterialTheme.extendedColors.success
                         } else {
                             MaterialTheme.colorScheme.primary
                         },
@@ -189,7 +190,7 @@ fun LegTimelineItem(
                             Text(
                                 text = "正在追踪",
                                 style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                color = Color.White,
+                                color = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                             )
                         }

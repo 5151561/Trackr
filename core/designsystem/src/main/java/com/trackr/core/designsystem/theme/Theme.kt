@@ -75,6 +75,52 @@ val MaterialTheme.busColors: BusSemanticColors
     @ReadOnlyComposable
     get() = LocalBusSemanticColors.current
 
+/**
+ * Material 基础配色之外的扩展语义色（成功 / 警示 / 第 2 程 / 步行）。
+ * 色值参考设计稿 docs/design/ui_adjustment_plan.html 的 CSS 变量。
+ * 通过 [MaterialTheme.extendedColors] 读取，随深浅色主题切换。
+ */
+@Immutable
+data class ExtendedColors(
+    val success: Color,
+    val successContainer: Color,
+    val onSuccessContainer: Color,
+    val warning: Color,
+    val warningContainer: Color,
+    val legSecondary: Color,
+    val walk: Color
+)
+
+val LightExtendedColors = ExtendedColors(
+    success = Color(0xFF146C2E),          // --success
+    successContainer = Color(0xFFB7F1B9), // --success-c
+    onSuccessContainer = Color(0xFF002106),
+    warning = Color(0xFF8B5000),          // --warn
+    warningContainer = Color(0xFFFFDCBE), // --warn-c
+    legSecondary = Color(0xFF7C4DFF),     // --leg2 第 2 程紫
+    walk = Color(0xFF73777F)              // --outline 步行灰
+)
+
+val DarkExtendedColors = ExtendedColors(
+    success = Color(0xFF9CD67D),          // --success (dark)
+    successContainer = Color(0xFF0F5223), // --success-c (dark)
+    onSuccessContainer = Color(0xFFB7F1B9),
+    warning = Color(0xFFFFB870),          // --warn (dark)
+    warningContainer = Color(0xFF693C00), // --warn-c (dark)
+    legSecondary = Color(0xFFCFBCFF),     // --leg2 (dark)
+    walk = Color(0xFF8D9199)              // --outline (dark)
+)
+
+val LocalExtendedColors = staticCompositionLocalOf { LightExtendedColors }
+
+/**
+ * 快捷获取当前主题的扩展语义色
+ */
+val MaterialTheme.extendedColors: ExtendedColors
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalExtendedColors.current
+
 // Material 3 基础基础调色板
 private val LightColorScheme = lightColorScheme(
     primary = Color(0xFF006C4C),
@@ -169,9 +215,11 @@ fun TrackrTheme(
     }
 
     val busSemanticColors = if (darkTheme) DarkBusSemanticColors else LightBusSemanticColors
+    val extendedColors = if (darkTheme) DarkExtendedColors else LightExtendedColors
 
     CompositionLocalProvider(
-        LocalBusSemanticColors provides busSemanticColors
+        LocalBusSemanticColors provides busSemanticColors,
+        LocalExtendedColors provides extendedColors
     ) {
         MaterialExpressiveTheme(
             colorScheme = colorScheme,

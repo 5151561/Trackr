@@ -53,6 +53,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.trackr.ui.theme.extendedColors
 import com.trackr.domain.model.CandidateLine
 import com.trackr.domain.model.CandidateLineRealtimeInfo
 import com.trackr.domain.model.GroupCategory
@@ -311,9 +312,9 @@ fun TransitGroupCard(
                                             color = if (isSelected) {
                                                 MaterialTheme.colorScheme.primaryContainer
                                             } else if (info.stopsAway <= 2) {
-                                                Color(0xFF00875A)
+                                                MaterialTheme.extendedColors.success
                                             } else {
-                                                Color(0xFFD97706)
+                                                MaterialTheme.extendedColors.warning
                                             }
                                         )
                                     }
@@ -426,12 +427,12 @@ fun TransitGroupCard(
                                             Spacer(modifier = Modifier.width(6.dp))
                                             Surface(
                                                 shape = RoundedCornerShape(4.dp),
-                                                color = Color(0xFF00875A)
+                                                color = MaterialTheme.extendedColors.successContainer
                                             ) {
                                                 Text(
                                                     text = "最快",
                                                     style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
-                                                    color = Color.White,
+                                                    color = MaterialTheme.extendedColors.success,
                                                     modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                                                 )
                                             }
@@ -455,7 +456,7 @@ fun TransitGroupCard(
                                     Text(
                                         text = etaText,
                                         style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Black),
-                                        color = if (info != null && info.stopsAway <= 2) Color(0xFF00875A) else MaterialTheme.colorScheme.primary,
+                                        color = if (info != null && info.stopsAway <= 2) MaterialTheme.extendedColors.success else MaterialTheme.colorScheme.primary,
                                         modifier = Modifier.testTag("selected_candidate_eta")
                                     )
                                     if (!info?.vehiclePlate.isNullOrBlank()) {
@@ -633,7 +634,7 @@ fun TransitGroupCard(
                             modifier = Modifier
                                 .size(10.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF00875A))
+                                .background(MaterialTheme.extendedColors.success)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
@@ -698,13 +699,13 @@ fun TransitGroupCard(
                                     modifier = Modifier
                                         .size(10.dp)
                                         .clip(CircleShape)
-                                        .background(Color(0xFF7C4DFF))
+                                        .background(MaterialTheme.extendedColors.legSecondary)
                                 )
                                 Spacer(modifier = Modifier.width(10.dp))
                                 Text(
                                     text = transferLabel,
                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFF512DA8)
+                                    color = MaterialTheme.extendedColors.legSecondary
                                 )
                             }
                         }
@@ -716,7 +717,7 @@ fun TransitGroupCard(
                             modifier = Modifier
                                 .size(10.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFFE91E63))
+                                .background(MaterialTheme.colorScheme.error)
                         )
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
