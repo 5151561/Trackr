@@ -263,6 +263,48 @@ class TransitUnitTest {
         assertEquals("417", extracted.getJSONArray("buses").getJSONObject(0).getString("licence"))
     }
 
+    private fun encryptForTest(plain: String, key: String): String {
+        val cipher = javax.crypto.Cipher.getInstance("AES/ECB/PKCS5Padding")
+        val keySpec = javax.crypto.spec.SecretKeySpec(key.toByteArray(Charsets.UTF_8), "AES")
+        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, keySpec)
+        return java.util.Base64.getEncoder().encodeToString(cipher.doFinal(plain.toByteArray(Charsets.UTF_8)))
+    }
+
+    @Test
+    fun testChelaileDecrypt_fallsBackToH5Key() {
+        // 用 H5 备用密钥加密：默认 WX 密钥解密失败或得到非 JSON 乱码时，必须回退到 H5 密钥
+        val plainJson = """{"targetOrder":8,"buses":[]}"""
+        val encryptedBase64 = encryptForTest(plainJson, ChelaileCrypto.AES_KEY_H5)
+
+        val decrypted = ChelaileCrypto.decryptResult(encryptedBase64)
+        assertEquals(plainJson, decrypted)
+
+        val rawEnvelope = """**YGKJ{"jsonr":{"status":"00","errmsg":"","data":{"encryptResult":"$encryptedBase64"}}}YGKJ##"""
+        val extracted = ChelaileCrypto.extractEnvelopeDataJson(rawEnvelope)
+        assertEquals(8, extracted.getInt("targetOrder"))
+    }
+
+    @Test
+    fun testChelaileDecrypt_nonJsonPlainTextWithAllKeys_throws() {
+        // 两把密钥都只能得到非 JSON 明文时应抛异常，而不是返回乱码
+        val encryptedBase64 = encryptForTest("not a json payload", ChelaileCrypto.AES_KEY_WX)
+        var thrown = false
+        try {
+            ChelaileCrypto.decryptResult(encryptedBase64)
+        } catch (_: Exception) {
+            thrown = true
+        }
+        assertTrue(thrown)
+    }
+
+    @Test
+    fun testChelaileEnvelopeStripping_braceInsideStringLiteral() {
+        // errmsg 中含有 '}' 与转义引号，括号计数必须跳过字符串字面量
+        val raw = """**YGKJ{"jsonr":{"status":"00","errmsg":"a}b\"}{","data":{"maxInterval":45}}}YGKJ##"""
+        val json = ChelaileCrypto.extractEnvelopeDataJson(raw)
+        assertEquals(45, json.getInt("maxInterval"))
+    }
+
     @Test
     fun testCalculateDistanceMeters_knownLocations() {
         // 上海人民广场 (31.2317, 121.4756) 到 陆家嘴东方明珠 (31.2397, 121.4998) 距离约 2.4 公里 (约 2400-2500 米)
@@ -401,13 +443,4 @@ class TransitUnitTest {
         assertTrue(putian.matchesCity(putianCity))
     }
 
-    @org.junit.Ignore("Online network probe test - skipped in automated unit testing")
-    @Test
-    fun testInspectStopDetailOnline() {
-        kotlinx.coroutines.runBlocking {
-            val client = com.trackr.data.remote.chelaile.ChelaileApiClient(okhttp3.OkHttpClient())
-            val rawStops = client.getStopDetail(cityId = "051", stationId = "0594-2854")
-            assertEquals(3, rawStops.size)
-        }
-    }
 }

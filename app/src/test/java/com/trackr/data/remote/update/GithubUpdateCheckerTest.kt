@@ -176,4 +176,63 @@ class GithubUpdateCheckerTest {
         assertTrue(result is UpdateCheckResult.Error)
         assertEquals("Unable to resolve host", (result as UpdateCheckResult.Error).message)
     }
+
+    private fun clientReturning(jsonPayload: String): OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor { chain ->
+            Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(200)
+                .message("OK")
+                .body(jsonPayload.toResponseBody("application/json".toMediaType()))
+                .build()
+        }
+        .build()
+
+    private fun payloadWithDownloadUrl(downloadUrl: String) = """
+        {
+            "versionCode": 3,
+            "versionName": "0.0.3",
+            "changelog": "更新说明",
+            "downloadUrl": "$downloadUrl"
+        }
+    """.trimIndent()
+
+    @Test
+    fun checkForUpdates_whenDownloadUrlIsHttp_returnsError() = runTest {
+        val checker = GithubUpdateChecker(
+            httpClient = clientReturning(payloadWithDownloadUrl("http://github.com/5151561/Trackr/releases")),
+            endpointUrls = listOf("https://example.com/update.json")
+        )
+        val result = checker.checkForUpdates(currentVersionCode = 2, currentVersionName = "0.0.2")
+        assertTrue(result is UpdateCheckResult.Error)
+    }
+
+    @Test
+    fun checkForUpdates_whenDownloadHostNotWhitelisted_returnsError() = runTest {
+        val checker = GithubUpdateChecker(
+            httpClient = clientReturning(payloadWithDownloadUrl("https://evil.example.com/trackr.apk")),
+            endpointUrls = listOf("https://example.com/update.json")
+        )
+        val result = checker.checkForUpdates(currentVersionCode = 2, currentVersionName = "0.0.2")
+        assertTrue(result is UpdateCheckResult.Error)
+    }
+
+    @Test
+    fun isAllowedDownloadUrl_validatesSchemeAndHost() {
+        assertTrue(GithubUpdateChecker.isAllowedDownloadUrl("https://github.com/5151561/Trackr/releases"))
+        assertTrue(GithubUpdateChecker.isAllowedDownloadUrl("https://objects.githubusercontent.com/a/b.apk"))
+        assertTrue(GithubUpdateChecker.isAllowedDownloadUrl("https://raw.githubusercontent.com/a/b.apk"))
+        assertTrue(GithubUpdateChecker.isAllowedDownloadUrl("https://cdn.jsdelivr.net/gh/a/b.apk"))
+        assertTrue(GithubUpdateChecker.isAllowedDownloadUrl("https://fastly.jsdelivr.net/gh/a/b.apk"))
+        assertTrue(GithubUpdateChecker.isAllowedDownloadUrl("https://GitHub.com/5151561/Trackr"))
+
+        assertFalse(GithubUpdateChecker.isAllowedDownloadUrl("http://github.com/5151561/Trackr"))
+        assertFalse(GithubUpdateChecker.isAllowedDownloadUrl("https://github.com.evil.com/a.apk"))
+        assertFalse(GithubUpdateChecker.isAllowedDownloadUrl("https://evilgithub.com/a.apk"))
+        assertFalse(GithubUpdateChecker.isAllowedDownloadUrl("https://user@evil.com/github.com"))
+        assertFalse(GithubUpdateChecker.isAllowedDownloadUrl("ftp://github.com/a.apk"))
+        assertFalse(GithubUpdateChecker.isAllowedDownloadUrl("javascript:alert(1)"))
+        assertFalse(GithubUpdateChecker.isAllowedDownloadUrl(""))
+    }
 }

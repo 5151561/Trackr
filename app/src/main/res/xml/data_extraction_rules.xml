@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12+ 云备份与设备迁移规则：排除存放自定义高德 Key 的 trackr_prefs.xml -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="trackr_prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="trackr_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>

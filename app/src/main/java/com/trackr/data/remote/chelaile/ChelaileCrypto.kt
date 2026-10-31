@@ -1,6 +1,9 @@
 package com.trackr.data.remote.chelaile
 
+import org.json.JSONArray
+import org.json.JSONException
 import org.json.JSONObject
+import org.json.JSONTokener
 import java.security.MessageDigest
 import java.util.Base64
 import javax.crypto.Cipher
@@ -30,7 +33,7 @@ object ChelaileCrypto {
         val clean = input.trim()
         return try {
             Base64.getDecoder().decode(clean)
-        } catch (e: Throwable) {
+        } catch (e: IllegalArgumentException) {
             android.util.Base64.decode(clean, android.util.Base64.DEFAULT)
         }
     }
@@ -44,20 +47,35 @@ object ChelaileCrypto {
     }
 
     /**
+     * 校验解密出的明文是否为合法 JSON（对象或数组）。
+     * 错误密钥约有 1/256 概率恰好得到合法填充而返回乱码，必须以 JSON 校验作为解密成功的判据。
+     */
+    private fun requireValidJson(text: String): String {
+        val trimmed = text.trim()
+        val value = JSONTokener(trimmed).nextValue()
+        if (value !is JSONObject && value !is JSONArray) {
+            throw JSONException("Decrypted text is not a JSON object or array")
+        }
+        return trimmed
+    }
+
+    /**
      * 对 Base64 编码的密文进行 AES/ECB/PKCS5Padding 解密。
-     * 默认优先尝试微信小程序接口密钥 [AES_KEY_WX]，解密失败时自动尝试 H5 接口备用密钥 [AES_KEY_H5]。
+     * 依次尝试 [aesKey]（默认微信小程序接口密钥 [AES_KEY_WX]）与其余已知密钥（H5 接口备用密钥 [AES_KEY_H5]），
+     * 每把密钥解密后立即做 JSON 校验，通过才视为成功，否则继续尝试下一把。
      */
     fun decryptResult(cipherTextBase64: String, aesKey: String = AES_KEY_WX): String {
         val cipherBytes = decodeBase64(cipherTextBase64)
-        return try {
-            decryptWithKey(cipherBytes, aesKey)
-        } catch (e: Exception) {
-            if (aesKey != AES_KEY_H5) {
-                decryptWithKey(cipherBytes, AES_KEY_H5)
-            } else {
-                throw e
+        val candidateKeys = listOf(aesKey, AES_KEY_WX, AES_KEY_H5).distinct()
+        var lastError: Exception? = null
+        for (key in candidateKeys) {
+            try {
+                return requireValidJson(decryptWithKey(cipherBytes, key))
+            } catch (e: Exception) {
+                lastError = e
             }
         }
+        throw lastError ?: IllegalStateException("No AES key available")
     }
 
     /**
@@ -71,8 +89,21 @@ object ChelaileCrypto {
         }
         var depth = 0
         var jsonEnd = -1
+        var inString = false
+        var escaped = false
         for (i in jsonStart until raw.length) {
-            when (raw[i]) {
+            val c = raw[i]
+            // 跳过字符串字面量（含转义字符），避免字符串内的 '{' / '}' 干扰括号计数
+            if (inString) {
+                when {
+                    escaped -> escaped = false
+                    c == '\\' -> escaped = true
+                    c == '"' -> inString = false
+                }
+                continue
+            }
+            when (c) {
+                '"' -> inString = true
                 '{' -> depth++
                 '}' -> {
                     depth--

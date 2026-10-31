@@ -1,8 +1,8 @@
 package com.trackr.util
 
 import android.content.Context
-import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.content.pm.Signature
 import android.os.Build
 import java.security.MessageDigest
 import java.util.Locale
@@ -27,39 +27,39 @@ object SignatureUtils {
             val pm = context.packageManager
             val packageName = context.packageName
 
-            val certificates = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val certificate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 val packageInfo = pm.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
                 val signingInfo = packageInfo.signingInfo ?: return@runCatching ""
                 if (signingInfo.hasMultipleSigners()) {
-                    signingInfo.apkContentsSigners
+                    // 多签名者场景无签名历史，取 APK 内容签名的第一个
+                    signingInfo.apkContentsSigners?.firstOrNull()
                 } else {
-                    signingInfo.signingCertificateHistory
+                    selectCurrentFromHistory(signingInfo.signingCertificateHistory)
                 }
             } else {
                 @Suppress("DEPRECATION")
                 val packageInfo = pm.getPackageInfo(packageName, PackageManager.GET_SIGNATURES)
                 @Suppress("DEPRECATION")
-                packageInfo.signatures
+                packageInfo.signatures?.firstOrNull()
             }
 
-            if (certificates.isNullOrEmpty()) return@runCatching ""
-
-            val certBytes = certificates[0].toByteArray()
-            val md = MessageDigest.getInstance("SHA-1")
-            val digest = md.digest(certBytes)
-
-            val hexString = StringBuilder()
-            for (i in digest.indices) {
-                val hex = Integer.toHexString(0xFF and digest[i].toInt()).uppercase(Locale.ROOT)
-                if (hex.length == 1) {
-                    hexString.append("0")
-                }
-                hexString.append(hex)
-                if (i < digest.size - 1) {
-                    hexString.append(":")
-                }
-            }
-            hexString.toString()
+            if (certificate == null) return@runCatching ""
+            sha1Fingerprint(certificate.toByteArray())
         }.getOrDefault("")
+    }
+
+    /**
+     * 从签名证书历史中选出当前签名证书。
+     * 官方文档（SigningInfo#getSigningCertificateHistory）：按轮换顺序返回，
+     * 原始证书位于下标 0，当前证书位于最后一个下标。
+     */
+    internal fun selectCurrentFromHistory(history: Array<Signature>?): Signature? = history?.lastOrNull()
+
+    /**
+     * 计算证书字节的 SHA-1 指纹，格式如 AA:BB:CC:...
+     */
+    internal fun sha1Fingerprint(certBytes: ByteArray): String {
+        val digest = MessageDigest.getInstance("SHA-1").digest(certBytes)
+        return digest.joinToString(":") { "%02X".format(Locale.ROOT, it) }
     }
 }
