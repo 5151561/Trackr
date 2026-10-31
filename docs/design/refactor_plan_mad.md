@@ -1356,3 +1356,20 @@ fun onReadAloud() = viewModelScope.launch {
 ./gradlew jacocoTestReport
 ./gradlew :androidApp:generateBaselineProfile                     # 第 27 步后，需设备
 ```
+
+## 附录 C：第 0 步基线（`4b40550`，2026-11-01）
+
+环境：macOS，16 GB 内存，JDK 21.0.11，Gradle 9.6.1，AGP 9.2.1，Kotlin 2.3.10。
+
+| 项 | 基线 | 怎么量 |
+| --- | --- | --- |
+| `./gradlew test` 用时 | 41 秒 | 先 `./gradlew --stop`，再 `./gradlew test --rerun-tasks`（冷守护进程、全部任务重跑） |
+| 用例数 | 436 个，0 跳过、0 失败（`:app` 433 + `:core:designsystem` 3） | 数 `build/test-results/testDebugUnitTest/*.xml` 的 `tests` |
+| 测试类数 | 52 个（`:app` 51 + `:core:designsystem` 1） | 同上，数 XML 文件 |
+| 跑的变体 | 只有 `testDebugUnitTest`（AGP 9 的 `test` 只跑 debug） | Gradle 任务日志 |
+| `./gradlew :app:assembleRelease` | 成功，1 分 38 秒（test 之后接着跑，部分任务已是最新） | — |
+| release APK 大小 | 72,593,066 字节（69.2 MiB）；其中 `lib/arm64-v8a` 35.4 MB、`lib/armeabi-v7a` 24.1 MB、`classes.dex` 6.9 MB | `app/build/outputs/apk/release/app-release.apk`，用 `local.properties` 里的 release 签名（`release.keystore`）签名 |
+| debug APK 大小 | 97,904,300 字节 | `app/build/outputs/apk/debug/app-debug.apk` |
+| 冷启动 | **debug 包** 682 毫秒（5 次中位数：689/673/682/692/681；装完首次 818） | Galaxy SM-S9310，Android 16；`adb shell am start -W -S -n com.github.u5151561.trackr/com.trackr.MainActivity` 的 `TotalTime` |
+
+冷启动只量了 debug 包：手机上装的是 debug 签名的包，release 签名不同，覆盖安装会报 `INSTALL_FAILED_UPDATE_INCOMPATIBLE`，要先卸载，会清掉手机上的数据，所以没装 release。debug 包冷启动偏慢，只用来和后面的 debug 包对比；第 27 步的 Macrobenchmark 再量 release。
