@@ -52,6 +52,15 @@ interface SettingsRepository {
      * 用 NFC 刷卡的人用不到它，开着反而挡住列表最后几条，所以可以在「我的」里关掉。
      */
     val showTransitCodeButton: StateFlow<Boolean>
+
+    /**
+     * 上车后自动结束追踪（issue #32），默认开：定位判断用户已经坐上这班车，就直接结束本次追踪。
+     *
+     * 只对**没有下车站**的追踪生效——单线路（线路页「追踪」、定时提醒）和站点页的一起等。
+     * 路线（有明确下车站）不受影响：上车后正是它该干活的时候，结束了就收不到下车站提醒。
+     * 需要精确定位；没有权限时这项开关不生效（判不出上车，追踪照旧）。
+     */
+    val autoStopAfterBoarding: StateFlow<Boolean>
     val nearbyStopsCount: StateFlow<Int>
     val isLiveNotificationEnabled: StateFlow<Boolean>
 
@@ -86,6 +95,7 @@ interface SettingsRepository {
     suspend fun selectCity(city: TransitCity)
     suspend fun setPreferredTransitCodeProvider(provider: TransitCodeProvider)
     fun setShowTransitCodeButton(enabled: Boolean)
+    fun setAutoStopAfterBoarding(enabled: Boolean)
 }
 
 /**

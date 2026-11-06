@@ -62,6 +62,8 @@
     <string name="me_transit_code_button_desc">关掉后首页、线路页、站点页都不再显示</string>
     <string name="me_arrival_alert">到站前提醒</string>
     <string name="me_arrival_alert_desc">车离上车站还剩几站时震动提醒</string>
+    <string name="me_auto_stop_after_boarding">上车后自动结束追踪</string>
+    <string name="me_auto_stop_after_boarding_desc">定位判断你已上车就结束追踪，不再等下一班；路线仍跟到下车站</string>
     <string name="me_reminders">定时提醒</string>
     <string name="me_reminders_none">没有</string>
     <string name="me_reminders_count">%1$s 个</string>

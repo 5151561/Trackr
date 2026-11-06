@@ -101,6 +101,27 @@ class ArrivalAlertNotifier(
         runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_INTERRUPTED, notification) }
     }
 
+    /**
+     * 定位判断用户已经上车，这次追踪自动结束（issue #32，「上车后自动结束追踪」开关）。
+     *
+     * 必须说一句：常驻通知和「追踪中」会一起消失，不说的话用户会以为 App 挂了。
+     * 顺手撤掉「车已到站」那条——上了车再看它没有意义。
+     */
+    fun triggerEndedAfterBoarding(context: Context, state: TrackingSessionState, sessionId: String = "") {
+        ensureNotificationChannel(context)
+        cancelNotification(context, alertNotificationId(NOTIFICATION_ID_ARRIVED, sessionId))
+        cancelNotification(context, alertNotificationId(NOTIFICATION_ID_APPROACHING, sessionId))
+        val notification = alertNotification(
+            context = context,
+            title = "已上车，追踪结束",
+            content = "定位判断你已坐上 ${state.lineName}，本次追踪已自动结束。还想看车的话重新追踪一次就好。",
+            category = NotificationCompat.CATEGORY_STATUS,
+            requestCode = NOTIFICATION_ID_BOARDED,
+            timeoutMillis = TIMEOUT_STATUS_MILLIS
+        )
+        runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID_BOARDED, notification) }
+    }
+
     /** 最长追踪时长写成文案（「3 小时」），常量改了文案自动跟着变 */
     private fun maxTrackingDurationText(): String {
         val hours = TrackingEngine.MAX_TRACKING_DURATION_MILLIS / 3_600_000L
@@ -412,6 +433,9 @@ class ArrivalAlertNotifier(
         const val NOTIFICATION_ID_EXPIRED = 10005
         const val NOTIFICATION_ID_INTERRUPTED = 10006
         const val NOTIFICATION_ID_MISSED = 10007
+
+        /** 定位判断已上车、追踪自动结束（issue #32） */
+        const val NOTIFICATION_ID_BOARDED = 10008
 
         private val APPROACHING_VIBRATION_PATTERN = longArrayOf(0, 280, 120, 280, 120, 400)
         private val TRANSFER_VIBRATION_PATTERN = longArrayOf(0, 300, 100, 300, 100, 300)

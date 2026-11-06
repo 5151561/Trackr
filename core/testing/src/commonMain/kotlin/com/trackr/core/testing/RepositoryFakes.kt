@@ -63,6 +63,9 @@ class FakeSettingsRepository(
     private val _showTransitCodeButton = MutableStateFlow(true)
     override val showTransitCodeButton: StateFlow<Boolean> = _showTransitCodeButton.asStateFlow()
 
+    private val _autoStopAfterBoarding = MutableStateFlow(true)
+    override val autoStopAfterBoarding: StateFlow<Boolean> = _autoStopAfterBoarding.asStateFlow()
+
     private val _nearbyStopsCount = MutableStateFlow(4)
     override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
 
@@ -114,6 +117,10 @@ class FakeSettingsRepository(
 
     override fun setShowTransitCodeButton(enabled: Boolean) {
         _showTransitCodeButton.value = enabled
+    }
+
+    override fun setAutoStopAfterBoarding(enabled: Boolean) {
+        _autoStopAfterBoarding.value = enabled
     }
 
     override fun setAlertThresholdStops(stops: Int) {

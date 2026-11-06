@@ -74,6 +74,8 @@ import com.trackr.feature.me.resources.me_about_title
 import com.trackr.feature.me.resources.me_amap_title
 import com.trackr.feature.me.resources.me_arrival_alert
 import com.trackr.feature.me.resources.me_arrival_alert_desc
+import com.trackr.feature.me.resources.me_auto_stop_after_boarding
+import com.trackr.feature.me.resources.me_auto_stop_after_boarding_desc
 import com.trackr.feature.me.resources.me_data_source
 import com.trackr.feature.me.resources.me_elder_mode
 import com.trackr.feature.me.resources.me_elder_mode_desc
@@ -205,6 +207,13 @@ fun MeScreen(
                         subtitle = stringResource(MeRes.string.me_arrival_alert_desc),
                         value = alertThresholdLabel(state.alertThresholdStops),
                         onClick = { showAlertThresholdDialog = true }
+                    )
+                    GroupDivider()
+                    SwitchRow(
+                        title = stringResource(MeRes.string.me_auto_stop_after_boarding),
+                        subtitle = stringResource(MeRes.string.me_auto_stop_after_boarding_desc),
+                        checked = state.autoStopAfterBoarding,
+                        onCheckedChange = { onEvent(MeEvent.SetAutoStopAfterBoarding(it)) }
                     )
                     GroupDivider()
                     SettingRow(

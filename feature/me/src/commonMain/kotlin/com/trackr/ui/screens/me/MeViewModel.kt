@@ -31,12 +31,14 @@ import kotlinx.coroutines.launch
  * @param amapKeyStatus 「高德 Key」那一行的状态文字
  * @param versionName 「关于」那一行显示的版本号；读不到为 null
  * @param showTransitCodeButton 「乘车码」按钮显不显示：首页悬浮按钮和线路页、站点页底栏的圆钮都听它（`SettingsRepository.showTransitCodeButton`）
+ * @param autoStopAfterBoarding 上车后自动结束追踪（issue #32）：单线路和一起等判出已上车就结束，路线不受影响
  * @param elderMode 长辈版开关（`SettingsRepository.uiMode` 是不是 Elder）
  */
 data class MeUiState(
     val engineMode: EngineMode = EngineMode.CHELAILE,
     val preferredTransitCode: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
     val showTransitCodeButton: Boolean = true,
+    val autoStopAfterBoarding: Boolean = true,
     val alertThresholdStops: Int = 2,
     val reminders: List<ScheduledReminder> = emptyList(),
     val remindersSubtitle: String? = null,
@@ -57,6 +59,7 @@ sealed interface MeEvent {
     data class SetEngineMode(val mode: EngineMode) : MeEvent
     data class SetTransitCode(val provider: TransitCodeProvider) : MeEvent
     data class SetShowTransitCodeButton(val visible: Boolean) : MeEvent
+    data class SetAutoStopAfterBoarding(val enabled: Boolean) : MeEvent
     data class SetAlertThresholdStops(val stops: Int) : MeEvent
     data class ToggleReminder(val id: String, val enabled: Boolean) : MeEvent
     data class SetLiveNotificationEnabled(val enabled: Boolean) : MeEvent
@@ -102,6 +105,7 @@ class MeViewModel(
         settings.showOnLockScreen
     ) { engine, code, stops, live, lock -> SettingsPart(engine, code, stops, live, lock) }
         .combine(settings.showTransitCodeButton) { part, visible -> part.copy(showTransitCodeButton = visible) }
+        .combine(settings.autoStopAfterBoarding) { part, enabled -> part.copy(autoStopAfterBoarding = enabled) }
         .combine(settings.uiMode) { part, mode -> part.copy(elderMode = mode == UiMode.Elder) }
         .combine(settings.railMode) { part, mode -> part.copy(railMode = mode) }
 
@@ -129,7 +133,8 @@ class MeViewModel(
                 settings.showOnLockScreen.value,
                 settings.showTransitCodeButton.value,
                 settings.uiMode.value == UiMode.Elder,
-                settings.railMode.value
+                settings.railMode.value,
+                settings.autoStopAfterBoarding.value
             ),
             reminderRepository.reminders.value,
             liveUpdateStatus.value,
@@ -147,6 +152,7 @@ class MeViewModel(
             }
             is MeEvent.SetAlertThresholdStops -> settings.setAlertThresholdStops(event.stops)
             is MeEvent.SetShowTransitCodeButton -> settings.setShowTransitCodeButton(event.visible)
+            is MeEvent.SetAutoStopAfterBoarding -> settings.setAutoStopAfterBoarding(event.enabled)
             is MeEvent.ToggleReminder -> viewModelScope.launch {
                 reminderRepository.toggleReminder(event.id, event.enabled)
             }
@@ -180,6 +186,7 @@ class MeViewModel(
         engineMode = part.engineMode,
         preferredTransitCode = part.transitCode,
         showTransitCodeButton = part.showTransitCodeButton,
+        autoStopAfterBoarding = part.autoStopAfterBoarding,
         alertThresholdStops = part.alertThresholdStops,
         reminders = reminders,
         remindersSubtitle = remindersRowSubtitle(reminders),
@@ -204,6 +211,7 @@ class MeViewModel(
         val showOnLockScreen: Boolean,
         val showTransitCodeButton: Boolean = true,
         val elderMode: Boolean = false,
-        val railMode: RailMode = RailMode.Horizontal
+        val railMode: RailMode = RailMode.Horizontal,
+        val autoStopAfterBoarding: Boolean = true
     )
 }

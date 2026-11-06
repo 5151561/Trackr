@@ -170,7 +170,28 @@ class BusTrackingServiceTest {
     }
 
     @Test
-    fun singleLine_neverAsksForLocationType() {
+    fun singleLine_takesLocationType_withAutoStopAfterBoarding() {
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 6, segmentProgress = 0.5f)))
+        )
+        // 默认开着「上车后自动结束追踪」：单线路也要定位（判人有没有跟着车走），前台就得带 location 类型
+        val session = requireNotNull(trackingRepository.start(singleTarget()))
+        val service = startService(session.sessionId).get()
+
+        assertEquals(
+            ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION,
+            service.lastForegroundServiceType
+        )
+        waitUntil("第一次轮询写回仓库") { trackingRepository.legState.value.currentBusId == "b1" }
+        assertEquals(LegPhase.SINGLE, trackingRepository.legState.value.legPhase)
+        // 车还有 1 站：这时候开始取定位，车到站后才判得出人有没有跟着走
+        assertEquals(LocationCadence.Tier.WAITING_NEAR, service.currentLocationTier)
+        assertEquals(listOf(LocationCadence.Tier.WAITING_NEAR), location.requestedTiers)
+    }
+
+    @Test
+    fun singleLine_autoStopOff_neverAsksForLocationType() {
+        transit.settings.setAutoStopAfterBoarding(false)
         transit.realtime.lineDetailResult = Result.success(
             lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 6, segmentProgress = 0.5f)))
         )
@@ -180,6 +201,7 @@ class BusTrackingServiceTest {
         assertEquals(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE, service.lastForegroundServiceType)
         waitUntil("第一次轮询写回仓库") { trackingRepository.legState.value.currentBusId == "b1" }
         assertEquals(LegPhase.SINGLE, trackingRepository.legState.value.legPhase)
+        assertEquals(LocationCadence.Tier.OFF, service.currentLocationTier)
         assertTrue(location.requestedTiers.isEmpty())
     }
 

@@ -165,6 +165,23 @@ class MeViewModelTest {
     }
 
     @Test
+    fun autoStopAfterBoarding_switchWritesSetting_andDefaultsOn() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        // 默认开：这本来才是该有的行为（issue #32）
+        assertTrue(viewModel.uiState.value.autoStopAfterBoarding)
+
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(false))
+        testScheduler.advanceUntilIdle()
+        assertFalse(settings.autoStopAfterBoarding.value)
+        assertFalse(viewModel.uiState.value.autoStopAfterBoarding)
+
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(true))
+        testScheduler.advanceUntilIdle()
+        assertTrue(settings.autoStopAfterBoarding.value)
+        assertTrue(viewModel.uiState.value.autoStopAfterBoarding)
+    }
+
+    @Test
     fun alertThreshold_isGlobalSetting_choicesOneToThree() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
         assertEquals(listOf(1, 2, 3), ALERT_THRESHOLD_CHOICES)

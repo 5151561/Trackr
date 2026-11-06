@@ -168,6 +168,23 @@ class ArrivalAlertManagerTest {
     }
 
     @Test
+    fun testEndedAfterBoarding_tellsUserAndCancelsArrivalAlert() {
+        // 没有实时活动时才会发独立到站提醒；这条用例要看「撤掉到站提醒」
+        alertNotifier.liveUpdateActiveChecker = { false }
+        val state = activeTrackingState(stopsRemaining = 0).copy(isBusArrivedAtStop = true, lineName = "59路")
+        alertNotifier.triggerArrivedAlert(app, state)
+        assertNotNull(shadowOf(notificationManager).getNotification(ArrivalAlertNotifier.NOTIFICATION_ID_ARRIVED))
+
+        alertNotifier.triggerEndedAfterBoarding(app, state)
+
+        // 上了车再看「车已到站」没意义，撤掉；换成一条说清楚追踪为什么结束了
+        assertNull(shadowOf(notificationManager).getNotification(ArrivalAlertNotifier.NOTIFICATION_ID_ARRIVED))
+        val posted = requireNotNull(shadowOf(notificationManager).getNotification(ArrivalAlertNotifier.NOTIFICATION_ID_BOARDED))
+        val text = posted.extras?.getCharSequence("android.text")?.toString().orEmpty()
+        assertTrue(text, text.contains("59路"))
+    }
+
+    @Test
     fun testTrackingExpired_textFollowsMaxTrackingDurationConstant() {
         alertNotifier.triggerTrackingExpired(app, activeTrackingState(stopsRemaining = 3))
 
