@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import com.trackr.core.domain.arrival.ArrivalRules
 import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.model.LegPhase
@@ -96,6 +97,38 @@ object XiaomiFocusAdapter {
             builder.extras.putString(EXTRA_KEY, payload)
         }
     }
+
+    /**
+     * 结束一个已经展示在小米焦点通知 / 超级岛里的实时追踪。
+     *
+     * MIUI 的焦点通知和通知栏里的普通通知不是同一层。只调用
+     * [NotificationManagerCompat.cancel] 会留下屏幕上的焦点通知，必须按小米协议
+     * 再发送一次 `param_v2.cancel=true` 才能真正收起它。
+     */
+    fun cancelFocusNotification(context: Context, notificationId: Int) {
+        if (!isXiaomiRom()) return
+        runCatching {
+            val manager = NotificationManagerCompat.from(context)
+            val cancellation = NotificationCompat.Builder(context, LiveProgressNotifier.CHANNEL_ID_LIVE_PROGRESS)
+                .setSmallIcon(com.trackr.R.drawable.ic_stat_trackr)
+                .setAutoCancel(true)
+                .setOngoing(false)
+                .apply { extras.putString(EXTRA_KEY, buildCancelPayload()) }
+                .build()
+            // 小米状态栏服务在 notify 时读取 cancel 参数；随后撤掉普通通知兜底。
+            manager.notify(notificationId, cancellation)
+            manager.cancel(notificationId)
+        }
+    }
+
+    /** 小米焦点通知结束协议的最小 payload。 */
+    fun buildCancelPayload(): String =
+        JSONObject().apply {
+            put("param_v2", JSONObject().apply {
+                put("protocol", 1)
+                put("cancel", true)
+            })
+        }.toString()
 
     /**
      * 构建紧凑的 param_v2 JSON 结构，并严格限制在 3072 字节以内

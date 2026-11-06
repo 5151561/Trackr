@@ -165,6 +165,14 @@ class XiaomiFocusAdapterTest {
     }
 
     @Test
+    fun testBuildCancelPayload_requestsFocusNotificationCancellation() {
+        val paramV2 = JSONObject(XiaomiFocusAdapter.buildCancelPayload()).getJSONObject("param_v2")
+
+        assertEquals(1, paramV2.getInt("protocol"))
+        assertTrue(paramV2.getBoolean("cancel"))
+    }
+
+    @Test
     fun testBuildJsonPayload_groupPhases_useStageTexts() {
         val waiting = TrackingSessionState(
             isActive = true,

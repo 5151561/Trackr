@@ -710,6 +710,7 @@ class LiveProgressNotifier(
     /** 取消一条常驻通知（默认那条：没有会话时进前台用的占位通知） */
     fun cancelNotification(context: Context, notificationId: Int = NOTIFICATION_ID_LIVE_PROGRESS) {
         try {
+            XiaomiFocusAdapter.cancelFocusNotification(context, notificationId)
             NotificationManagerCompat.from(context).cancel(notificationId)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to cancel live progress notification", e)
@@ -752,7 +753,9 @@ class LiveProgressNotifier(
          */
         fun cancelSessionNotification(context: Context, sessionId: String) {
             runCatching {
-                NotificationManagerCompat.from(context).cancel(notificationIdOfSession(sessionId))
+                val notificationId = notificationIdOfSession(sessionId)
+                XiaomiFocusAdapter.cancelFocusNotification(context, notificationId)
+                NotificationManagerCompat.from(context).cancel(notificationId)
             }
         }
 
@@ -765,7 +768,9 @@ class LiveProgressNotifier(
         /** 撤掉一起等里某条线的通知（那条线被去掉 / 结束后） */
         fun cancelWatchLineNotification(context: Context, sessionId: String, lineId: String) {
             runCatching {
-                NotificationManagerCompat.from(context).cancel(notificationIdOfSession(watchLineKey(sessionId, lineId)))
+                val notificationId = notificationIdOfSession(watchLineKey(sessionId, lineId))
+                XiaomiFocusAdapter.cancelFocusNotification(context, notificationId)
+                NotificationManagerCompat.from(context).cancel(notificationId)
             }
         }
 
