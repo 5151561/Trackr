@@ -202,6 +202,41 @@ class BusTrackingServiceTest {
         assertNull(trackingRepository.session.value)
     }
 
+    /**
+     * #28：结束追踪以后，这一项留下的到站提醒也要跟着消失，不能继续挂在通知栏和锁屏上等用户手动点掉。
+     */
+    @Test
+    fun stop_cancelsArrivalAlertOfThatSession() {
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 2, segmentProgress = 0.5f)))
+        )
+        val session = requireNotNull(trackingRepository.start(routeTarget()))
+        val service = startService(session.sessionId).get()
+        waitUntil("定位打开") { location.activeCollectors == 1 }
+
+        // 到站那一刻服务会发这条；这里直接替它发出来，然后结束追踪
+        val alerts = GlobalContext.get().get<ArrivalAlertNotifier>()
+        alerts.triggerArrivedAlert(
+            app,
+            trackingRepository.legState.value,
+            forceStandalone = true,
+            sessionId = session.sessionId
+        )
+        val arrivedId = ArrivalAlertNotifier.alertNotificationId(
+            ArrivalAlertNotifier.NOTIFICATION_ID_ARRIVED,
+            session.sessionId
+        )
+        assertNotNull("到站提醒应先发出来", shadowOf(notificationManager).getNotification(arrivedId))
+
+        trackingRepository.stop()
+        waitUntil("服务停下") { shadowOf(service).isStoppedBySelf }
+
+        assertNull(
+            "追踪结束后提醒不该留着",
+            shadowOf(notificationManager).getNotification(arrivedId)
+        )
+    }
+
     @Test
     fun staleStartRequest_entersForegroundThenStops() {
         val session = requireNotNull(trackingRepository.start(singleTarget()))

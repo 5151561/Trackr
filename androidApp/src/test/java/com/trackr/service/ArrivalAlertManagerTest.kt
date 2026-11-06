@@ -200,6 +200,104 @@ class ArrivalAlertManagerTest {
     }
 
     /**
+     * #28：提醒要自己消失。
+     *
+     * `setAutoCancel(true)` 只是「点一下才消失」，用户不点就一直挂在通知栏和锁屏上；
+     * 追踪结束后常驻通知已经撤了，这条「车辆已到站」还得手动点掉。给每条提醒配一个 timeout。
+     */
+    @Test
+    fun testStandaloneAlerts_timeOutOnTheirOwn() {
+        alertNotifier.liveUpdateActiveChecker = { false }
+        fun timeoutOf(id: Int): Long {
+            val posted = shadowOf(notificationManager).getNotification(id)
+            assertNotNull("提醒 $id 没发出来", posted)
+            return posted!!.timeoutAfter
+        }
+
+        // 每种提醒单独发一次、当场断言：后一条会撤掉前一条（到站撤临近、换乘撤到站）
+        alertNotifier.triggerApproachingAlert(app, activeTrackingState(stopsRemaining = 2))
+        assertEquals(true, timeoutOf(ArrivalAlertNotifier.NOTIFICATION_ID_APPROACHING) > 0)
+
+        alertNotifier.triggerArrivedAlert(app, activeTrackingState(stopsRemaining = 0).copy(isBusArrivedAtStop = true))
+        val arrived = timeoutOf(ArrivalAlertNotifier.NOTIFICATION_ID_ARRIVED)
+        // 到站只有一次机会：留够时间给人看，但别按小时算
+        assertEquals(true, arrived in 1..(10 * 60_000L))
+
+        alertNotifier.triggerTransferAlert(app, "珞雄路雄楚大道", "M492")
+        assertEquals(true, timeoutOf(ArrivalAlertNotifier.NOTIFICATION_ID_TRANSFER) > 0)
+
+        alertNotifier.triggerMissedBusAlert(app, activeTrackingState(stopsRemaining = 1).copy(etaSeconds = 480))
+        assertEquals(true, timeoutOf(ArrivalAlertNotifier.NOTIFICATION_ID_MISSED) > 0)
+    }
+
+    /** #28：追踪结束时，这一项留下的到站 / 临近 / 换乘 / 错过提醒一起撤掉 */
+    @Test
+    fun testCancelSessionAlerts_clearsEveryAlertOfThatSession() {
+        alertNotifier.liveUpdateActiveChecker = { false }
+        val mine = "session-a"
+        val other = "session-b"
+        val arrived = activeTrackingState(stopsRemaining = 0).copy(isBusArrivedAtStop = true)
+
+        // 四种提醒互相会顶掉（到站撤临近、换乘撤到站…），所以一种一种验：发两份，只清自己那份
+        val cases = listOf<Pair<Int, (String) -> Unit>>(
+            ArrivalAlertNotifier.NOTIFICATION_ID_APPROACHING to { id ->
+                alertNotifier.triggerApproachingAlert(app, activeTrackingState(stopsRemaining = 2), sessionId = id)
+            },
+            ArrivalAlertNotifier.NOTIFICATION_ID_ARRIVED to { id ->
+                alertNotifier.triggerArrivedAlert(app, arrived, forceStandalone = true, sessionId = id)
+            },
+            ArrivalAlertNotifier.NOTIFICATION_ID_TRANSFER to { id ->
+                alertNotifier.triggerTransferAlert(app, "换乘站", "M492", sessionId = id)
+            },
+            ArrivalAlertNotifier.NOTIFICATION_ID_MISSED to { id ->
+                alertNotifier.triggerMissedBusAlert(app, activeTrackingState(stopsRemaining = 1), sessionId = id)
+            }
+        )
+        cases.forEach { (base, post) ->
+            post(mine)
+            post(other)
+
+            ArrivalAlertNotifier.cancelSessionAlerts(app, mine)
+
+            assertNull(
+                "追踪结束后提醒不该留着，id=$base",
+                shadowOf(notificationManager).getNotification(ArrivalAlertNotifier.alertNotificationId(base, mine))
+            )
+            assertNotNull(
+                "别把同时追的另一项一起撤了，id=$base",
+                shadowOf(notificationManager).getNotification(ArrivalAlertNotifier.alertNotificationId(base, other))
+            )
+            ArrivalAlertNotifier.cancelSessionAlerts(app, other)
+        }
+    }
+
+    /** 「已停止 / 已中断」是解释性的状态消息，不挂在某一份会话上，清场时不能顺手抹掉 */
+    @Test
+    fun testCancelSessionAlerts_keepsStatusNotifications() {
+        alertNotifier.triggerTrackingExpired(app, activeTrackingState(stopsRemaining = 3))
+
+        ArrivalAlertNotifier.cancelSessionAlerts(app, "session-a")
+
+        assertNotNull(
+            "「追踪已停止」要留到它自己过期",
+            shadowOf(notificationManager).getNotification(ArrivalAlertNotifier.NOTIFICATION_ID_EXPIRED)
+        )
+    }
+
+    /** 旧版本发出去的通知没带 sessionId，算不出 id；给空 id 时空转，不能把固定 id 那几条误伤 */
+    @Test
+    fun testCancelSessionAlerts_ignoresBlankSessionId() {
+        alertNotifier.liveUpdateActiveChecker = { false }
+        alertNotifier.triggerArrivedAlert(app, activeTrackingState(stopsRemaining = 0).copy(isBusArrivedAtStop = true))
+
+        ArrivalAlertNotifier.cancelSessionAlerts(app, "")
+
+        assertNotNull(
+            shadowOf(notificationManager).getNotification(ArrivalAlertNotifier.NOTIFICATION_ID_ARRIVED)
+        )
+    }
+
+    /**
      * D3：强提醒的锁屏可见性跟「我的 → 锁屏显示」走。
      * 不设的话 `Notification.visibility` 默认 PRIVATE，用户把系统锁屏设成「隐藏敏感内容」时，
      * 到站提醒在锁屏上只剩「内容已隐藏」，震动照响但看不到是哪条线哪个站。

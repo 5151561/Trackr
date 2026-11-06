@@ -303,6 +303,9 @@ class BusTrackingService : LifecycleService() {
                 worker.job = null
                 endedWorkers += worker
             }
+            // 这一项没了，它留下的到站提醒也没有主人了：一起撤掉，别让「车辆已到站」在通知栏
+            // 和锁屏上等用户手动点掉（#28）。常驻通知等前台换人之后再撤，提醒不用等。
+            ArrivalAlertNotifier.cancelSessionAlerts(this, sessionId)
             if (foregroundSessionId == sessionId) foregroundSessionId = null
         }
         // 新增 / 换代：接上或重开这一路（通知 id 跟会话绑定，不用挪）
@@ -792,6 +795,8 @@ class BusTrackingService : LifecycleService() {
         // 服务被销毁（含系统回收）时结束正在追的会话，避免 UI 一直显示“追踪中”
         val active = trackingRepository.sessions.value.filter { !it.interrupted }
         active.forEach { runCatching { trackingRepository.stop(it.sessionId) } }
+        // 会话没了，这些追踪留下的到站提醒也跟着撤（#28）
+        active.forEach { ArrivalAlertNotifier.cancelSessionAlerts(this, it.sessionId) }
         foregroundSessionId = null
         cancelPostedNotifications()
         super.onDestroy()
