@@ -91,7 +91,7 @@ object AndroidLiveUpdateSettings : LiveUpdateSettings {
     override fun openPromotionSettings(context: Context): Boolean = LiveUpdatePromotion.openPromotionSettings(context)
     override fun openAppNotificationSettings(context: Context): Boolean =
         LiveUpdatePromotion.openAppNotificationSettings(context)
-    override fun isXiaomiRom(): Boolean = XiaomiFocusAdapter.isXiaomiRom()
+    override fun isXiaomiFocusSupported(context: Context): Boolean = XiaomiFocusAdapter.isFocusSupported(context)
     override fun canShowXiaomiFocus(context: Context): Boolean = XiaomiFocusAdapter.canShowFocus(context)
     override fun openXiaomiNotificationSettings(context: Context) = XiaomiFocusAdapter.openNotificationSettings(context)
     override fun isColorOs(): Boolean = OppoFluidCloudAdapter.isColorOs()
@@ -101,6 +101,9 @@ object AndroidLiveUpdateSettings : LiveUpdateSettings {
 /**
  * 「我的」页「状态栏胶囊」：判断和跳转和第 17 步「更多」页里的写法一样（经 [LiveUpdateSettings]，用 applicationContext；
  * 厂商适配对象打开设置页时都带 NEW_TASK）。
+ *
+ * 只判断「这台机器有没有 / 用户开没开」，不判断各家叫什么名字——界面上统一叫「实时活动通知」。
+ * 小米要先看焦点通知协议版本：MIUI 13/14 没有这个功能，不能因为 `Build.BRAND` 是 xiaomi 就说支持。
  */
 class AndroidLiveUpdateAccess(
     context: Context,
@@ -108,30 +111,32 @@ class AndroidLiveUpdateAccess(
 ) : LiveUpdateAccess {
     private val appContext: Context = context.applicationContext ?: context
 
+    /** 澎湃OS 1 起才有焦点通知（3 起叫超级岛）；MIUI 全系为 false */
+    private fun xiaomiFocusSupported(): Boolean = settings.isXiaomiFocusSupported(appContext)
+
     private val supported: Boolean
-        get() = settings.isPromotionSupported() || settings.isXiaomiRom() || settings.isColorOs()
+        get() = xiaomiFocusSupported() || settings.isPromotionSupported() || settings.isColorOs()
 
     private fun allowed(): Boolean = when {
-        settings.isXiaomiRom() -> settings.canShowXiaomiFocus(appContext)
+        xiaomiFocusSupported() -> settings.canShowXiaomiFocus(appContext)
         settings.isPromotionSupported() -> settings.canPromote(appContext)
         else -> false
     }
 
     override fun status(): LiveUpdateStatus {
-        if (!supported) return LiveUpdateStatus(supported = false, allowed = false, systemName = "")
-        val name = when {
-            settings.isXiaomiRom() -> "小米焦点通知"
-            settings.isColorOs() -> "OPPO 流体云"
-            else -> "Android 实时活动"
-        }
-        return LiveUpdateStatus(supported = true, allowed = allowed(), systemName = name)
+        if (!supported) return LiveUpdateStatus(supported = false, allowed = false)
+        return LiveUpdateStatus(supported = true, allowed = allowed())
     }
 
     override fun openSettings() {
         when {
             !supported -> settings.openAppNotificationSettings(appContext)
-            !allowed() -> settings.openPromotionSettings(appContext)
-            settings.isXiaomiRom() -> settings.openXiaomiNotificationSettings(appContext)
+            !allowed() -> if (xiaomiFocusSupported()) {
+                settings.openXiaomiNotificationSettings(appContext)
+            } else {
+                settings.openPromotionSettings(appContext)
+            }
+            xiaomiFocusSupported() -> settings.openXiaomiNotificationSettings(appContext)
             settings.isColorOs() -> settings.openFluidCloudSettings(appContext)
             else -> settings.openAppNotificationSettings(appContext)
         }

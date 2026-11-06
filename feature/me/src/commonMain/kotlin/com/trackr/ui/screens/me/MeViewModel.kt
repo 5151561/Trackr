@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
  *
  * @param alertThresholdStops 到站前提醒：车离上车站还有几站时提醒（1–3）
  * @param remindersSubtitle 「定时提醒」那一行的副标题（最早一条开着的提醒）；没有提醒为 null
- * @param liveUpdate 状态栏胶囊的系统状态；平台没有这项（iOS）或实时通知关着时为 null，不显示那一行
+ * @param liveUpdate 实时活动通知支持没支持、开没开；平台没有这项（iOS）或实时通知关着时为 null，不显示那一行
  * @param notificationHealth 通知可靠性体检；全正常或平台没有这项（iOS）时为 null，不显示那一行
  * @param amapKeyStatus 「高德 Key」那一行的状态文字
  * @param versionName 「关于」那一行显示的版本号；读不到为 null
@@ -163,7 +163,7 @@ class MeViewModel(
         }
     }
 
-    /** 回到前台时重查状态栏胶囊权限和通知体检（用户可能刚从系统设置回来） */
+    /** 回到前台时重查实时活动通知的权限和通知体检（用户可能刚从系统设置回来） */
     fun onScreenResumed() {
         liveUpdateStatus.value = liveUpdateAccess?.status()
         notificationHealthStatus.value = notificationHealthAccess?.status()

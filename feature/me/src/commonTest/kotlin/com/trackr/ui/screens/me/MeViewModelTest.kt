@@ -225,7 +225,7 @@ class MeViewModelTest {
     fun liveUpdateRow_hiddenWhenLiveNotificationOff_orNoPlatformSupport() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
         testScheduler.advanceUntilIdle()
-        assertEquals(LiveUpdateStatus(supported = true, allowed = false, systemName = "小米焦点通知"), viewModel.uiState.value.liveUpdate)
+        assertEquals(LiveUpdateStatus(supported = true, allowed = false), viewModel.uiState.value.liveUpdate)
 
         // 和原来一样：实时通知关着时不显示胶囊权限
         viewModel.onEvent(MeEvent.SetLiveNotificationEnabled(false))
@@ -247,7 +247,7 @@ class MeViewModelTest {
         assertEquals(1, liveUpdate.openCount)
 
         // 用户在系统设置里开了，回到前台重查
-        liveUpdate.current = LiveUpdateStatus(supported = true, allowed = true, systemName = "小米焦点通知")
+        liveUpdate.current = LiveUpdateStatus(supported = true, allowed = true)
         viewModel.onScreenResumed()
         testScheduler.advanceUntilIdle()
         assertTrue(viewModel.uiState.value.liveUpdate!!.allowed)
@@ -315,7 +315,7 @@ class MeViewModelTest {
 
 /** 状态栏胶囊的 Fake：默认小米、没开权限 */
 class FakeLiveUpdateAccess(
-    var current: LiveUpdateStatus = LiveUpdateStatus(supported = true, allowed = false, systemName = "小米焦点通知")
+    var current: LiveUpdateStatus = LiveUpdateStatus(supported = true, allowed = false)
 ) : LiveUpdateAccess {
     var openCount: Int = 0
         private set
