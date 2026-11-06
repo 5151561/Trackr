@@ -424,6 +424,16 @@ class FakeLocationRepository(
 
     override fun lastKnown(maxAgeMillis: Long): UserFix? = lastKnownResult
 
+    /** 有没有定位权限；首页提示「没有定位权限」时置 false */
+    var permissionGranted: Boolean = true
+
+    /** 系统「位置信息」总开关；首页提示「手机定位服务未开启」时置 false */
+    var systemLocationEnabled: Boolean = true
+
+    override fun hasPermission(): Boolean = permissionGranted
+
+    override fun isSystemLocationEnabled(): Boolean = systemLocationEnabled
+
     override fun fixes(tier: LocationCadence.Tier): Flow<UserFix> =
         if (tier == LocationCadence.Tier.OFF) emptyFlow() else live
 

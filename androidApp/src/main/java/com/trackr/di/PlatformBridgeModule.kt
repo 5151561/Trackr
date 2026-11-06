@@ -4,6 +4,7 @@ import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import androidx.core.app.NotificationManagerCompat
@@ -15,6 +16,7 @@ import com.trackr.core.data.repository.UserLocationStore
 import com.trackr.core.domain.platform.Announcer
 import com.trackr.core.domain.platform.AppSigningInfo
 import com.trackr.core.domain.platform.AppVersionInfo
+import com.trackr.core.domain.platform.SystemSettingsLauncher
 import com.trackr.core.domain.platform.TransitCodeLauncher
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.data.repository.ITransitRepository
@@ -43,6 +45,8 @@ import org.koin.dsl.onClose
  */
 val platformBridgeModule: Module = module {
     single<TransitCodeLauncher> { AndroidTransitCodeLauncher(androidContext()) }
+    // 定位提示里的「去授权 / 去开启」：跳应用详情页或系统位置信息页（issue #34）
+    single<SystemSettingsLauncher> { AndroidSystemSettingsLauncher(androidContext()) }
     single<AppSigningInfo> { AndroidAppSigningInfo(androidContext()) }
     // 「读给我听」（第 33 步）：进程级一个，第一次读才建引擎；Koin 关闭时释放
     single<Announcer> { AndroidTtsAnnouncer(androidContext(), get(AppScopeQualifier)) } onClose {
@@ -72,6 +76,35 @@ class AndroidTransitCodeLauncher(context: Context) : TransitCodeLauncher {
         TransitCodeProvider.ALIPAY -> TransitCodeHelper.isAlipayInstalled(appContext)
         TransitCodeProvider.UNIONPAY -> TransitCodeHelper.isUnionPayInstalled(appContext)
         TransitCodeProvider.ASK_ALWAYS -> false
+    }
+}
+
+/**
+ * 定位提示里的「去授权 / 去开启」：用 applicationContext 带 NEW_TASK 打开系统页。
+ *
+ * 权限和系统总开关是两层，提示里必须指向对应那一层：没授权去应用详情页，总开关关着去位置信息页。
+ * 打不开（没这个 Activity，多是 ROM 裁掉了）返回 false，页面就不做任何事。
+ */
+class AndroidSystemSettingsLauncher(context: Context) : SystemSettingsLauncher {
+    private val appContext: Context = context.applicationContext ?: context
+
+    override fun openLocationSettings(): Boolean = open(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+
+    override fun openAppSettings(): Boolean = open(
+        action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        data = Uri.fromParts("package", appContext.packageName, null)
+    )
+
+    private fun open(action: String, data: Uri? = null): Boolean = try {
+        appContext.startActivity(
+            Intent(action).apply {
+                data?.let { this.data = it }
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        )
+        true
+    } catch (_: Exception) {
+        false
     }
 }
 
