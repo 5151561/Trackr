@@ -1,13 +1,13 @@
 {
-  "versionCode": 10,
-  "versionName": "0.1.6",
+  "versionCode": 11,
+  "versionName": "0.1.7",
   "minSupportedVersionCode": 1,
-  "changelog": "## 更新内容\n\n- 可以同时追踪多条线路（最多 4 项）：首页一项一张卡，各自的倒计时、剩余站数和「结束」互不影响，一起等的每条线也单独成卡\n- 通知按线路独立：一起等里每条线一条通知，结束只停自己那条；服务收摊时连旧版遗留的常驻通知一起撤掉\n- 到站提醒一律独立发通知，不再赌实时通知能不能升成状态栏胶囊；错过车时补一条「错过 B612 了，下一班约 8 分钟」，并撤掉已经过时的「车已到站」\n- 「我的 → 通知」新增可靠性体检：没给通知权限、到站强提醒渠道被静音、追踪进度渠道被关掉会直接指出来，点一下跳到对应设置\n- 五条强提醒的锁屏可见性跟「锁屏显示」开关走，锁屏设成隐藏敏感内容时不会再只看到一条空通知\n- Android 16 实时通知改成按设备自检是否染色，两种相反的官方说法都能兼容\n- 线路详情：候车站胶囊只写站名、装不下时滚动；方向行太长也改成滚动，不再打省略号\n- 横排走向条的括号改为自绘横版括号，不再挤字、不再偏下\n- 「显示乘车码按钮」现在对整个 App 生效：线路页、站点页的乘车码按钮和首页悬浮按钮一起显示或隐藏\n- 修复删光默认分组后重启又自动恢复\n- 修复旧版通知不带会话 id 时被当成「结束全部」的问题\n\n## 下载\n\n- 64 位设备：`trackr-0.1.6-arm64-v8a.apk`\n- 32 位设备：`trackr-0.1.6-armeabi-v7a.apk`\n\n覆盖安装即可，收藏与设置保留。",
-  "downloadUrl": "https://github.com/5151561/Trackr/releases/tag/v0.1.6",
+  "changelog": "chore(release): 0.1.7（versionCode 11）",
+  "downloadUrl": "https://github.com/5151561/Trackr/releases/tag/v0.1.7",
   "downloadUrls": {
-    "arm64-v8a": "https://github.com/5151561/Trackr/releases/download/v0.1.6/trackr-0.1.6-arm64-v8a.apk",
-    "armeabi-v7a": "https://github.com/5151561/Trackr/releases/download/v0.1.6/trackr-0.1.6-armeabi-v7a.apk"
+    "arm64-v8a": "https://github.com/5151561/Trackr/releases/download/v0.1.7/trackr-0.1.7-arm64-v8a.apk",
+    "armeabi-v7a": "https://github.com/5151561/Trackr/releases/download/v0.1.7/trackr-0.1.7-armeabi-v7a.apk"
   },
-  "publishTime": "2026-11-05",
+  "publishTime": "2026-11-06",
   "forceUpdate": false
 }
