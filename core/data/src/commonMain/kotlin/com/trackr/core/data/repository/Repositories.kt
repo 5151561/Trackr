@@ -13,6 +13,7 @@ import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LineTimetable
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.RailMode
+import com.trackr.core.model.ThemeMode
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.TransitGroup
@@ -79,6 +80,8 @@ interface SettingsRepository {
     /** 线路详情走向条样式；没存过或认不出按 [RailMode.Horizontal] */
     val railMode: StateFlow<RailMode>
 
+    val themeMode: StateFlow<ThemeMode>
+
     /** 系统字体放大时的「试试长辈版」提示已经点过（打开或先不用），之后不再提示 */
     val fontScalePromptDismissed: StateFlow<Boolean>
 
@@ -91,6 +94,7 @@ interface SettingsRepository {
     fun setAlertThresholdStops(stops: Int)
     fun setUiMode(mode: UiMode)
     fun setRailMode(mode: RailMode)
+    fun setThemeMode(mode: ThemeMode)
     fun dismissFontScalePrompt()
     suspend fun selectCity(city: TransitCity)
     suspend fun setPreferredTransitCodeProvider(provider: TransitCodeProvider)

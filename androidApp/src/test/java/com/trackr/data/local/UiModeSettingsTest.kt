@@ -7,6 +7,7 @@ import com.trackr.core.data.provider.TransitProviderCoordinator
 import com.trackr.core.database.TrackrDatabase
 import com.trackr.core.datastore.TrackrDataStoreFiles
 import com.trackr.core.model.UiMode
+import com.trackr.core.model.ThemeMode
 import com.trackr.data.repository.RouteGroupRepository
 import com.trackr.data.repository.TransitRepository
 import kotlinx.coroutines.CoroutineScope
@@ -160,5 +161,49 @@ class UiModeSettingsTest {
         val seen = repo(back)
         assertEquals(UiMode.Elder, seen.uiMode.value)
         assertTrue(seen.fontScalePromptDismissed.value)
+    }
+
+    @Test
+    fun themeMode_defaultsToSystemInBothStores() {
+        assertEquals(ThemeMode.System, repo(open()).themeMode.value)
+        assertEquals(ThemeMode.System, repo(open(forceLegacy = true)).themeMode.value)
+    }
+
+    @Test
+    fun themeMode_allChoicesSurviveReopeningBothStores() = runBlocking {
+        for (legacy in listOf(false, true)) {
+            for (mode in listOf(ThemeMode.Dark, ThemeMode.Light, ThemeMode.System)) {
+                val first = repo(open(forceLegacy = legacy))
+                first.setThemeMode(mode)
+                assertEquals(mode, first.themeMode.value)
+                first.flushWrites()
+                closeAll()
+                assertEquals(mode, repo(open(forceLegacy = legacy)).themeMode.value)
+                closeAll()
+            }
+        }
+    }
+
+    @Test
+    fun themeMode_unknownValueFallsBackToSystem() {
+        context.getSharedPreferences("trackr_prefs", Context.MODE_PRIVATE).edit()
+            .putString("theme_mode", "unknown").commit()
+        assertEquals(ThemeMode.System, repo(open(forceLegacy = true)).themeMode.value)
+        assertEquals(ThemeMode.System, repo(open()).themeMode.value)
+    }
+
+    @Test
+    fun themeMode_switchOldThenNewImportsChoiceWithoutDeletingLegacyKey() = runBlocking {
+        repo(open())
+        closeAll()
+        File(context.filesDir, StoreSwitch.OVERRIDE_FILE).writeText("old")
+        val old = repo(open())
+        old.setThemeMode(ThemeMode.Dark)
+        old.flushWrites()
+        closeAll()
+
+        File(context.filesDir, StoreSwitch.OVERRIDE_FILE).writeText("new")
+        assertEquals(ThemeMode.Dark, repo(open()).themeMode.value)
+        assertEquals("Dark", context.getSharedPreferences("trackr_prefs", Context.MODE_PRIVATE).getString("theme_mode", null))
     }
 }

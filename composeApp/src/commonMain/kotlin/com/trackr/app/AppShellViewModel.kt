@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.model.UiMode
+import com.trackr.core.model.ThemeMode
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -18,6 +19,7 @@ import kotlinx.coroutines.flow.stateIn
 data class AppShellState(
     val uiMode: UiMode = UiMode.Standard,
     val fontScalePromptDismissed: Boolean = false,
+    val themeMode: ThemeMode = ThemeMode.System,
 )
 
 /**
@@ -28,12 +30,12 @@ data class AppShellState(
  */
 class AppShellViewModel(private val settings: SettingsRepository) : ViewModel() {
 
-    val shell: StateFlow<AppShellState> = combine(settings.uiMode, settings.fontScalePromptDismissed) { mode, dismissed ->
-        AppShellState(mode, dismissed)
+    val shell: StateFlow<AppShellState> = combine(settings.uiMode, settings.fontScalePromptDismissed, settings.themeMode) { mode, dismissed, theme ->
+        AppShellState(mode, dismissed, theme)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
-        initialValue = AppShellState(settings.uiMode.value, settings.fontScalePromptDismissed.value)
+        initialValue = AppShellState(settings.uiMode.value, settings.fontScalePromptDismissed.value, settings.themeMode.value)
     )
 
     /** 提示里点「打开长辈版」：切过去，提示也算点过 */

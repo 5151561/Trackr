@@ -66,6 +66,11 @@ import com.trackr.core.designsystem.resources.transit_code
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.RailMode
+import com.trackr.core.model.ThemeMode
+import com.trackr.feature.me.resources.me_theme_mode
+import com.trackr.feature.me.resources.me_theme_system
+import com.trackr.feature.me.resources.me_theme_light
+import com.trackr.feature.me.resources.me_theme_dark
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.feature.me.resources.Res as MeRes
@@ -126,6 +131,7 @@ fun MeScreen(
     var showTransitCodeDialog by rememberSaveable { mutableStateOf(false) }
     var showAlertThresholdDialog by rememberSaveable { mutableStateOf(false) }
     var showRailModeDialog by rememberSaveable { mutableStateOf(false) }
+    var showThemeModeDialog by rememberSaveable { mutableStateOf(false) }
     var showEngineModeDialog by rememberSaveable { mutableStateOf(false) }
     var showRemindersSheet by rememberSaveable { mutableStateOf(false) }
     // 状态栏胶囊「去开启」的说明弹窗：只有用户自己点进来时才出现，开始追踪时不弹（issue #29）
@@ -134,6 +140,11 @@ fun MeScreen(
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val layoutDirection = LocalLayoutDirection.current
+    val themeModeLabels = mapOf(
+        ThemeMode.System to stringResource(MeRes.string.me_theme_system),
+        ThemeMode.Light to stringResource(MeRes.string.me_theme_light),
+        ThemeMode.Dark to stringResource(MeRes.string.me_theme_dark)
+    )
 
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -177,6 +188,12 @@ fun MeScreen(
                         subtitle = stringResource(MeRes.string.me_rail_mode_desc),
                         value = railModeLabel(state.railMode),
                         onClick = { showRailModeDialog = true }
+                    )
+                    GroupDivider()
+                    SettingRow(
+                        title = stringResource(MeRes.string.me_theme_mode),
+                        value = themeModeLabels.getValue(state.themeMode),
+                        onClick = { showThemeModeDialog = true }
                     )
                 }
             }
@@ -367,6 +384,20 @@ fun MeScreen(
                 showRailModeDialog = false
             },
             onDismiss = { showRailModeDialog = false }
+        )
+    }
+
+    if (showThemeModeDialog) {
+        ChoiceDialog(
+            title = stringResource(MeRes.string.me_theme_mode),
+            options = ThemeMode.entries,
+            selected = state.themeMode,
+            label = { themeModeLabels.getValue(it) },
+            onSelect = {
+                onEvent(MeEvent.SetThemeMode(it))
+                showThemeModeDialog = false
+            },
+            onDismiss = { showThemeModeDialog = false }
         )
     }
 

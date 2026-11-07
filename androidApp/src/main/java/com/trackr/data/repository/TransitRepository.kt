@@ -24,6 +24,7 @@ import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.TransitSearchResult
 import com.trackr.core.model.RailMode
+import com.trackr.core.model.ThemeMode
 import com.trackr.core.model.UiMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -121,6 +122,9 @@ class TransitRepository(
     private val _railMode = MutableStateFlow(RailMode.entries.firstOrNull { it.name == initial.railMode } ?: RailMode.Horizontal)
     override val railMode: StateFlow<RailMode> = _railMode.asStateFlow()
 
+    private val _themeMode = MutableStateFlow(ThemeMode.entries.firstOrNull { it.name == initial.themeMode } ?: ThemeMode.System)
+    override val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
     private val _fontScalePromptDismissed = MutableStateFlow(initial.fontScalePromptDismissed ?: false)
     override val fontScalePromptDismissed: StateFlow<Boolean> = _fontScalePromptDismissed.asStateFlow()
 
@@ -197,6 +201,11 @@ class TransitRepository(
     override fun setRailMode(mode: RailMode) {
         _railMode.value = mode
         writer.enqueue { store.saveRailMode(mode.name) }
+    }
+
+    override fun setThemeMode(mode: ThemeMode) {
+        _themeMode.value = mode
+        writer.enqueue { store.saveThemeMode(mode.name) }
     }
 
     override fun dismissFontScalePrompt() {
