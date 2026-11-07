@@ -2,7 +2,7 @@
   "versionCode": 12,
   "versionName": "0.1.8",
   "minSupportedVersionCode": 1,
-  "changelog": "chore(release): 0.1.8（versionCode 12）",
+  "changelog": "## 更新内容\n\n- 新增主题设置：支持跟随系统、浅色和深色模式，可选择种子色、系统配色及九种 MD3 主题风格\n- 调整调试版应用包名，避免与正式版安装冲突\n\n## 下载\n\n- 64 位设备：`trackr-0.1.8-arm64-v8a.apk`\n- 32 位设备：`trackr-0.1.8-armeabi-v7a.apk`\n\n覆盖安装即可，收藏与设置保留。",
   "downloadUrl": "https://github.com/5151561/Trackr/releases/tag/v0.1.8",
   "downloadUrls": {
     "arm64-v8a": "https://github.com/5151561/Trackr/releases/download/v0.1.8/trackr-0.1.8-arm64-v8a.apk",
