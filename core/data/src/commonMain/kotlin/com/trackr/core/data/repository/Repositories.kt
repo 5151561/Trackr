@@ -1,5 +1,6 @@
 package com.trackr.core.data.repository
 
+import com.trackr.core.model.ThemeColors
 import com.trackr.core.domain.tracking.LocationCadence
 import com.trackr.core.model.AmapTipItem
 import com.trackr.core.model.AmapTransitSchemeResult
@@ -81,6 +82,7 @@ interface SettingsRepository {
     val railMode: StateFlow<RailMode>
 
     val themeMode: StateFlow<ThemeMode>
+    val themeColors: StateFlow<ThemeColors>
 
     /** 系统字体放大时的「试试长辈版」提示已经点过（打开或先不用），之后不再提示 */
     val fontScalePromptDismissed: StateFlow<Boolean>
@@ -95,6 +97,7 @@ interface SettingsRepository {
     fun setUiMode(mode: UiMode)
     fun setRailMode(mode: RailMode)
     fun setThemeMode(mode: ThemeMode)
+    fun setThemeColors(colors: ThemeColors)
     fun dismissFontScalePrompt()
     suspend fun selectCity(city: TransitCity)
     suspend fun setPreferredTransitCodeProvider(provider: TransitCodeProvider)

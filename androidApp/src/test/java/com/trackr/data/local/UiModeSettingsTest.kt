@@ -1,5 +1,10 @@
 package com.trackr.data.local
 
+import com.trackr.core.model.SystemThemeSeed
+import com.trackr.core.model.ThemeSeed
+import com.trackr.core.model.ThemeColorStyle
+import com.trackr.core.model.ThemeColorSource
+import com.trackr.core.model.ThemeColors
 import android.app.Application
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
@@ -206,4 +211,49 @@ class UiModeSettingsTest {
         assertEquals(ThemeMode.Dark, repo(open()).themeMode.value)
         assertEquals("Dark", context.getSharedPreferences("trackr_prefs", Context.MODE_PRIVATE).getString("theme_mode", null))
     }
+    @Test
+    fun themeColors_surviveReopeningBothStoresWithAllChoices() = runBlocking {
+        for (legacy in listOf(false, true)) {
+            for (source in ThemeColorSource.entries) {
+                val choice = ThemeColors(
+                    source = source,
+                    preset = ThemeSeed.Teal,
+                    customRgb = 0xCF304A,
+                    style = ThemeColorStyle.Fidelity,
+                    systemSeed = SystemThemeSeed.Tertiary,
+                    followSystem = false,
+                )
+                val first = repo(open(forceLegacy = legacy))
+                first.setThemeColors(choice)
+                first.flushWrites()
+                closeAll()
+                assertEquals(choice, repo(open(forceLegacy = legacy)).themeColors.value)
+                closeAll()
+            }
+        }
+    }
+
+    @Test
+    fun themeColors_oldToNewImportsChoiceWithoutDeletingLegacyKey() = runBlocking {
+        repo(open())
+        closeAll()
+        File(context.filesDir, StoreSwitch.OVERRIDE_FILE).writeText("old")
+        val old = repo(open())
+        val choice = ThemeColors(style = ThemeColorStyle.Monochrome)
+        old.setThemeColors(choice)
+        old.flushWrites()
+        closeAll()
+        val raw = context.getSharedPreferences("trackr_prefs", Context.MODE_PRIVATE).getString("theme_colors", null)
+        File(context.filesDir, StoreSwitch.OVERRIDE_FILE).writeText("new")
+        assertEquals(choice, repo(open()).themeColors.value)
+        assertEquals(raw, context.getSharedPreferences("trackr_prefs", Context.MODE_PRIVATE).getString("theme_colors", null))
+    }
+
+    @Test
+    fun themeColors_missingOrCorruptPreferenceFallsBackSafely() {
+        assertEquals(ThemeColors(), repo(open()).themeColors.value)
+        context.getSharedPreferences("trackr_prefs", Context.MODE_PRIVATE).edit().putString("theme_colors", "{broken").commit()
+        assertEquals(ThemeColors(), repo(open(forceLegacy = true)).themeColors.value)
+    }
+
 }

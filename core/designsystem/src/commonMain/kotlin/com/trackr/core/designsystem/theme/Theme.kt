@@ -17,12 +17,14 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import com.trackr.core.model.ThemeMode
+import com.trackr.core.model.ThemeColors
 import com.trackr.core.model.UiMode
 
 private val LocalDarkTheme = staticCompositionLocalOf { false }
 
 /**
- * 应用主题（设计稿 v3，重构计划 §8.3）。v3 蓝固定主色，不用动态取色。
+ * 应用主题。根页面传入配色偏好；未传入时保留 v3 基线，供独立组件与旧预览使用。
+ * 长辈版继续使用已有高对比配色，标准版按种子色 / 系统方案生成。
  *
  * 组件只读 `MaterialTheme.colorScheme/typography/shapes`、[TrackrTheme.colors]、[TrackrTheme.dimens]，
  * 不判断 [UiMode]；模式只在这里换 Token。
@@ -37,10 +39,13 @@ fun TrackrTheme(
         ThemeMode.Light -> false
         ThemeMode.Dark -> true
     },
+    themeColors: ThemeColors? = null,
     content: @Composable () -> Unit,
 ) {
     val tokens = tokensFor(uiMode)
-    val colorScheme = tokens.colorScheme(darkTheme)
+    val colorScheme = if (themeColors != null && uiMode == UiMode.Standard) {
+        rememberThemeColorScheme(themeColors, darkTheme)
+    } else tokens.colorScheme(darkTheme)
     val trackrColors = tokens.colors(darkTheme)
     val busColors = remember(trackrColors, colorScheme) { legacyBusColors(trackrColors, colorScheme) }
     val extendedColors = remember(trackrColors, colorScheme) { legacyExtendedColors(trackrColors, colorScheme) }

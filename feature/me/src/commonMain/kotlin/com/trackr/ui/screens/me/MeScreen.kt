@@ -67,7 +67,7 @@ import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.RailMode
 import com.trackr.core.model.ThemeMode
-import com.trackr.feature.me.resources.me_theme_mode
+import com.trackr.feature.me.resources.theme_title
 import com.trackr.feature.me.resources.me_theme_system
 import com.trackr.feature.me.resources.me_theme_light
 import com.trackr.feature.me.resources.me_theme_dark
@@ -131,7 +131,6 @@ fun MeScreen(
     var showTransitCodeDialog by rememberSaveable { mutableStateOf(false) }
     var showAlertThresholdDialog by rememberSaveable { mutableStateOf(false) }
     var showRailModeDialog by rememberSaveable { mutableStateOf(false) }
-    var showThemeModeDialog by rememberSaveable { mutableStateOf(false) }
     var showEngineModeDialog by rememberSaveable { mutableStateOf(false) }
     var showRemindersSheet by rememberSaveable { mutableStateOf(false) }
     // 状态栏胶囊「去开启」的说明弹窗：只有用户自己点进来时才出现，开始追踪时不弹（issue #29）
@@ -191,9 +190,9 @@ fun MeScreen(
                     )
                     GroupDivider()
                     SettingRow(
-                        title = stringResource(MeRes.string.me_theme_mode),
+                        title = stringResource(MeRes.string.theme_title),
                         value = themeModeLabels.getValue(state.themeMode),
-                        onClick = { showThemeModeDialog = true }
+                        onClick = { onEvent(MeEvent.OpenThemeSettings) }
                     )
                 }
             }
@@ -384,20 +383,6 @@ fun MeScreen(
                 showRailModeDialog = false
             },
             onDismiss = { showRailModeDialog = false }
-        )
-    }
-
-    if (showThemeModeDialog) {
-        ChoiceDialog(
-            title = stringResource(MeRes.string.me_theme_mode),
-            options = ThemeMode.entries,
-            selected = state.themeMode,
-            label = { themeModeLabels.getValue(it) },
-            onSelect = {
-                onEvent(MeEvent.SetThemeMode(it))
-                showThemeModeDialog = false
-            },
-            onDismiss = { showThemeModeDialog = false }
         )
     }
 

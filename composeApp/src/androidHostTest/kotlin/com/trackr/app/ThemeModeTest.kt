@@ -6,11 +6,11 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.assertIsSelected
-import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.junit4.v2.createAndroidComposeRule
-import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.hasText
-import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.performClick
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -18,21 +18,22 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.ThemeMode
 import com.trackr.core.model.UiMode
-import com.trackr.core.testing.FakeAmapKeyRepository
 import com.trackr.core.testing.FakeSettingsRepository
-import com.trackr.data.repository.FakeScheduledReminderRepository
-import com.trackr.ui.screens.me.MeNotices
-import com.trackr.ui.screens.me.MeScreen
-import com.trackr.ui.screens.me.MeViewModel
+import com.trackr.ui.screens.me.ThemeSettingsViewModel
+import com.trackr.ui.screens.me.ThemeSettingsScreen
+import com.trackr.core.designsystem.theme.generatedThemeColorScheme
+import com.trackr.core.model.ThemeColorStyle
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 /** 真实设置事件 → 仓库 → 根主题，以及主题切换时系统栏图标的对比度。 */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34], qualifiers = "w360dp-h800dp-notnight")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ThemeModeTest {
     @get:Rule
     val rule = createAndroidComposeRule<ComponentActivity>()
@@ -43,11 +44,11 @@ class ThemeModeTest {
 
     private fun show() {
         val shellViewModel = AppShellViewModel(settings)
-        val meViewModel = MeViewModel(settings, FakeScheduledReminderRepository(), FakeAmapKeyRepository(), MeNotices())
+        val meViewModel = ThemeSettingsViewModel(settings)
         rule.setContent {
             val shell by shellViewModel.shell.collectAsStateWithLifecycle()
             val me by meViewModel.uiState.collectAsStateWithLifecycle()
-            TrackrTheme(uiMode = shell.uiMode, themeMode = shell.themeMode) {
+            TrackrTheme(uiMode = shell.uiMode, themeMode = shell.themeMode, themeColors = shell.themeColors) {
                 val currentBackground = MaterialTheme.colorScheme.background
                 val currentDark = TrackrTheme.isDark
                 SideEffect {
@@ -55,7 +56,7 @@ class ThemeModeTest {
                     isDark = currentDark
                 }
                 PlatformHost(enabled = false) {
-                    MeScreen(state = me, onEvent = meViewModel::onEvent)
+                    ThemeSettingsScreen(state = me, onEvent = meViewModel::onEvent)
                 }
             }
         }
@@ -63,11 +64,14 @@ class ThemeModeTest {
     }
 
     private fun choose(label: String) {
-        rule.onNodeWithText("深浅色模式").performClick()
-        rule.onNode(hasText(label) and hasAnyAncestor(isDialog())).performClick()
+        val mode = when (label) { "深色" -> "Dark"; "浅色" -> "Light"; else -> "System" }
+        rule.onNodeWithTag("theme_settings").performScrollToNode(hasTestTag("theme_mode_$mode"))
+        rule.onNodeWithTag("theme_mode_$mode").performScrollTo().performClick()
         rule.waitForIdle()
-        rule.onNode(isDialog()).assertDoesNotExist()
     }
+
+    private fun standardBackground(dark: Boolean): Color =
+        generatedThemeColorScheme(Color(0xFF1F5FD6), ThemeColorStyle.TonalSpot, dark).background
 
     private fun assertTheme(dark: Boolean, expectedBackground: Color) {
         assertEquals(dark, isDark)
@@ -81,32 +85,29 @@ class ThemeModeTest {
     @Test
     fun choicesUpdateWholeThemeAndSystemBars_withoutLeavingSettings() {
         show()
-        assertTheme(dark = false, Color(0xFFF5F6F8))
+        assertTheme(dark = false, standardBackground(false))
         choose("深色")
         assertEquals(ThemeMode.Dark, settings.themeMode.value)
-        assertTheme(dark = true, Color(0xFF0F1115))
+        assertTheme(dark = true, standardBackground(true))
 
-        rule.onNodeWithText("深浅色模式").performClick()
-        rule.onNode(hasText("深色") and hasAnyAncestor(isDialog())).assertIsSelected()
-        rule.onNodeWithText("取消").performClick()
-        assertEquals(ThemeMode.Dark, settings.themeMode.value)
+        rule.onNodeWithTag("theme_mode_Dark").assertIsSelected()
 
         choose("浅色")
-        assertTheme(dark = false, Color(0xFFF5F6F8))
+        assertTheme(dark = false, standardBackground(false))
         choose("跟随系统")
         assertEquals(ThemeMode.System, settings.themeMode.value)
-        assertTheme(dark = false, Color(0xFFF5F6F8))
+        assertTheme(dark = false, standardBackground(false))
     }
 
     @Test
     @Config(qualifiers = "w360dp-h800dp-night")
     fun systemDark_canBeOverriddenAndRestored() {
         show()
-        assertTheme(dark = true, Color(0xFF0F1115))
+        assertTheme(dark = true, standardBackground(true))
         choose("浅色")
-        assertTheme(dark = false, Color(0xFFF5F6F8))
+        assertTheme(dark = false, standardBackground(false))
         choose("跟随系统")
-        assertTheme(dark = true, Color(0xFF0F1115))
+        assertTheme(dark = true, standardBackground(true))
     }
 
     @Test

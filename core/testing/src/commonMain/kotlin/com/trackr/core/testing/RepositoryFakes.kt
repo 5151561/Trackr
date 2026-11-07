@@ -1,5 +1,6 @@
 package com.trackr.core.testing
 
+import com.trackr.core.model.ThemeColors
 import com.trackr.core.data.repository.FavoritesRepository
 import com.trackr.core.data.repository.LocationRepository
 import com.trackr.core.data.repository.RealtimeRepository
@@ -84,6 +85,13 @@ class FakeSettingsRepository(
 
     private val _railMode = MutableStateFlow(RailMode.Horizontal)
     override val railMode: StateFlow<RailMode> = _railMode.asStateFlow()
+
+    private val _themeColors = MutableStateFlow(ThemeColors())
+    override val themeColors: StateFlow<ThemeColors> = _themeColors.asStateFlow()
+
+    override fun setThemeColors(colors: ThemeColors) {
+        _themeColors.value = colors.normalized()
+    }
 
     private val _themeMode = MutableStateFlow(ThemeMode.System)
     override val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()

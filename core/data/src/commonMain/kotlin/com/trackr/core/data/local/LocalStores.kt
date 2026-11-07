@@ -46,6 +46,7 @@ data class TransitLocalSnapshot(
     val railMode: String? = null,
     /** 深浅色偏好（`ThemeMode` 的名字）；没存过为 null，按跟随系统 */
     val themeMode: String? = null,
+    val themeColorsJson: String? = null,
     val fontScalePromptDismissed: Boolean? = null,
     val favorites: List<FavoriteStationLine> = emptyList(),
     val searchHistory: List<String> = emptyList()
@@ -66,6 +67,7 @@ interface TransitLocalStore {
     suspend fun saveUiMode(name: String)
     suspend fun saveRailMode(name: String)
     suspend fun saveThemeMode(name: String)
+    suspend fun saveThemeColors(json: String)
     suspend fun saveFontScalePromptDismissed(dismissed: Boolean)
     suspend fun saveSearchHistory(list: List<String>)
     suspend fun clearSearchHistory()
