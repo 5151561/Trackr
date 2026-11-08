@@ -308,6 +308,12 @@ AMAP_WEB_KEY=你的 Web 服务 Key
 
 ---
 
+## iOS 开发
+
+已提供复用现有 CMP 页面的 Xcode 宿主，打开 `iosApp/Trackr.xcodeproj` 的 Trackr scheme 即可构建。模拟器运行、存储说明和当前能力范围见 [iOS 启动工程](docs/ios.md)。
+
+---
+
 ## ⚠️ 免责声明
 
 项目仅用于学习与技术交流。实时公交数据来自第三方公开接口，请遵守数据提供方的服务条款，不要用于商业用途或高频抓取。

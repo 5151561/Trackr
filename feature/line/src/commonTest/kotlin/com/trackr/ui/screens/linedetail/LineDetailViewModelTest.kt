@@ -163,7 +163,7 @@ class LineDetailViewModelTest {
         stationId: String? = null,
         realtime: RealtimeRepository = fakeRepository.realtime,
         cache: LineStopsCache = FakeLineStopsCache(),
-        reminders: FakeScheduledReminderRepository = FakeScheduledReminderRepository(),
+        reminders: com.trackr.data.repository.IScheduledReminderRepository = FakeScheduledReminderRepository(),
         announcer: FakeAnnouncer = FakeAnnouncer()
     ): LineDetailViewModel {
         return LineDetailViewModel(
@@ -1038,6 +1038,23 @@ class LineDetailViewModelTest {
 
         viewModel.openGroupPicker()
         assertFalse(viewModel.uiState.value.isGroupPickerOpen)
+    }
+
+    @Test
+    fun unavailableRemindersDoNotOpenOrSave() = runTest(main.dispatcher) {
+        val backing = FakeScheduledReminderRepository()
+        val unavailable = object : com.trackr.data.repository.IScheduledReminderRepository by backing {
+            override val unavailableReason = "此平台尚未接入定时提醒"
+        }
+        val viewModel = createViewModel(targetOrder = 2, reminders = unavailable)
+        testScheduler.runCurrent()
+        viewModel.openReminderDialog()
+        assertFalse(viewModel.uiState.value.isReminderDialogOpen)
+        viewModel.saveReminder(7, 30, setOf(2), true)
+        testScheduler.runCurrent()
+        assertTrue(backing.reminders.value.isEmpty())
+        assertTrue(viewModel.uiState.value.userMessages.all { it.text == unavailable.unavailableReason })
+        assertTrue(viewModel.uiState.value.userMessages.isNotEmpty())
     }
 
     @Test

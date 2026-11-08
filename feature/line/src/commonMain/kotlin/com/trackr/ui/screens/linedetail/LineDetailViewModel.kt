@@ -857,6 +857,7 @@ class LineDetailViewModel(
 
     /** 顶栏时钟：定时提醒 */
     fun openReminderDialog() {
+        reminderRepository.unavailableReason?.let { postMessage(it); return }
         if (_uiState.value.static == null || _uiState.value.selectedStop == null) return
         _uiState.update { it.copy(isReminderDialogOpen = true) }
     }
@@ -868,6 +869,7 @@ class LineDetailViewModel(
     /** 保存定时提醒（当前线路 + 候车站），保存后提示条报时间 */
     @OptIn(ExperimentalUuidApi::class)
     fun saveReminder(hour: Int, minute: Int, daysOfWeek: Set<Int>, autoStartTracking: Boolean) {
+        reminderRepository.unavailableReason?.let { postMessage(it); return }
         val state = _uiState.value
         val static = state.static ?: return
         val stop = state.selectedStop ?: return

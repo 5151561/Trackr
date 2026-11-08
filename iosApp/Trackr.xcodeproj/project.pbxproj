@@ -1,0 +1,198 @@
+// !$*UTF8*$!
+{
+	classes = {};
+	objectVersion = 56;
+	archiveVersion = 1;
+	objects = {
+		00000000000000000000000C = {
+			isa = XCConfigurationList;
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+			buildConfigurations = (
+				000000000000000000000010,
+				000000000000000000000011,
+			);
+		};
+		000000000000000000000011 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				MARKETING_VERSION = 0.1.0;
+				INFOPLIST_FILE = Trackr/Info.plist;
+				TARGETED_DEVICE_FAMILY = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				ARCHS = arm64;
+				CODE_SIGN_STYLE = Automatic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				OTHER_LDFLAGS = "$(inherited) -framework ComposeApp";
+				FRAMEWORK_SEARCH_PATHS = "$(inherited) $(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.github.u5151561.trackr;
+				SUPPORTS_MACCATALYST = NO;
+				CURRENT_PROJECT_VERSION = 1;
+			};
+			name = Release;
+		};
+		000000000000000000000001 = {
+			buildConfigurationList = 00000000000000000000000B;
+			targets = (
+				000000000000000000000004,
+			);
+			developmentRegion = zh_CN;
+			knownRegions = (
+				en,
+				zh_CN,
+				Base,
+			);
+			isa = PBXProject;
+			compatibilityVersion = "Xcode 14.0";
+			productRefGroup = 000000000000000000000003;
+			projectDirPath = "";
+			attributes = {
+				LastUpgradeCheck = 2700;
+			};
+			hasScannedForEncodings = 0;
+			projectRoot = "";
+			mainGroup = 000000000000000000000002;
+		};
+		000000000000000000000006 = {
+			path = Trackr/Info.plist;
+			isa = PBXFileReference;
+			lastKnownFileType = text.plist.xml;
+			sourceTree = "<group>";
+		};
+		00000000000000000000000D = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000005;
+		};
+		000000000000000000000002 = {
+			isa = PBXGroup;
+			sourceTree = "<group>";
+			children = (
+				000000000000000000000005,
+				000000000000000000000006,
+				000000000000000000000003,
+			);
+		};
+		000000000000000000000007 = {
+			path = Trackr.app;
+			isa = PBXFileReference;
+			includeInIndex = 0;
+			explicitFileType = wrapper.application;
+			sourceTree = BUILT_PRODUCTS_DIR;
+		};
+		00000000000000000000000E = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SWIFT_VERSION = 5.0;
+				CLANG_ENABLE_MODULES = YES;
+				SDKROOT = iphoneos;
+			};
+			name = Debug;
+		};
+		000000000000000000000003 = {
+			isa = PBXGroup;
+			name = Products;
+			children = (
+				000000000000000000000007,
+			);
+			sourceTree = "<group>";
+		};
+		00000000000000000000000A = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000008 = {
+			name = "Build shared CMP framework";
+			inputPaths = ();
+			buildActionMask = 2147483647;
+			shellPath = /bin/sh;
+			outputPaths = ();
+			isa = PBXShellScriptBuildPhase;
+			runOnlyForDeploymentPostprocessing = 0;
+			shellScript = "set -eu\nif [ \"${OVERRIDE_KOTLIN_BUILD_IDE_SUPPORTED:-}\" = \"YES\" ]; then exit 0; fi\nif [ -z \"${JAVA_HOME:-}\" ]; then export JAVA_HOME=\"$(/usr/libexec/java_home)\"; fi\ncd \"$SRCROOT/..\"\n./gradlew :composeApp:embedAndSignAppleFrameworkForXcode\n";
+			files = ();
+			alwaysOutOfDate = 1;
+		};
+		00000000000000000000000F = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SWIFT_VERSION = 5.0;
+				CLANG_ENABLE_MODULES = YES;
+				SDKROOT = iphoneos;
+			};
+			name = Release;
+		};
+		000000000000000000000004 = {
+			buildConfigurationList = 00000000000000000000000C;
+			productReference = 000000000000000000000007;
+			productType = "com.apple.product-type.application";
+			productName = Trackr;
+			isa = PBXNativeTarget;
+			buildPhases = (
+				000000000000000000000008,
+				000000000000000000000009,
+				00000000000000000000000A,
+			);
+			dependencies = ();
+			name = Trackr;
+			buildRules = ();
+		};
+		00000000000000000000000B = {
+			isa = XCConfigurationList;
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+			buildConfigurations = (
+				00000000000000000000000E,
+				00000000000000000000000F,
+			);
+		};
+		000000000000000000000009 = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				00000000000000000000000D,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		000000000000000000000010 = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				MARKETING_VERSION = 0.1.0;
+				INFOPLIST_FILE = Trackr/Info.plist;
+				TARGETED_DEVICE_FAMILY = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				ARCHS = arm64;
+				CODE_SIGN_STYLE = Automatic;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				OTHER_LDFLAGS = "$(inherited) -framework ComposeApp";
+				FRAMEWORK_SEARCH_PATHS = "$(inherited) $(SRCROOT)/../composeApp/build/xcode-frameworks/$(CONFIGURATION)/$(SDK_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = com.github.u5151561.trackr;
+				SUPPORTS_MACCATALYST = NO;
+				CURRENT_PROJECT_VERSION = 1;
+			};
+			name = Debug;
+		};
+		000000000000000000000005 = {
+			path = Trackr/AppDelegate.swift;
+			isa = PBXFileReference;
+			lastKnownFileType = sourcecode.swift;
+			sourceTree = "<group>";
+		};
+	};
+	rootObject = 000000000000000000000001;
+}
