@@ -31,6 +31,24 @@ xcrun simctl launch booted com.github.u5151561.trackr
 
 真机需在 Xcode 的 Signing & Capabilities 里设置自己的 Team；不要把个人签名配置提交到仓库。当前 deployment target 为 iOS 17.0，低版本兼容性需要另行真机验证。
 
+## 打包 IPA
+
+Release 配置的 framework 链接（`:composeApp:linkReleaseFrameworkIosArm64`）跑在 Gradle daemon 里，`org.gradle.jvmargs` 低于 6 GB 会直接 `OutOfMemoryError: Java heap space`（Debug 链接的内存峰值低于 Release，所以只在打包时暴露）。`gradle.properties` 已按 6 GB 配置。
+
+```sh
+xcodebuild -workspace iosApp/Trackr.xcworkspace -scheme Trackr -configuration Release \
+  -sdk iphoneos -destination 'generic/platform=iOS' \
+  -derivedDataPath iosApp/DerivedData CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
+
+rm -rf /tmp/trackr-ipa && mkdir -p /tmp/trackr-ipa/Payload
+ditto iosApp/DerivedData/Build/Products/Release-iphoneos/Trackr.app /tmp/trackr-ipa/Payload/Trackr.app
+(cd /tmp/trackr-ipa && zip -qry trackr-<版本>-unsigned.ipa Payload)
+```
+
+本机只装了一个 Apple Development 证书和免费个人 Team（`U6U8YSR37T`），没有发行证书和描述文件，因此只能出**未签名** IPA：安装前要用 AltStore / Sideloader 之类重新签名，重签名时主 App 与 `TrackrWidgets` 必须给同一个 App Group，否则小组件和实时活动不可用。要出签名包，得换成付费账号，在 Xcode 里登录并生成 distribution / ad hoc profile，再走 `archive` + `-exportArchive`。
+
+发布资产命名沿用 Android 的规则：`trackr-<版本>-unsigned.ipa`。
+
 ## 本轮接通的能力
 
 - 共享公交首页、城市选择、搜索、站点和线路详情、收藏管理、我的与主题设置。
