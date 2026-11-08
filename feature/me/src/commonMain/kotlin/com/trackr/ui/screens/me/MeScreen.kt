@@ -43,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberBottomSheetState
+import com.trackr.ui.bottombar.LocalBottomBarHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -148,7 +149,7 @@ fun MeScreen(
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         contentWindowInsets = WindowInsets.safeDrawing,
-        snackbarHost = { MeMessageHost(state.userMessages) { onEvent(MeEvent.MessageShown(it)) } },
+        snackbarHost = { MeMessageHost(state.userMessages, Modifier.padding(bottom = LocalBottomBarHeight.current)) { onEvent(MeEvent.MessageShown(it)) } },
         topBar = {
             LargeTopAppBar(
                 title = { Text(text = stringResource(MeRes.string.me_title), fontWeight = FontWeight.Bold) },
@@ -168,7 +169,7 @@ fun MeScreen(
                 start = innerPadding.calculateStartPadding(layoutDirection) + 16.dp,
                 top = innerPadding.calculateTopPadding() + 8.dp,
                 end = innerPadding.calculateEndPadding(layoutDirection) + 16.dp,
-                bottom = innerPadding.calculateBottomPadding() + 24.dp
+                bottom = innerPadding.calculateBottomPadding() + LocalBottomBarHeight.current + 24.dp
             ),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {

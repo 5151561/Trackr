@@ -1,6 +1,33 @@
 import XCTest
 
 final class StartupTests: XCTestCase {
+    func testNativeTabBarSelectionDetailsAndRotation() {
+        let app = XCUIApplication()
+        app.launchArguments = ["--offline-ui-test"]
+        app.launch()
+        let tabBar = app.tabBars.firstMatch
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 30))
+        let me = tabBar.buttons["我的"]
+        me.tap()
+        XCTAssertTrue(me.isSelected)
+        XCTAssertTrue(app.switches.containing(NSPredicate(format: "label CONTAINS %@", "长辈版")).firstMatch.waitForExistence(timeout: 10))
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+        XCTAssertTrue(me.isHittable)
+        XCTAssertLessThanOrEqual(tabBar.frame.maxY, app.frame.maxY)
+        XCUIDevice.shared.orientation = .portrait
+
+        // 主题页是子页，原生底栏应释放；返回后重新与共享 Navigator 同步。
+        app.buttons.containing(NSPredicate(format: "label BEGINSWITH %@", "主题与颜色")).firstMatch.tap()
+        XCTAssertTrue(tabBar.waitForNonExistence(timeout: 10))
+        app.buttons["返回"].firstMatch.tap()
+        XCTAssertTrue(tabBar.waitForExistence(timeout: 10))
+        XCTAssertTrue(tabBar.buttons["我的"].isSelected)
+        tabBar.buttons["公交"].tap()
+        XCTAssertTrue(tabBar.buttons["公交"].isSelected)
+    }
+
     func testInitializationFailureCanRetryAndReopenStores() {
         let app = XCUIApplication()
         app.launchArguments = ["--offline-ui-test", "--fail-startup-once"]

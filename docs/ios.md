@@ -67,6 +67,18 @@ xcrun simctl launch booted com.github.u5151561.trackr
 - Key 与追踪文件位于 `Application Support/private/`，整个目录设置不参与 iCloud 备份，避免原子写入替换文件后丢失排除标记。
 - iOS 不读取 Android 的 SharedPreferences，也不执行 Android 旧数据导入。
 
+## 原生底部页签与安全区
+
+`AppTabBar` 由 Koin 的 `platformUiModule` 注入：Android 使用现有 Material `NavigationBar`，iOS 使用 UIKit `UITabBar`（SF Symbols、原生选中态和 VoiceOver）。页面栈、深链、路线页签的 Key/隐私条件仍由共享 `Navigator` 管理；原生控件只回报点击，不能绕过共享状态自行切页。
+
+iOS 底栏固定显示在标准版根页，子页、长辈版和键盘打开时隐藏。没有手绘仿 iOS 按钮，也没有另建 UIKit 页面栈。UIKit 通过 `sizeThatFits` 提供内容高度，系统底部安全区另外计入一次；共享页面通过 `LocalBottomBarHeight` 让开实际底栏。公交列表、乘车码按钮和提示条、路线面板以及「我的」列表和提示条都使用该值。状态栏、刘海和详情页的底部操作仍使用现有 `WindowInsets`。
+
+组件选择依据：设计系统没有原生页签宿主；Material 底栏无法提供 UIKit 控件语义。因此仅在 iOS 平台实现中使用 `UIKitView` 托管 `UITabBar`，尺寸子类只报告布局结果，不重写按钮布局、点击或无障碍。使用 CMP 的原生 overlay 放置，让系统玻璃材质采样共享页面，安全区透出页面底色，避免深色模式的白色切口（[JetBrains interop overlay 说明](https://kotlinlang.org/docs/multiplatform/whats-new-compose-110.html#overlay-placement-for-interop-views)）。安全区依据 [Apple UIView.safeAreaInsets](https://developer.apple.com/documentation/uikit/uiview/safeareainsets)。
+
+回归入口：`BusHomeScreenTest.transitCodeFab_tracksPlatformBarHeight_withoutFixedMaterialClearance` 检查动态高度与悬浮按钮的位置关系；`KoinGraphVerifyTest` 检查平台模块装配；`StartupTests.testNativeTabBarSelectionDetailsAndRotation` 检查原生页签切换、子页隐藏与返回、横屏布局。
+
+本次验证（2026-11-08）：公交、路线、我的、根导航，以及 Android 根导航/Koin 装配共 291 个 JVM 用例通过；iOS 模拟器共享代码编译和 Xcode 宿主构建通过。iOS 27 模拟器使用 `--offline-ui-test` 人工确认页签切换、进入详情页隐藏底栏、返回恢复、横竖屏布局和深色底部白块修复。XCUITest 因 `DTServiceHubClient failed to bless service hub` 无法开始执行，未记为通过；弹层层级、VoiceOver、真机和 iOS 17 仍待验证。
+
 ## 验证
 
 ```sh
