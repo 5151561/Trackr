@@ -2,7 +2,7 @@
   "versionCode": 13,
   "versionName": "0.1.9",
   "minSupportedVersionCode": 1,
-  "changelog": "chore(release): 0.1.9（versionCode 13，首个 iOS 包）",
+  "changelog": "## 更新内容\n\n### iOS 版首次发布\n\n从这一版起有 iOS 包了。它和 Android 共用同一套页面和业务逻辑（KMP + CMP）：公交首页（收藏、附近站点、乘车码）、城市切换、搜索（含语音）、站点与线路详情、一起等多条线路、收藏与分组、我的与主题、深色模式，以及前台追踪、到站通知和定时提醒，`trackr://` 深链照旧，底栏用原生 `UITabBar` 并适配安全区。\n\n首版边界先说清楚：\n\n- 只在 App 位于前台时查车；进后台就停掉周期查询和定位，回来再判断会话是否还有效，不做后台常驻追踪。\n- 这个 IPA **没有签名**（只有免费个人 Team，没有发行证书和描述文件），要用 AltStore / Sideloadly 之类自己重签后再装；重签时主 App 和 `TrackrWidgets` 要给同一个 App Group。\n- 包里没有高德 Key：路线页签会按现有规则隐藏。自己构建时填 `iosApp/Configuration/Local.xcconfig` 才有地图和算路。\n- 最低 iOS 17。本轮只在 iOS 27 模拟器上验证过，真机、iOS 17、实时活动和小组件都还没验收。\n\n### Android 修复\n\n- 同时追多条线路时，通知栏的「结束」偶发点不动、通知也关不掉：按钮的 PendingIntent 身份改成完整会话路径（原来用截断哈希当请求码，会撞到另一项），服务收尾改成先把前台交给仍在追的项再撤通知，销毁时补 `stopForeground`。\n- 「上车后自动结束追踪」在轮询直接跳过进站那一轮时不生效：现在会先用上一轮那辆车补一次候选，仍然要靠两次定位确认，不会因为车过站就直接结束。\n- 检查更新改成并发请求三个源、取版本号最大的那个，不再拿第一个能连上的结果（#36）。\n\n## 下载\n\n- Android 64 位设备：`trackr-0.1.9-arm64-v8a.apk`\n- Android 32 位设备：`trackr-0.1.9-armeabi-v7a.apk`\n- iOS（未签名，需自行签名后安装）：`trackr-0.1.9-unsigned.ipa`\n\nAndroid 覆盖安装即可，收藏与设置保留。",
   "downloadUrl": "https://github.com/5151561/Trackr/releases/tag/v0.1.9",
   "downloadUrls": {
     "arm64-v8a": "https://github.com/5151561/Trackr/releases/download/v0.1.9/trackr-0.1.9-arm64-v8a.apk",
