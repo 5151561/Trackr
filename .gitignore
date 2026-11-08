@@ -61,3 +61,5 @@ Thumbs.db
 xcuserdata/
 *.xcuserstate
 iosApp/DerivedData/
+iosApp/Configuration/Local.xcconfig
+iosApp/Pods/

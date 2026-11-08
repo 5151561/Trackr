@@ -12,27 +12,21 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.data.repository.TrackingRepository
-import com.trackr.core.data.repository.WatchTogetherPoller
+import com.trackr.core.data.repository.TrackingPoller
 import com.trackr.core.domain.platform.LocationSource
 import com.trackr.core.domain.platform.MonotonicClock
 import com.trackr.core.domain.tracking.LocationCadence
 import com.trackr.core.domain.tracking.TrackingEngine
-import com.trackr.core.domain.tracking.WatchPollPlan
-import com.trackr.core.model.LineOperatingState
 import com.trackr.core.model.LegPhase
 import com.trackr.core.model.TrackingSession
 import com.trackr.core.model.TrackingSessionState
 import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.WatchedLine
-import com.trackr.core.model.TransitCity
 import com.trackr.core.model.UserFix
 import com.trackr.data.repository.ITransitRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import org.koin.android.ext.android.inject
 import kotlin.time.Clock
 
@@ -73,12 +67,6 @@ class BusTrackingService : LifecycleService() {
         /** 正在轮询的代际号 */
         var generation: Int = NO_GENERATION
 
-        /** 连续刷新失败次数（失败指数退避用，成功后清零） */
-        var consecutiveFailures: Int = 0
-
-        /** 最近一次成功刷新拿到的线路运营状态（非运营时降频轮询） */
-        var operatingState: LineOperatingState = LineOperatingState.RUNNING
-
         /** 每条通知上次刷过的内容（key -> 内容），相同就不重复刷 */
         val rendered: MutableMap<String, Pair<TrackingSessionState, LiveProgressNotifier.WatchNotice?>> = mutableMapOf()
 
@@ -103,7 +91,12 @@ class BusTrackingService : LifecycleService() {
     )
 
     /** 一起等的取数（同一个实时仓库，条数不影响请求数） */
-    private val watchPoller by lazy { WatchTogetherPoller(repository) }
+    private val poller by lazy {
+        TrackingPoller(trackingRepository, repository, settings, clock, monotonicClock,
+            locationEnabled = { locationTrackingAllowed && locationSource.hasPrecisePermission() },
+            serviceFix = { serviceFix }, onEffect = ::runEffect,
+            onExpired = { arrivalAlerts.triggerTrackingExpired(this, it.state) }, requestDispatcher = Dispatchers.IO)
+    }
 
     /**
      * 「我的 → 上车后自动结束追踪」（issue #32）现在开着没。
@@ -384,186 +377,18 @@ class BusTrackingService : LifecycleService() {
             serviceFix = null
         }
         worker.generation = session.generation
-        worker.consecutiveFailures = 0
-        worker.operatingState = LineOperatingState.RUNNING
         render(session, force = true)
         startPolling(worker)
     }
 
     private fun startPolling(worker: PollWorker) {
         worker.job?.cancel()
-        worker.job = lifecycleScope.launch {
-            // 首次立即刷新
-            pollOnce(worker)
-            while (isActive && isCurrent(worker)) {
-                val state = sessionOf(worker.sessionId)?.state ?: break
-                val intervalMs = TrackingEngine.pollingIntervalMillis(
-                    state,
-                    consecutiveFailures = worker.consecutiveFailures,
-                    operatingState = worker.operatingState
-                )
-                delay(intervalMs) // 自适应防刷轮询退避
-                val current = sessionOf(worker.sessionId) ?: break
-                if (TrackingEngine.isTrackingExpired(current, clock.now().toEpochMilliseconds())) {
-                    arrivalAlerts.triggerTrackingExpired(this@BusTrackingService, current.state)
-                    trackingRepository.stop(current.sessionId)
-                    break
-                }
-                pollOnce(worker)
-            }
+        worker.job = lifecycleScope.launch(Dispatchers.Main) {
+            poller.run(worker.sessionId, worker.generation) { afterUpdate(worker) }
         }
     }
 
-    /** 这一路轮询是否仍属于当前会话 */
-    private fun isCurrent(worker: PollWorker): Boolean {
-        val session = sessionOf(worker.sessionId) ?: return false
-        return worker.generation == session.generation && !session.interrupted
-    }
-
-    private fun sessionOf(sessionId: String): TrackingSession? =
-        trackingRepository.sessions.value.firstOrNull { it.sessionId == sessionId }
-
-    private suspend fun pollOnce(worker: PollWorker) {
-        if (!isCurrent(worker)) return
-        val session = sessionOf(worker.sessionId) ?: return
-        val watchTarget = session.watchTarget
-        val watchPlan = TrackingEngine.watchPollPlan(session)
-        if (watchTarget != null && watchPlan != null) {
-            pollWatch(worker, watchTarget, watchPlan)
-            return
-        }
-        val state = session.state
-        val leg = session.leg
-        val targetCity = cityFor(leg.cityId, leg.mygolbsCityCode)
-
-        val result = withContext(Dispatchers.IO) {
-            repository.getLineDetail(
-                city = targetCity,
-                lineId = leg.lineId,
-                // 等车阶段的 ETA 必须针对上车站；上车后才切到下车站。一起等刚上车
-                // 还不知道终点站时 targetOrder 为 0，也先按上车站请求，拿到全线站点后补终点。
-                targetOrder = when {
-                    state.legPhase == LegPhase.WAITING_BOARD && state.boardStopOrder > 0 -> state.boardStopOrder
-                    state.targetOrder > 0 -> state.targetOrder
-                    else -> leg.targetOrder
-                },
-                stationId = state.targetStopId.ifBlank { leg.targetStopId },
-                source = leg.source,
-                lineNameHint = state.lineName,
-                directionHint = leg.direction
-            )
-        }
-
-        // 回到主线程：切程 / 停止后返回的旧结果直接丢弃
-        if (!isCurrent(worker)) return
-
-        result.onSuccess { detail ->
-            worker.consecutiveFailures = 0
-            worker.operatingState = detail.operatingState
-            trackingRepository.recordBuses(worker.sessionId, worker.generation, detail.buses)
-
-            val locationEnabled = locationTrackingAllowed && locationSource.hasPrecisePermission()
-            val dropFix = trackingRepository.latestUserFix
-            val nowMillis = clock.now().toEpochMilliseconds()
-            val nowElapsed = monotonicClock.elapsedMillis()
-            var effects: List<TrackingEngine.Effect> = emptyList()
-            val applied = trackingRepository.update(worker.sessionId, worker.generation) { current ->
-                val reduced = TrackingEngine.reducePoll(
-                    session = current,
-                    detail = detail,
-                    locationEnabled = locationEnabled,
-                    serviceFix = serviceFix,
-                    dropFix = dropFix,
-                    nowMillis = nowMillis,
-                    nowElapsedMillis = nowElapsed,
-                    stopAfterBoarding = stopAfterBoarding
-                )
-                effects = reduced.effects
-                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
-            }
-            if (!applied) return
-            // 提醒先于刷新通知（和原来一样：先发到站 / 换乘提醒，再刷新常驻通知或切到下一程）
-            effects.forEach { runEffect(it, worker.sessionId) }
-            afterUpdate(worker)
-        }.onFailure { e ->
-            Log.w(TAG, "Failed to refresh line detail", e)
-            worker.consecutiveFailures++
-            val nowMillis = clock.now().toEpochMilliseconds()
-            if (trackingRepository.update(worker.sessionId, worker.generation) {
-                    TrackingEngine.reduceFailure(it, nowMillis)
-                }
-            ) {
-                afterUpdate(worker)
-            }
-        }
-    }
-
-    /** 请求用的城市：和当前选的城市一样就用它（带城市名），否则按会话里的 id 拼一个 */
-    private fun cityFor(cityId: String, mygolbsCityCode: String, cityName: String = ""): TransitCity {
-        val selectedCity = repository.selectedCity.value
-        return if (selectedCity.cityId == cityId) {
-            selectedCity
-        } else {
-            TransitCity(
-                cityId = cityId,
-                cityName = cityName,
-                mygolbsCityCode = mygolbsCityCode.takeIf { it.isNotEmpty() }
-            )
-        }
-    }
-
-    /** 一起等等车阶段的一轮：按计划请求（条数不影响请求数），结果交给引擎 */
-    private suspend fun pollWatch(
-        worker: PollWorker,
-        target: TrackingTarget.WatchTogether,
-        plan: WatchPollPlan
-    ) {
-        val city = cityFor(target.cityId, target.mygolbsCityCode, target.cityName)
-        val result = withContext(Dispatchers.IO) { watchPoller.poll(target, plan, city) }
-        if (!isCurrent(worker)) return
-
-        result.onSuccess { poll ->
-            worker.consecutiveFailures = 0
-            // 站点接口没有线路运营状态：按运营中算，节奏只看最先到的那辆
-            worker.operatingState = LineOperatingState.RUNNING
-            trackingRepository.recordLineBuses(
-                worker.sessionId,
-                worker.generation,
-                poll.lines.mapValues { it.value.buses }
-            )
-
-            val locationEnabled = locationTrackingAllowed && locationSource.hasPrecisePermission()
-            val nowMillis = clock.now().toEpochMilliseconds()
-            val nowElapsed = monotonicClock.elapsedMillis()
-            var effects: List<TrackingEngine.Effect> = emptyList()
-            val applied = trackingRepository.update(worker.sessionId, worker.generation) { current ->
-                val reduced = TrackingEngine.reduceWatchPoll(
-                    session = current,
-                    poll = poll,
-                    locationEnabled = locationEnabled,
-                    serviceFix = serviceFix,
-                    nowMillis = nowMillis,
-                    nowElapsedMillis = nowElapsed,
-                    stopAfterBoarding = stopAfterBoarding
-                )
-                effects = reduced.effects
-                if (reduced.effects.any { it is TrackingEngine.Effect.Finished }) null else reduced.session
-            }
-            if (!applied) return
-            effects.forEach { runEffect(it, worker.sessionId) }
-            afterUpdate(worker)
-        }.onFailure { e ->
-            Log.w(TAG, "Failed to refresh watch-together stop", e)
-            worker.consecutiveFailures++
-            val nowMillis = clock.now().toEpochMilliseconds()
-            if (trackingRepository.update(worker.sessionId, worker.generation) {
-                    TrackingEngine.reduceFailure(it, nowMillis)
-                }
-            ) {
-                afterUpdate(worker)
-            }
-        }
-    }
+    private fun sessionOf(sessionId: String): TrackingSession? = trackingRepository.sessionById(sessionId)
 
     private fun runEffect(effect: TrackingEngine.Effect, sessionId: String) {
         when (effect) {

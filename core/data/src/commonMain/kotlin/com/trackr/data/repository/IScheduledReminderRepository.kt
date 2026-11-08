@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.StateFlow
  * 定时提醒仓库接口
  */
 interface IScheduledReminderRepository {
+    val supportsAutoStart: Boolean get() = true
     /** Host has not implemented scheduling yet; UI must not report a successful reminder. */
     val unavailableReason: String? get() = null
 
