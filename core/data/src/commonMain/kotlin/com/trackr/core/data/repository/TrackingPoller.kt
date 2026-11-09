@@ -1,5 +1,6 @@
 package com.trackr.core.data.repository
 
+import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.domain.platform.MonotonicClock
 import com.trackr.core.domain.tracking.TrackingEngine
 import com.trackr.core.model.*
@@ -66,8 +67,9 @@ class TrackingPoller(
                         if (current() != null) tracking.recordBuses(sessionId, generation, detail.buses)
                         operating = detail.operatingState
                         val reduce: (TrackingSession) -> TrackingEngine.Result = { latest ->
-                            TrackingEngine.reducePoll(latest, detail, locationEnabled(), serviceFix(), tracking.latestUserFix,
+                            val reduced = TrackingEngine.reducePoll(latest, detail, locationEnabled(), serviceFix(), tracking.latestUserFix,
                                 clock.now().toEpochMilliseconds(), monotonicClock.elapsedMillis(), settings.autoStopAfterBoarding.value)
+                            reduced.copy(session = reduced.session.withTargetStopCoords(detail))
                         }
                         reduce
                     }
@@ -116,13 +118,37 @@ class TrackingPoller(
         if (finishedCity.isNotBlank() && otherCity.isNotBlank() && finishedCity != otherCity) return false
         val finishedStopId = finished.state.targetStopId.ifBlank { finished.leg.targetStopId }
         val otherStopId = other.state.targetStopId.ifBlank { other.leg.targetStopId }
-        if (finishedStopId.isNotBlank() && otherStopId.isNotBlank() && finishedStopId == otherStopId) return true
         val finishedStopName = finished.state.boardStopName.ifBlank { finished.state.targetStopName }
         val otherStopName = other.state.boardStopName.ifBlank { other.state.targetStopName }
-        return finishedStopName.isNotBlank() && finishedStopName == otherStopName
+        // 掌上公交线路详情的站 id 就是站序，不同站也可能相同：站名不同一定不是同一站
+        if (finishedStopName.isNotBlank() && otherStopName.isNotBlank() && finishedStopName != otherStopName) return false
+        if (finishedStopId.isNotBlank() && otherStopId.isNotBlank() && finishedStopId == otherStopId) return true
+        // 同名不同 id：可能是同一站（两个接口给的 id 不一样），也可能是对向站，看坐标；不知道坐标就不结束
+        val (finishedLat, finishedLng) = finished.waitingStopCoords()
+        val (otherLat, otherLng) = other.waitingStopCoords()
+        val distance = RouteProjectionMath.calculateDistanceMeters(finishedLat, finishedLng, otherLat, otherLng)
+        return distance != null && distance <= SAME_STOP_MAX_METERS
+    }
+
+    private fun TrackingSession.waitingStopCoords(): Pair<Double, Double> {
+        val watch = watchTarget
+        return if (watch != null && watch.stopLat > 0.0 && watch.stopLng > 0.0) watch.stopLat to watch.stopLng
+        else state.targetStopLat to state.targetStopLng
+    }
+
+    private fun TrackingSession.withTargetStopCoords(detail: BusLineDetail): TrackingSession {
+        if (state.legPhase != LegPhase.SINGLE) return this
+        val stop = detail.stops.firstOrNull { it.order == state.targetOrder } ?: return this
+        if (stop.wgsLat == state.targetStopLat && stop.wgsLng == state.targetStopLng) return this
+        return copy(state = state.copy(targetStopLat = stop.wgsLat, targetStopLng = stop.wgsLng))
     }
 
     private fun cityFor(id: String, code: String, name: String = ""): TransitCity =
         settings.selectedCity.value.takeIf { it.cityId == id }
             ?: TransitCity(cityId = id, cityName = name, mygolbsCityCode = code.takeIf { it.isNotEmpty() })
+
+    private companion object {
+        /** 同名站相距不超过这么远才算同一站；对向站一般隔着马路，比这远 */
+        const val SAME_STOP_MAX_METERS = 30
+    }
 }

@@ -404,7 +404,10 @@ data class TrackingSessionState(
     /** 单线路：刚从候车站开走但当轮尚无可用定位的车辆 busId，供定位随后到达时追回 */
     val recentDepartedBusId: String? = null,
     /** 记录 [recentDepartedBusId] 的墙钟毫秒 */
-    val recentDepartedAtMillis: Long = 0L
+    val recentDepartedAtMillis: Long = 0L,
+    /** 单线路：候车站坐标（WGS-84，线路详情给的），0 = 还不知道；用来区分同名的对向站 */
+    val targetStopLat: Double = 0.0,
+    val targetStopLng: Double = 0.0
 ) {
     /** 车已到上车站，正在用定位确认用户是否上车 */
     val isAwaitingBoardingConfirmation: Boolean

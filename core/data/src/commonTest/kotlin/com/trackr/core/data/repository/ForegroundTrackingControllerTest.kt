@@ -188,4 +188,50 @@ class ForegroundTrackingControllerTest {
         // L1 和同站候车的 L2 都自动结束，不同站的 L3 保留
         assertEquals(listOf("L3"), f.repo.sessions.value.map { it.leg.lineId })
     }
+
+    @Test fun autoStopAfterBoarding_tellsSameNameStopsApartByCoordinates() = runTest {
+        val f = Fixture(this)
+        val stopLat = 31.2300
+        val stopLng = 121.4700
+        fun north(m: Int) = stopLat + m / 111_000.0
+        fun waiting(id: String, stop: BusStop) = BusLineDetail(
+            line = BusLineDirection(lineId = id, name = id, startStop = "始", endStop = "终"),
+            stops = listOf(stop),
+            buses = listOf(LiveBus(busId = "b$id", plateOrFleetNo = "b$id", order = 2, wgsLat = north(-800), wgsLng = stopLng))
+        )
+        val waitStop = BusStop(stopId = "s5", name = "站5", order = 5, wgsLat = stopLat, wgsLng = stopLng)
+        // 同一站、另一个接口给的 id
+        f.realtime.lineDetailsMap["SAME"] = waiting("SAME", waitStop.copy(stopId = "other-api", wgsLat = north(10)))
+        // 马路对面的同名站
+        f.realtime.lineDetailsMap["OPPOSITE"] = waiting("OPPOSITE", waitStop.copy(stopId = "opposite", wgsLat = north(-60)))
+        // id 相同（掌上公交的站序）但其实是别的站
+        f.realtime.lineDetailsMap["COLLIDE"] = waiting("COLLIDE", waitStop.copy(name = "别的站", wgsLat = north(5_000)))
+        f.realtime.lineDetailsMap["L1"] = BusLineDetail(
+            line = BusLineDirection(lineId = "L1", name = "1路", startStop = "始", endStop = "终"),
+            stops = listOf(waitStop),
+            buses = listOf(LiveBus(busId = "b1", plateOrFleetNo = "b1", order = 5, isArrived = true, wgsLat = stopLat, wgsLng = stopLng))
+        )
+
+        f.controller.setActive(true)
+        runCurrent()
+        f.controller.updateUserFix(UserFix(stopLat, stopLng, 10f, f.clock.elapsed))
+        assertTrue(f.controller.start(target))
+        assertTrue(f.controller.start(target.copy(lineId = "SAME", lineName = "SAME", targetStopId = "other-api")))
+        assertTrue(f.controller.start(target.copy(lineId = "OPPOSITE", lineName = "OPPOSITE", targetStopId = "opposite")))
+        assertTrue(f.controller.start(target.copy(lineId = "COLLIDE", lineName = "COLLIDE", targetStopName = "别的站")))
+        runCurrent()
+        assertEquals(4, f.repo.sessions.value.size)
+
+        for (meters in listOf(150, 300)) {
+            f.clock.advanceBy(10.seconds)
+            f.controller.updateUserFix(UserFix(north(meters), stopLng, 10f, f.clock.elapsed))
+            f.realtime.lineDetailsMap["L1"] = f.realtime.lineDetailsMap.getValue("L1").copy(
+                buses = listOf(LiveBus(busId = "b1", plateOrFleetNo = "b1", order = 6, wgsLat = north(meters), wgsLng = stopLng))
+            )
+            advanceTimeBy(10_000)
+            runCurrent()
+        }
+
+        assertEquals(setOf("OPPOSITE", "COLLIDE"), f.repo.sessions.value.map { it.leg.lineId }.toSet())
+    }
 }
