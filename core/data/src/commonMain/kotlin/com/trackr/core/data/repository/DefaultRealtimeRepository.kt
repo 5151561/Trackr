@@ -5,6 +5,7 @@ import com.trackr.core.domain.platform.MonotonicClock
 import com.trackr.core.domain.platform.ProcessMonotonicClock
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
+import com.trackr.core.model.BusLineSummary
 import com.trackr.core.model.BusStop
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.LineTimetable
@@ -109,6 +110,13 @@ class DefaultRealtimeRepository(
         val cities = coordinator.getSupportedCities(forceRefresh)
         cachedCities = cities
         cities
+    }
+
+    override suspend fun unreachableCities(cities: List<TransitCity>): Set<String> =
+        runCatching { coordinator.unreachableCities(cities) }.getOrDefault(emptySet())
+
+    override suspend fun listAllLines(city: TransitCity): Result<List<BusLineSummary>> = runCatching {
+        coordinator.listAllLines(city, settings.engineMode.value)
     }
 
     override suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): Result<TransitCity?> = runCatching {

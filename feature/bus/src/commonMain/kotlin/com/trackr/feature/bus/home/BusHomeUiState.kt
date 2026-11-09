@@ -10,6 +10,7 @@ import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TrackingSession
 import com.trackr.core.model.TrackingSessionState
 import com.trackr.core.model.TransitCity
+import com.trackr.core.model.isLenzOnlyCity
 import com.trackr.ui.components.arrival.ArrivalUi
 
 /**
@@ -46,6 +47,11 @@ data class BusHomeUiState(
     val trackingSession: TrackingSession? = null,
     val isRefreshing: Boolean = false,
     val engineMode: EngineMode = EngineMode.CHELAILE,
+    /** 当前连不上数据源的城市名（掌上出行一城一服务器，常在线的没几台） */
+    val unreachableCityNames: Set<String> = emptySet(),
+    /** 当前城市能整体列出来的线路（掌上出行县级城市）；别的数据源列不了，是空的 */
+    val cityLines: List<CityLineUi> = emptyList(),
+    val isLoadingCityLines: Boolean = false,
     /** 「每次询问」时点乘车码弹出的平台选择 */
     val isTransitCodeSheetOpen: Boolean = false,
     /** 右下角「乘车码」悬浮按钮显不显示（「我的」里可以关掉，用 NFC 的嫌它挡列表） */
@@ -60,15 +66,26 @@ data class BusHomeUiState(
 ) {
     val filteredCities: List<TransitCity>
         get() {
+            // 本数据源支持的城市 + 朗斯独有的县级城市（如「范县」）；
+            // 后者在任何模式下都要能看到，否则用户切到车来了模式就永远选不到它（选中后会自动切源）。
             val baseList = when (engineMode) {
-                EngineMode.MYGOLBS -> cities.filter { !it.mygolbsCityCode.isNullOrBlank() }
-                EngineMode.CHELAILE -> cities.filter { it.cityId.isNotBlank() }
+                EngineMode.MYGOLBS -> cities.filter {
+                    !it.mygolbsCityCode.isNullOrBlank() || it.isLenzOnlyCity
+                }
+                EngineMode.CHELAILE -> cities.filter {
+                    it.cityId.isNotBlank() || it.isLenzOnlyCity
+                }
+                EngineMode.LENZ -> cities.filter {
+                    !it.lenzServerIp.isNullOrBlank() || it.cityId.isNotBlank()
+                }
             }
             if (citySearchQuery.isBlank()) return baseList
             val q = citySearchQuery.trim().lowercase()
             return baseList.filter {
                 it.cityName.lowercase().contains(q) ||
                     it.pinyin.lowercase().contains(q) ||
+                    // 搜上级地级市也能搜到下面的县（搜「濮阳」出范县 / 清丰 / 台前）
+                    it.lenzRegion.orEmpty().lowercase().contains(q) ||
                     (it.province.ifBlank { ProvinceCityCatalog.inferProvince(it.cityName) }).lowercase().contains(q)
             }
         }
@@ -104,6 +121,20 @@ data class LineTarget(
     val stopId: String,
     val source: DataSourceType,
     val lineName: String
+)
+
+/**
+ * 首页「本城线路」里的一行（掌上出行县级城市直接列全部线路）。
+ * 一条线路只占一行；正反两个方向都有的，起点终点之间用「⇄」表示，进详情可以换向。
+ */
+data class CityLineUi(
+    val key: String,
+    val lineName: String,
+    val startStop: String,
+    val endStop: String,
+    /** 有对开方向（upDown 0/1 都有） */
+    val isBidirectional: Boolean,
+    val open: LineTarget
 )
 
 /** 打开站点页要的参数（和 `ScreenKey.StopDetail` 一一对应） */

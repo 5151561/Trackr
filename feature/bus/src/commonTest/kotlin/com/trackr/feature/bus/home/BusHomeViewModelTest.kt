@@ -238,6 +238,11 @@ class BusHomeViewModelTest {
         testScheduler.runCurrent()
         assertEquals(EngineMode.MYGOLBS, viewModel.uiState.value.engineMode)
 
+        // 三个数据源循环：掌上公交 -> 掌上出行 -> 车来了
+        viewModel.toggleEngineMode()
+        testScheduler.runCurrent()
+        assertEquals(EngineMode.LENZ, viewModel.uiState.value.engineMode)
+
         viewModel.toggleEngineMode()
         testScheduler.runCurrent()
         assertEquals(EngineMode.CHELAILE, viewModel.uiState.value.engineMode)

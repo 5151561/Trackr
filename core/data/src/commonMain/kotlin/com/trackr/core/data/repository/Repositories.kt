@@ -5,6 +5,7 @@ import com.trackr.core.model.AmapTipItem
 import com.trackr.core.model.AmapTransitSchemeResult
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
+import com.trackr.core.model.BusLineSummary
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteGroup
@@ -203,6 +204,18 @@ interface RealtimeRepository {
 
     /** 收藏的每条线各查一次线路详情（命中 6 秒合并缓存），返回 收藏 id -> 站点 */
     suspend fun refreshFavoritesRealtime(): Result<Map<String, NearbyStop>>
+
+    /**
+     * 这批城市里哪些当前连不上数据源（只有掌上出行的「一城一服务器」会真的离线）。
+     * 默认空集，Fake 不用改。
+     */
+    suspend fun unreachableCities(cities: List<TransitCity>): Set<String> = emptySet()
+
+    /**
+     * 当前城市能列出来的全部线路（掌上出行的县级城市线路少，首页直接铺开）。
+     * 数据源不支持时返回空表。默认空表，Fake 不用改。
+     */
+    suspend fun listAllLines(city: TransitCity): Result<List<BusLineSummary>> = Result.success(emptyList())
 }
 
 /**

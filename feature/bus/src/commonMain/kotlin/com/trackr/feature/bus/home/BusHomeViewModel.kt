@@ -14,6 +14,7 @@ import com.trackr.core.domain.platform.NoAnnouncer
 import com.trackr.core.domain.platform.ProcessMonotonicClock
 import com.trackr.core.domain.platform.TrackingController
 import com.trackr.core.domain.platform.TransitCodeLauncher
+import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TransitCity
@@ -151,6 +152,15 @@ class BusHomeViewModel(
                     }
                     loadNearbyStops(coords.first, coords.second, cityOverride = city)
                 }
+                loadCityLines(city)
+            }
+        }
+
+        // 数据源变了（含首次启动）就重新拉一次「本城全部线路」：掌上出行能列，
+        // 车来了 / 掌上公交列不了会返回空表，首页自然不显示这块
+        viewModelScope.launch {
+            settings.engineMode.collect {
+                loadCityLines(settings.selectedCity.value)
             }
         }
 
@@ -455,13 +465,68 @@ class BusHomeViewModel(
     }
 
     fun setCityPickerOpen(isOpen: Boolean) {
+        var provinceToProbe: String? = null
         edit {
             val defaultProvince = if (isOpen) {
                 it.currentCity.province.ifBlank { ProvinceCityCatalog.inferProvince(it.currentCity.cityName) }
             } else {
                 it.selectedProvince
             }
+            if (isOpen) provinceToProbe = defaultProvince
             it.copy(isCityPickerOpen = isOpen, citySearchQuery = "", selectedProvince = defaultProvince)
+        }
+        provinceToProbe?.let(::probeUnreachableCities)
+    }
+
+    /**
+     * 载入当前城市的全部线路。
+     *
+     * 掌上出行一个县就二三十条线，首页直接铺开比让用户先搜更合理；
+     * 车来了 / 掌上公交列不了「全部」，会返回空表，首页这两块不显示。
+     */
+    private fun loadCityLines(city: TransitCity = _uiState.value.currentCity) {
+        viewModelScope.launch {
+            edit { it.copy(isLoadingCityLines = true) }
+            // 一条线路一行；正反方向都有的提示「⇄」，进详情可以换向。
+            // 有线路号（1路、2路…）的按号码升序排在前面，没编号的按名字排在后面。
+            val lines = realtime.listAllLines(city).getOrNull().orEmpty()
+                .sortedWith(compareBy({ routeNumberOrderOf(it.name) }, { it.name }))
+            val ui = lines.mapNotNull { summary ->
+                val direction = summary.primaryDirection ?: return@mapNotNull null
+                CityLineUi(
+                    key = summary.name,
+                    lineName = summary.name,
+                    startStop = direction.startStop,
+                    endStop = direction.endStop,
+                    isBidirectional = summary.directions.size > 1,
+                    open = LineTarget(
+                        cityId = city.cityId,
+                        lineId = direction.lineId,
+                        targetOrder = 1,
+                        stopId = "",
+                        source = direction.source,
+                        lineName = summary.name
+                    )
+                )
+            }
+            edit { it.copy(cityLines = ui, isLoadingCityLines = false) }
+        }
+    }
+
+    /** 线路名开头的「1路」「10路」取出数字用于排序；没编号的排到最后 */
+    private fun routeNumberOrderOf(lineName: String): Int {
+        val match = Regex("^(\\d+)路").find(lineName.trim()) ?: return Int.MAX_VALUE
+        return match.groupValues[1].toIntOrNull() ?: Int.MAX_VALUE
+    }
+
+    /** 探测当前省里哪些掌上出行城市连不上（结果只用于在选择器里标「离线」） */
+    private fun probeUnreachableCities(province: String) {
+        viewModelScope.launch {
+            val cities = _uiState.value.cities.filter {
+                it.province.ifBlank { ProvinceCityCatalog.inferProvince(it.cityName) } == province
+            }
+            val offline = realtime.unreachableCities(cities)
+            edit { it.copy(unreachableCityNames = offline) }
         }
     }
 
@@ -471,6 +536,7 @@ class BusHomeViewModel(
 
     fun selectProvince(province: String) {
         edit { it.copy(selectedProvince = province) }
+        probeUnreachableCities(province)
     }
 
     fun selectCity(city: TransitCity) {
@@ -484,11 +550,11 @@ class BusHomeViewModel(
                 ProvinceCityCatalog.getCityCenterCoordinates(city.cityName)
             }
 
-            // 若所选城市仅某单一数据源支持，自动联动切换至支持的引擎
-            if (city.cityId.isBlank() && !city.mygolbsCityCode.isNullOrBlank() && state.engineMode != EngineMode.MYGOLBS) {
-                setEngineMode(EngineMode.MYGOLBS)
-            } else if (city.cityId.isNotBlank() && city.mygolbsCityCode.isNullOrBlank() && state.engineMode != EngineMode.CHELAILE) {
-                setEngineMode(EngineMode.CHELAILE)
+            // 三个数据源对城市的覆盖是重叠 + 互补的：当前源支持就留着，
+            // 不支持就切到能查这个城市的第一顺位源（车来了 > 掌上公交 > 掌上出行）。
+            val supportedEngines = supportedEnginesOf(city)
+            if (supportedEngines.isNotEmpty() && state.engineMode !in supportedEngines) {
+                setEngineMode(supportedEngines.first())
             }
 
             edit {
@@ -507,13 +573,26 @@ class BusHomeViewModel(
         }
     }
 
+    /**
+     * 这个城市能被哪些数据源查到，按优先级排列。
+     *
+     * 车来了 / 掌上公交看城市编码，掌上出行看服务器；县级城市只有掌上出行有。
+     * 顺序即「都支持时优先用哪个」：车来了 > 掌上公交 > 掌上出行。
+     */
+    private fun supportedEnginesOf(city: TransitCity): List<EngineMode> = buildList {
+        if (city.cityId.isNotBlank()) add(EngineMode.CHELAILE)
+        if (!city.mygolbsCityCode.isNullOrBlank()) add(EngineMode.MYGOLBS)
+        if (!city.lenzServerIp.isNullOrBlank()) add(EngineMode.LENZ)
+    }
+
     fun setEngineMode(mode: EngineMode) {
         settings.setEngineMode(mode)
     }
 
     fun toggleEngineMode() {
         val nextMode = when (_uiState.value.engineMode) {
-            EngineMode.MYGOLBS -> EngineMode.CHELAILE
+            EngineMode.MYGOLBS -> EngineMode.LENZ
+            EngineMode.LENZ -> EngineMode.CHELAILE
             EngineMode.CHELAILE -> EngineMode.MYGOLBS
         }
         setEngineMode(nextMode)
