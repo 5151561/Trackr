@@ -372,9 +372,12 @@ class BusTrackingService : LifecycleService() {
         }
         worker.job?.cancel()
         worker.job = null
-        if (worker.generation != session.generation) {
-            // 新会话 / 切了程：上一次的服务定位不再用
+        if (worker.generation != NO_GENERATION && worker.generation != session.generation && workers.size <= 1) {
+            // 切了程：上一次的服务定位不再用（新开会话时不清空，保留刚拿到的定位供首轮判断）
             serviceFix = null
+        }
+        if (serviceFix == null && locationTrackingAllowed && locationSource.hasPrecisePermission()) {
+            locationSource.lastKnownFixes().forEach { onServiceFix(it) }
         }
         worker.generation = session.generation
         render(session, force = true)
@@ -599,6 +602,7 @@ class BusTrackingService : LifecycleService() {
         if (tier == LocationCadence.Tier.OFF) return
         if (!locationSource.hasPrecisePermission()) return
         activeTier = tier
+        locationSource.lastKnownFixes().forEach { onServiceFix(it) }
         locationJob = lifecycleScope.launch {
             locationSource.fixes(tier).collect { fix -> onServiceFix(fix) }
             // 没有可用的定位来源（流直接结束）：下次刷新时再试

@@ -400,9 +400,13 @@ data class TrackingSessionState(
     /** ON_BOARD：疑似锁错车时，离用户更近的那辆车 */
     val relockCandidateBusId: String? = null,
     /** 连续满足“应改锁 [relockCandidateBusId]”条件的轮询次数 */
-    val relockStreak: Int = 0
+    val relockStreak: Int = 0,
+    /** 单线路：刚从候车站开走但当轮尚无可用定位的车辆 busId，供定位随后到达时追回 */
+    val recentDepartedBusId: String? = null,
+    /** 记录 [recentDepartedBusId] 的墙钟毫秒 */
+    val recentDepartedAtMillis: Long = 0L
 ) {
     /** 车已到上车站，正在用定位确认用户是否上车 */
     val isAwaitingBoardingConfirmation: Boolean
-        get() = legPhase == LegPhase.WAITING_BOARD && boardingCandidateBusId != null
+        get() = (legPhase == LegPhase.WAITING_BOARD || legPhase == LegPhase.SINGLE) && boardingCandidateBusId != null
 }

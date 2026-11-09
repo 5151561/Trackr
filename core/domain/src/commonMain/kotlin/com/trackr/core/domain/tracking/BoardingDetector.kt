@@ -29,6 +29,7 @@ internal object BoardingDetector {
     const val CANDIDATE_TIMEOUT_MILLIS = 5 * 60_000L
 
     private const val NEAR_BUS_MIN_METERS = 80
+    private const val NEAR_BUS_MOVING_METERS = 160
     private const val LEFT_BOARD_STOP_METERS = 100
     private const val FAR_FROM_BOARD_STOP_METERS = 400
     private const val STILL_AT_BOARD_STOP_METERS = 120
@@ -83,6 +84,26 @@ internal object BoardingDetector {
         return toStop <= CANDIDATE_RADIUS_METERS
     }
 
+    /**
+     * 车刚从候车站开走（跳过了到站那轮）时，判断是否要补建“待确认”。
+     * 除了人在站附近（[shouldStartCandidate]），若人已经跟着这辆车走出站（人已离开站 ≥ [LEFT_BOARD_STOP_METERS]
+     * 且就在这辆车旁边），也补建待确认（仍需后续新定位满足连续两次确认才算上车）。
+     */
+    fun shouldRecoverDepartedCandidate(input: Input, departed: LiveBus): Boolean {
+        if (shouldStartCandidate(input)) return true
+        return isUserRidingBus(input, departed)
+    }
+
+    /** 用户是否已离开候车站且贴着 [bus]（用于在多辆车之间识别用户实际坐上的那辆） */
+    fun isUserRidingBus(input: Input, bus: LiveBus): Boolean {
+        val user = input.user ?: return false
+        if (!input.hasBoardStop) return false
+        val toStop = distance(user.lat, user.lng, input.boardStopLat, input.boardStopLng) ?: return false
+        val toBus = distance(user.lat, user.lng, bus.wgsLat, bus.wgsLng) ?: return false
+        val nearBusLimit = max(NEAR_BUS_MIN_METERS, (user.accuracyMeters * 2).toInt())
+        return toStop >= LEFT_BOARD_STOP_METERS && toBus <= nearBusLimit
+    }
+
     /** 用户离上车站 A 的距离（米），算不出时为 null */
     fun userDistanceToBoardStop(input: Input): Int? {
         val user = input.user ?: return null
@@ -114,19 +135,32 @@ internal object BoardingDetector {
             val userToStop = distance(user.lat, user.lng, input.boardStopLat, input.boardStopLng)
             val userToBus = candidate?.let { distance(user.lat, user.lng, it.wgsLat, it.wgsLng) }
             val busToStop = candidate?.let { distance(it.wgsLat, it.wgsLng, input.boardStopLat, input.boardStopLng) }
-            val busLeftStop = candidate == null || candidate.order > boardOrder
+            val busLeftStop = candidate == null ||
+                candidate.order > boardOrder ||
+                (busToStop != null && busToStop >= LEFT_BOARD_STOP_METERS)
 
-            val nearBusLimit = max(NEAR_BUS_MIN_METERS, (user.accuracyMeters * 2).toInt())
+            val baseNearLimit = max(NEAR_BUS_MIN_METERS, (user.accuracyMeters * 2).toInt())
+            // 车已离站、人也已离站时，车载 GPS 上报往往比手机实时定位慢 10–15 秒，放宽人车距离上限
+            val nearBusLimit = if (busLeftStop && (busToStop == null || busToStop >= LEFT_BOARD_STOP_METERS)) {
+                max(NEAR_BUS_MOVING_METERS, baseNearLimit)
+            } else {
+                baseNearLimit
+            }
             val boardedSignal = userToStop != null && (
                 (userToBus != null && userToBus <= nearBusLimit && userToStop >= LEFT_BOARD_STOP_METERS) ||
                     (userToStop >= FAR_FROM_BOARD_STOP_METERS && busLeftStop)
                 )
-            val missedSignal = userToStop != null && userToStop <= STILL_AT_BOARD_STOP_METERS && candidate != null && (
-                (busToStop != null && busToStop >= BUS_GONE_FROM_BOARD_STOP_METERS) ||
+            val missedSignal = userToStop != null && userToStop <= STILL_AT_BOARD_STOP_METERS && (
+                candidate == null ||
+                    (busToStop != null && busToStop >= BUS_GONE_FROM_BOARD_STOP_METERS) ||
                     (busToStop == null && candidate.order >= boardOrder + 2)
                 )
 
-            confirm = if (boardedSignal) confirm + 1 else 0
+            confirm = when {
+                boardedSignal -> confirm + 1
+                confirm > 0 && !missedSignal && userToStop != null && userToStop >= LEFT_BOARD_STOP_METERS -> confirm
+                else -> 0
+            }
             miss = if (missedSignal) miss + 1 else 0
         }
 
@@ -196,7 +230,9 @@ internal object BoardingDetector {
         boardingLastFixElapsedMillis = -1L,
         boardingLockAttempts = 0,
         relockCandidateBusId = null,
-        relockStreak = 0
+        relockStreak = 0,
+        recentDepartedBusId = null,
+        recentDepartedAtMillis = 0L
     )
 
     private fun distance(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Int? =

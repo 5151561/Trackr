@@ -45,7 +45,7 @@ class TrackingPoller(
                         operating = LineOperatingState.RUNNING
                         val reduce: (TrackingSession) -> TrackingEngine.Result = { latest ->
                             TrackingEngine.reduceWatchPoll(latest, poll, locationEnabled(), serviceFix(),
-                                clock.now().toEpochMilliseconds(), monotonicClock.elapsedMillis(), settings.autoStopAfterBoarding.value)
+                                clock.now().toEpochMilliseconds(), monotonicClock.elapsedMillis(), settings.autoStopAfterBoarding.value, tracking.latestUserFix)
                         }
                         reduce
                     }
@@ -93,11 +93,33 @@ class TrackingPoller(
                 })
             }
             if (!applied) return
+            if (effects.any { it is TrackingEngine.Effect.Finished.Boarded } && settings.autoStopAfterBoarding.value) {
+                tracking.sessions.value
+                    .filter { sameStopWaiting(session, it) }
+                    .forEach { tracking.stop(it.sessionId) }
+            }
             effects.forEach { onEffect(it, sessionId) }
             onUpdate()
             val next = current() ?: return
             delay(TrackingEngine.pollingIntervalMillis(next.state, failures, operating))
         }
+    }
+
+    /** 同站同时追多条候车线时，确认上了其中一趟并离开该站后，同站其余候车单线路/一起等一并结束 */
+    private fun sameStopWaiting(finished: TrackingSession, other: TrackingSession): Boolean {
+        if (other.sessionId == finished.sessionId || other.interrupted || !other.state.isActive) return false
+        val isWaitingAtStop = other.state.legPhase == LegPhase.SINGLE ||
+            (other.watchTarget != null && other.state.legPhase == LegPhase.WAITING_BOARD)
+        if (!isWaitingAtStop) return false
+        val finishedCity = finished.state.cityId.ifBlank { finished.leg.cityId }
+        val otherCity = other.state.cityId.ifBlank { other.leg.cityId }
+        if (finishedCity.isNotBlank() && otherCity.isNotBlank() && finishedCity != otherCity) return false
+        val finishedStopId = finished.state.targetStopId.ifBlank { finished.leg.targetStopId }
+        val otherStopId = other.state.targetStopId.ifBlank { other.leg.targetStopId }
+        if (finishedStopId.isNotBlank() && otherStopId.isNotBlank() && finishedStopId == otherStopId) return true
+        val finishedStopName = finished.state.boardStopName.ifBlank { finished.state.targetStopName }
+        val otherStopName = other.state.boardStopName.ifBlank { other.state.targetStopName }
+        return finishedStopName.isNotBlank() && finishedStopName == otherStopName
     }
 
     private fun cityFor(id: String, code: String, name: String = ""): TransitCity =

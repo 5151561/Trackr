@@ -264,12 +264,13 @@ object TrackingEngine {
         serviceFix: UserFix?,
         nowMillis: Long,
         nowElapsedMillis: Long,
-        stopAfterBoarding: Boolean = false
+        stopAfterBoarding: Boolean = false,
+        dropFix: UserFix? = null
     ): Result = WatchTogetherTracker.reduce(
         session = session,
         poll = poll,
         locationEnabled = locationEnabled,
-        fix = usableBoardingFix(serviceFix, nowElapsedMillis),
+        fix = bestBoardingFix(serviceFix, dropFix, nowElapsedMillis),
         nowMillis = nowMillis,
         stopAfterBoarding = stopAfterBoarding
     )
@@ -313,12 +314,13 @@ object TrackingEngine {
         stopAfterBoarding: Boolean = false
     ): Result {
         val previous = session.state
+        val boardingFix = bestBoardingFix(serviceFix, dropFix, nowElapsedMillis)
         if (session.watchTarget != null) {
-            return reduceWatchOnBoard(session, detail, locationEnabled, serviceFix, nowMillis, nowElapsedMillis)
+            return reduceWatchOnBoard(session, detail, locationEnabled, boardingFix, nowMillis, nowElapsedMillis)
         }
         if (previous.legPhase == LegPhase.SINGLE) {
             // 单线路本来不用定位；开着「上车后自动结束追踪」时只在车临近 / 车上有人时取定位，判人有没有跟着车走
-            val boarding = singleBoardingInput(previous, detail, stopAfterBoarding, locationEnabled, serviceFix, nowMillis, nowElapsedMillis)
+            val boarding = singleBoardingInput(previous, detail, stopAfterBoarding, locationEnabled, boardingFix, nowMillis, nowElapsedMillis)
             val update = SingleLegTracker.processPoll(
                 session = previous,
                 buses = detail.buses,
@@ -344,7 +346,7 @@ object TrackingEngine {
         }
 
         // 路线：两阶段（等车站 A / 锁定车 -> 下车站 B）
-        val boarding = boardingInput(previous, detail, locationEnabled, serviceFix, nowMillis, nowElapsedMillis)
+        val boarding = boardingInput(previous, detail, locationEnabled, boardingFix, nowMillis, nowElapsedMillis)
         val update = GroupLegTracker.processPoll(previous, detail.buses, boarding, nowMillis)
         // 提醒编排按“轮询前”的阶段判断：先发上车站到站提醒，再重置标志进入 ON_BOARD
         val decision = GroupLegTracker.planAlerts(previous, update)
@@ -595,8 +597,10 @@ object TrackingEngine {
     ): Long {
         val stopsRemaining = state.stopsRemaining
         val etaSeconds = state.etaSeconds
+        val awaitingBoarding = state.boardingCandidateBusId != null || state.recentDepartedBusId != null
 
         val base = when {
+            awaitingBoarding -> 10_000L
             stopsRemaining in 0..1 || (etaSeconds in 1..180) -> 10_000L
             stopsRemaining in 2..4 || (etaSeconds in 181..600) -> 20_000L
             else -> 45_000L
@@ -605,10 +609,10 @@ object TrackingEngine {
         if (consecutiveFailures > 0) {
             val shift = consecutiveFailures.coerceAtMost(4)
             val backedOff = (base shl shift).coerceAtMost(MAX_FAILURE_BACKOFF_MS)
-            return if (operatingState == LineOperatingState.RUNNING) backedOff
+            return if (operatingState == LineOperatingState.RUNNING || awaitingBoarding) backedOff
             else backedOff.coerceAtLeast(NOT_RUNNING_POLL_INTERVAL_MS)
         }
-        if (operatingState != LineOperatingState.RUNNING) return NOT_RUNNING_POLL_INTERVAL_MS
+        if (operatingState != LineOperatingState.RUNNING && !awaitingBoarding) return NOT_RUNNING_POLL_INTERVAL_MS
         if (state.isSignalLost) return base.coerceAtLeast(SIGNAL_LOST_MIN_INTERVAL_MS)
         return base
     }
@@ -655,6 +659,21 @@ object TrackingEngine {
         if (accuracy > BOARDING_FIX_MAX_ACCURACY_METERS) return null
         val age = nowElapsedMillis - fix.elapsedMillis
         return fix.takeIf { age in 0..BOARDING_FIX_MAX_AGE_MILLIS }
+    }
+
+    /** 服务定位与仓库最新定位里挑一个更新且满足判上车要求（≤30 秒、≤50 m）的定位 */
+    private fun bestBoardingFix(
+        serviceFix: UserFix?,
+        dropFix: UserFix?,
+        nowElapsedMillis: Long
+    ): UserFix? {
+        val usableService = usableBoardingFix(serviceFix, nowElapsedMillis)
+        val usableDrop = usableBoardingFix(dropFix, nowElapsedMillis)
+        return when {
+            usableService != null && usableDrop != null ->
+                if (usableDrop.elapsedMillis > usableService.elapsedMillis) usableDrop else usableService
+            else -> usableService ?: usableDrop
+        }
     }
 
     /**
