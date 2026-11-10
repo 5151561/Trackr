@@ -2,7 +2,7 @@
   "versionCode": 15,
   "versionName": "0.1.11",
   "minSupportedVersionCode": 1,
-  "changelog": "chore(release): 0.1.11（versionCode 15）",
+  "changelog": "## 更新内容\n\n**新增**\n\n- 收藏分组可以设颜色：8 个色板色，或用自定义颜色。首页收藏卡和分组 chip 上会显示对应色条 / 色点。\n\n**改进**\n\n- 站点页：运营中的线路排前面，同段里收藏的排前面。\n- 线路临时改道时，线路页会提示你。\n\n**修复**\n\n- 偶尔出现「还有 9xx 站」\n- 追踪通知偶尔慢一步\n- 个别情况下上车检测不生效\n- 下载进度里的百分号显示成两个\n\n## 下载\n\n- Android 64 位设备：`trackr-0.1.11-arm64-v8a.apk`\n- Android 32 位设备：`trackr-0.1.11-armeabi-v7a.apk`\n- iOS（未签名，需自行签名后安装）：`trackr-0.1.11-unsigned.ipa`\n\nAndroid 覆盖安装即可，收藏与设置保留。iOS 包和 0.1.10 一样没有签名，要用 AltStore / Sideloadly 之类重签后再装；重签时主 App 和 `TrackrWidgets` 要给同一个 App Group。",
   "downloadUrl": "https://github.com/5151561/Trackr/releases/tag/v0.1.11",
   "downloadUrls": {
     "arm64-v8a": "https://github.com/5151561/Trackr/releases/download/v0.1.11/trackr-0.1.11-arm64-v8a.apk",
