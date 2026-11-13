@@ -26,7 +26,14 @@ sealed interface TrackingTarget {
         val alertThresholdStops: Int = 2,
         val source: DataSourceType = DataSourceType.CHELAILE,
         val mygolbsCityCode: String = "",
-        val direction: Int = 0
+        val direction: Int = 0,
+        /**
+         * 只追这一辆车（issue #52「下车提醒」）：线路页车辆卡上点「追这辆车」。空 = 不指定，照旧追离目标站最近的车。
+         * 指定后不换车；这辆车到了目标站就提醒，开过目标站后追踪自动结束。
+         */
+        val pinnedBusId: String = "",
+        /** [pinnedBusId] 的车牌（通知、提醒里写给人看） */
+        val pinnedPlate: String = ""
     ) : TrackingTarget
 
     /**

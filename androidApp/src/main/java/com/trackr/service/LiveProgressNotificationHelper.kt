@@ -459,6 +459,8 @@ class LiveProgressNotifier(
         val contentText = when {
             isArrived && isMultiLeg && currentLegNum < state.totalLegs ->
                 "到达换乘站 ${state.targetStopName}，自动切换下一程"
+            isArrived && state.isPinnedBus ->
+                "${state.targetStopName}：到站了，请下车"
             isArrived ->
                 "${state.targetStopName}：到站了，快去上车"
             state.stopsRemaining == 0 && isMultiLeg ->
@@ -473,6 +475,8 @@ class LiveProgressNotifier(
 
         val subText = if (isMultiLeg) {
             "换乘追踪 · 第$currentLegNum/${state.totalLegs}程"
+        } else if (state.isPinnedBus) {
+            "只追 ${state.pinnedPlate.ifBlank { "这辆车" }} · 第${state.targetOrder}站"
         } else {
             "候车追踪 · 第${state.targetOrder}站"
         }

@@ -142,6 +142,8 @@ object TrackingEngine {
                     startTrackingOrder = (target.targetOrder - 1).coerceAtLeast(1),
                     alertThresholdStops = target.alertThresholdStops,
                     legPhase = LegPhase.SINGLE,
+                    pinnedBusId = target.pinnedBusId.ifBlank { null },
+                    pinnedPlate = target.pinnedPlate,
                     statusSummary = "正在连接实时公交数据…",
                     updatedAtMillis = nowMillis,
                     startedAtMillis = nowMillis
@@ -249,7 +251,8 @@ object TrackingEngine {
     /** 这次追踪要不要用定位（判上车、下车站辅助）：路线和一起等要（Q17），单线路只在开着「上车后自动结束追踪」时要 */
     fun wantsLocation(target: TrackingTarget, stopAfterBoarding: Boolean = false): Boolean =
         target is TrackingTarget.Route || target is TrackingTarget.WatchTogether ||
-            (stopAfterBoarding && target is TrackingTarget.SingleLine)
+            // 指定了车（issue #52）不判上车，不用定位
+            (stopAfterBoarding && target is TrackingTarget.SingleLine && target.pinnedBusId.isBlank())
 
     // ---------------------------------------------------------------- 一起等（第 15 步）
 
@@ -349,6 +352,8 @@ object TrackingEngine {
             }
             // 判出上车就结束了，同一轮里不需要再发到站 / 临近提醒
             if (update.boarded) return Result(session.copy(state = update.state), listOf(Effect.Finished.Boarded(update.state)))
+            // 指定的车开过目标站（issue #52）：到站提醒（如果这轮才补发）之后结束
+            if (update.finished) return Result(session.copy(state = update.state), effects + Effect.Finished.Completed)
             return Result(session.copy(state = update.state), effects)
         }
 
@@ -543,7 +548,7 @@ object TrackingEngine {
         nowMillis: Long,
         nowElapsedMillis: Long
     ): BoardingDetector.Input? {
-        if (!stopAfterBoarding || !locationEnabled) return null
+        if (!stopAfterBoarding || !locationEnabled || state.pinnedBusId != null) return null
         val waitStop = detail.stops.firstOrNull { it.order == state.targetOrder } ?: return null
         if (waitStop.wgsLat <= 0.0 || waitStop.wgsLng <= 0.0) return null
         return boardingInputAt(waitStop.wgsLat, waitStop.wgsLng, serviceFix, coarseFix, nowMillis, nowElapsedMillis)
@@ -655,7 +660,7 @@ object TrackingEngine {
         stopAfterBoarding: Boolean = false
     ): LocationCadence.Tier = when {
         !locationEnabled -> LocationCadence.Tier.OFF
-        state.legPhase == LegPhase.SINGLE && !stopAfterBoarding -> LocationCadence.Tier.OFF
+        state.legPhase == LegPhase.SINGLE && (!stopAfterBoarding || state.pinnedBusId != null) -> LocationCadence.Tier.OFF
         else -> LocationCadence.tierFor(state)
     }
 

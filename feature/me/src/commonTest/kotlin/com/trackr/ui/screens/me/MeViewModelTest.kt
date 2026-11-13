@@ -180,6 +180,18 @@ class MeViewModelTest {
     }
 
     @Test
+    fun voiceAlerts_switchWritesSetting_andDefaultsOff() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertFalse(viewModel.uiState.value.voiceAlerts)
+
+        viewModel.onEvent(MeEvent.SetVoiceAlerts(true))
+        testScheduler.runCurrent()
+        assertTrue(settings.voiceAlerts.value)
+        assertTrue(viewModel.uiState.value.voiceAlerts)
+    }
+
+    @Test
     fun autoStopAfterBoarding_switchWritesSetting_andDefaultsOn() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
         // 默认开：这本来才是该有的行为（issue #32）

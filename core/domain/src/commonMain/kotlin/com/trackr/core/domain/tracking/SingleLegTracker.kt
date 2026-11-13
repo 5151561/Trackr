@@ -15,6 +15,8 @@ import com.trackr.core.model.TrackingSessionState
  * - 正在追踪的车已开过目标站或消失超过上限时换车；换车时重置提醒触发标志，下一辆车照常提醒。
  * - 开着「上车后自动结束追踪」时，车停到候车站就开始用定位确认人有没有跟着车走（见 [checkBoarding]），
  *   确认上了就发 `boarded` 让调用方结束这次追踪（issue #32）。
+ * - 指定了车（[TrackingSessionState.pinnedBusId]，issue #52「下车提醒」）时只追这一辆：不换车、不判上车，
+ *   它暂时从数据里消失就一直保持上次位置；开过目标站后发 `finished` 让调用方结束追踪（没发过到站提醒的先补发）。
  */
 internal object SingleLegTracker {
 
@@ -36,12 +38,14 @@ internal object SingleLegTracker {
      * @param alert 本轮要发的提醒，null 表示不发
      * @param alertState 发提醒时用的状态
      * @param boarded 定位判出已上车：调用方据此结束这次追踪
+     * @param finished 指定的那辆车已开过目标站（issue #52）：调用方据此结束这次追踪
      */
     data class SingleUpdate(
         val state: TrackingSessionState,
         val alert: AlertKind? = null,
         val alertState: TrackingSessionState? = null,
-        val boarded: Boolean = false
+        val boarded: Boolean = false,
+        val finished: Boolean = false
     )
 
     /**
@@ -63,6 +67,9 @@ internal object SingleLegTracker {
         nowMillis: Long,
         boarding: BoardingDetector.Input? = null
     ): SingleUpdate {
+        session.pinnedBusId?.let { pinnedId ->
+            return processPinnedBus(session, pinnedId, buses, operatingState, statusDescription, nowMillis)
+        }
         if (boarding == null) {
             val cleaned = if (session.recentDepartedBusId != null) {
                 session.copy(recentDepartedBusId = null, recentDepartedAtMillis = 0L)
@@ -195,6 +202,97 @@ internal object SingleLegTracker {
             ),
             alert,
             alertState
+        )
+    }
+
+    // ---------------------------------------------------------------- 只追指定的车（issue #52）
+
+    /**
+     * 只追 [pinnedId] 这一辆：提醒规则和不指定时一样（还剩阈值站数提醒一次、到站提醒一次）。
+     * - 车不在数据里：保持上次位置接着等，不换车（指定的车可能只是一会儿没信号）；
+     * - 车开过目标站：没发过到站提醒的先补发，然后 `finished`。
+     */
+    private fun processPinnedBus(
+        session: TrackingSessionState,
+        pinnedId: String,
+        buses: List<LiveBus>,
+        operatingState: LineOperatingState,
+        statusDescription: String,
+        nowMillis: Long
+    ): SingleUpdate {
+        val targetOrder = session.targetOrder
+        val plate = session.pinnedPlate.ifBlank { "这辆车" }
+        val bus = buses.firstOrNull { it.busId == pinnedId }
+        if (bus == null) {
+            val summary = when {
+                session.currentBusId == null && operatingState != LineOperatingState.RUNNING ->
+                    statusDescription.ifEmpty { operatingState.defaultLabel }
+                session.currentBusId == null -> "正在查找 $plate 的实时位置…"
+                else -> "$plate 信号暂时丢失，保持上次位置（距 ${session.targetStopName}）"
+            }
+            return SingleUpdate(
+                session.copy(
+                    missingBusPolls = session.missingBusPolls + 1,
+                    statusSummary = summary,
+                    updatedAtMillis = nowMillis
+                )
+            )
+        }
+
+        val isFirstSight = session.currentBusId != pinnedId
+        val passed = bus.order > targetOrder
+        val stopsRemaining = (targetOrder - bus.order).coerceAtLeast(0)
+        val isStoppedAtTarget = stopsRemaining == 0 && !passed && ArrivalRules.isBusStopped(bus)
+        val isArrivedCondition = ArrivalRules.isBusArrivedAtOrder(targetOrder, bus)
+        val startOrder = if (isFirstSight) {
+            val base = if (ArrivalRules.isBusStopped(bus)) bus.order else bus.order - 1
+            base.coerceAtMost(targetOrder - 1).coerceAtLeast(1)
+        } else {
+            session.startTrackingOrder
+        }
+        val etaFormatted = RouteProjectionMath.formatEtaText(bus.etaSeconds, isStoppedAtTarget)
+        val statusSummary = when {
+            passed || isStoppedAtTarget -> "$plate 已到达 ${session.targetStopName}！"
+            stopsRemaining == 0 -> "$plate 即将进站 ${session.targetStopName}"
+            bus.etaSeconds > 0 -> "$plate 距 ${session.targetStopName} 还有 $stopsRemaining 站（$etaFormatted）"
+            else -> "$plate 距 ${session.targetStopName} 还有 $stopsRemaining 站"
+        }
+        val baseState = session.copy(
+            startTrackingOrder = startOrder,
+            currentBusId = pinnedId,
+            currentBusOrder = bus.order.coerceAtMost(targetOrder),
+            currentBusProgress = if (passed) 1f else bus.segmentProgress,
+            isBusArrivedAtStop = isStoppedAtTarget || passed,
+            stopsRemaining = stopsRemaining,
+            etaSeconds = if (passed) 0 else bus.etaSeconds,
+            expectedArrivalTime = bus.expectedArrivalTimeText,
+            missingBusPolls = 0,
+            statusSummary = statusSummary,
+            updatedAtMillis = nowMillis
+        )
+
+        var hasApproaching = session.hasTriggeredApproachingAlert
+        var hasArrived = session.hasTriggeredArrivedAlert
+        var alert: AlertKind? = null
+        var alertState: TrackingSessionState? = null
+        if (isArrivedCondition && !hasArrived) {
+            alert = AlertKind.ARRIVED
+            alertState = baseState.copy(stopsRemaining = 0, isBusArrivedAtStop = true)
+            hasArrived = true
+            hasApproaching = true
+        } else if (!isArrivedCondition && stopsRemaining <= session.alertThresholdStops && !hasApproaching) {
+            alert = AlertKind.APPROACHING
+            alertState = baseState
+            hasApproaching = true
+        }
+        return SingleUpdate(
+            baseState.copy(
+                hasTriggeredApproachingAlert = hasApproaching,
+                hasTriggeredArrivedAlert = hasArrived
+            ),
+            alert,
+            alertState,
+            finished = passed
         )
     }
 

@@ -168,7 +168,12 @@ class ArrivalAlertNotifier(
                 ""
             }
             val title = "【即将到站】${state.lineName}"
-            val content = "距 ${state.targetStopName} 还有 ${state.stopsRemaining} 站$etaText，请准备上车/下车！"
+            // 只追一辆车（issue #52）：多半是坐在车上等下车站，写清是哪辆
+            val content = if (state.isPinnedBus) {
+                "${state.pinnedPlate.ifBlank { "所追车辆" }} 距 ${state.targetStopName} 还有 ${state.stopsRemaining} 站$etaText，请准备下车！"
+            } else {
+                "距 ${state.targetStopName} 还有 ${state.stopsRemaining} 站$etaText，请准备上车/下车！"
+            }
 
             val notification = alertNotification(
                 context = context,
@@ -210,7 +215,11 @@ class ArrivalAlertNotifier(
         var posted = false
         if (forceStandalone || shouldPostStandaloneNotification(context, state)) {
             val title = "【车辆已到站】${state.lineName}"
-            val content = "${state.lineName} 已到达 ${state.targetStopName}！请注意上车/下车。"
+            val content = if (state.isPinnedBus) {
+                "${state.pinnedPlate.ifBlank { state.lineName }} 已到达 ${state.targetStopName}！请下车，本次追踪结束。"
+            } else {
+                "${state.lineName} 已到达 ${state.targetStopName}！请注意上车/下车。"
+            }
 
             val notification = alertNotification(
                 context = context,

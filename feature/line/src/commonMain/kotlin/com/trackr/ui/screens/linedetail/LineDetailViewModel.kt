@@ -32,6 +32,7 @@ import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.displayLineName
+import com.trackr.core.model.sanitizePlateOrFleetNo
 import com.trackr.data.repository.IScheduledReminderRepository
 import com.trackr.ui.components.elder.TTS_UNAVAILABLE_MESSAGE
 import com.trackr.ui.screens.linedetail.components.stationArrivalState
@@ -153,6 +154,18 @@ data class LineDetailUiState(
             static != null &&
             trackingSession.lineId == static.line.lineId &&
             trackingSession.targetOrder == selectedStop?.order
+
+    /** 这个候车站正在「只追一辆车」时那辆车的 busId（issue #52）；没在追或没指定车为 null */
+    val trackedPinnedBusId: String?
+        get() = if (isTrackingThisStop) trackingSession.pinnedBusId else null
+
+    /** 单车跟随里正在看的这辆车还能不能「追这辆车」：要有候车站，且车还没开过它 */
+    val canTrackFollowedBus: Boolean
+        get() {
+            val stop = selectedStop ?: return false
+            val bus = live?.buses?.firstOrNull { it.busId == followedBusId } ?: return false
+            return bus.order <= stop.order
+        }
 }
 
 /**
@@ -366,7 +379,8 @@ class LineDetailViewModel(
         line: BusLineDirection,
         targetStop: BusStop,
         totalStops: Int,
-        alertThresholdStops: Int
+        alertThresholdStops: Int,
+        pinnedBus: LiveBus? = null
     ): Boolean = trackingController.start(
         TrackingTarget.SingleLine(
             cityId = cityId,
@@ -381,7 +395,9 @@ class LineDetailViewModel(
             alertThresholdStops = alertThresholdStops,
             source = line.source,
             mygolbsCityCode = line.mygolbsCityCode,
-            direction = line.direction
+            direction = line.direction,
+            pinnedBusId = pinnedBus?.busId.orEmpty(),
+            pinnedPlate = pinnedBus?.let { sanitizePlateOrFleetNo(it.plateOrFleetNo) }.orEmpty()
         )
     )
 
@@ -398,6 +414,25 @@ class LineDetailViewModel(
             targetStop = stop,
             totalStops = static.stops.size,
             alertThresholdStops = DEFAULT_ALERT_THRESHOLD_STOPS
+        )
+    }
+
+    /**
+     * 「追这辆车」（issue #52 下车提醒）：只追单车跟随里正在看的这辆，到当前候车站（可以是下车站）时提醒，
+     * 前面先到的车不算；这辆车开过该站后追踪自动结束。车已开过该站、或没选站时返回 false。
+     */
+    fun startTrackingFollowedBus(): Boolean {
+        val state = _uiState.value
+        val static = state.static ?: return false
+        val stop = state.selectedStop ?: return false
+        if (!state.canTrackFollowedBus) return false
+        val bus = state.live?.buses?.firstOrNull { it.busId == state.followedBusId } ?: return false
+        return startTracking(
+            line = static.line,
+            targetStop = stop,
+            totalStops = static.stops.size,
+            alertThresholdStops = DEFAULT_ALERT_THRESHOLD_STOPS,
+            pinnedBus = bus
         )
     }
 

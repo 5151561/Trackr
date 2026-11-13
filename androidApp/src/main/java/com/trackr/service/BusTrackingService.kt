@@ -13,8 +13,10 @@ import androidx.lifecycle.lifecycleScope
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.data.repository.TrackingPoller
+import com.trackr.core.domain.platform.Announcer
 import com.trackr.core.domain.platform.LocationSource
 import com.trackr.core.domain.platform.MonotonicClock
+import com.trackr.core.domain.tracking.AlertSpeech
 import com.trackr.core.domain.tracking.LocationCadence
 import com.trackr.core.domain.tracking.TrackingEngine
 import com.trackr.core.model.LegPhase
@@ -24,6 +26,8 @@ import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.WatchedLine
 import com.trackr.core.model.UserFix
 import com.trackr.data.repository.ITransitRepository
+import com.trackr.di.AppScopeQualifier
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -54,6 +58,9 @@ class BusTrackingService : LifecycleService() {
     private val settings: SettingsRepository by inject()
     private val liveProgressNotifier: LiveProgressNotifier by inject()
     private val arrivalAlerts: ArrivalAlertNotifier by inject()
+    private val announcer: Announcer by inject()
+    /** 朗读放应用级作用域：到站提醒常和「追踪结束」同一轮，服务马上就停，不能跟着 lifecycleScope 被取消 */
+    private val appScope: CoroutineScope by inject(AppScopeQualifier)
     private val locationSource: LocationSource by inject()
     private val clock: Clock by inject()
     private val monotonicClock: MonotonicClock by inject()
@@ -402,6 +409,7 @@ class BusTrackingService : LifecycleService() {
     private fun sessionOf(sessionId: String): TrackingSession? = trackingRepository.sessionById(sessionId)
 
     private fun runEffect(effect: TrackingEngine.Effect, sessionId: String) {
+        speakIfEnabled(effect)
         when (effect) {
             is TrackingEngine.Effect.Alert -> when (effect.kind) {
                 TrackingEngine.AlertKind.ARRIVED ->
@@ -421,6 +429,16 @@ class BusTrackingService : LifecycleService() {
                 Log.d(TAG, "定位判断已上车，结束追踪: ${effect.state.lineName}")
                 arrivalAlerts.triggerEndedAfterBoarding(this, effect.state, sessionId)
             }
+        }
+    }
+
+    /** 「语音播报提醒」开着时把提醒念出来（issue #52）；读不了（没有朗读引擎）就算了，通知和振动照常 */
+    private fun speakIfEnabled(effect: TrackingEngine.Effect) {
+        val enabled = runCatching { settings.voiceAlerts.value }.getOrDefault(false)
+        if (!enabled) return
+        val sentence = AlertSpeech.sentenceFor(effect) ?: return
+        appScope.launch {
+            if (!announcer.speak(sentence)) Log.w(TAG, "语音播报失败：没有可用的朗读引擎")
         }
     }
 

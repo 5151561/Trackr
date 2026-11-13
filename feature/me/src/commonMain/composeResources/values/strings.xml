@@ -68,6 +68,8 @@
     <string name="me_arrival_alert_desc">车离上车站还剩几站时震动提醒</string>
     <string name="me_auto_stop_after_boarding">上车后自动结束追踪</string>
     <string name="me_auto_stop_after_boarding_desc">定位判断你已上车就结束追踪，不再等下一班；路线仍跟到下车站</string>
+    <string name="me_voice_alerts">语音播报提醒</string>
+    <string name="me_voice_alerts_desc">快到站、到站、换乘时除了通知和振动，再念一遍给你听</string>
     <string name="me_reminders">定时提醒</string>
     <string name="me_reminders_none">没有</string>
     <string name="me_reminders_count">%1$s 个</string>

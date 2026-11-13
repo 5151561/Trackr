@@ -483,6 +483,93 @@ class TrackingEngineTest {
         assertEquals(LineOperatingState.ENDED.defaultLabel, update.state.statusSummary)
     }
 
+    // ================================================================ 只追指定的车（issue #52「下车提醒」）
+    // 目标站 order 10，提前 2 站提醒；前车 ahead 离目标站更近，指定的是后面的 mine
+
+    private fun beginPinned(busId: String = "mine", plate: String = "闽A06303D"): TrackingSession =
+        assertNotNull(TrackingEngine.begin("s1", 1, singleTarget().copy(pinnedBusId = busId, pinnedPlate = plate), NOW_MILLIS))
+
+    @Test
+    fun engine_pinned_beginCarriesPinnedBusIntoState() {
+        val session = beginPinned()
+        assertEquals("mine", session.state.pinnedBusId)
+        assertEquals("闽A06303D", session.state.pinnedPlate)
+        assertTrue(session.state.isPinnedBus)
+        // 不指定车时照旧
+        assertNull(beginSingle().state.pinnedBusId)
+    }
+
+    @Test
+    fun engine_pinned_tracksPinnedBusEvenWhenAnotherBusIsCloser() {
+        val buses = listOf(boardingBus("ahead", order = 6), boardingBus("mine", order = 1, eta = 1900))
+        val result = singlePoll(beginPinned(), buses, fix = null, stopAfterBoarding = false)
+        assertEquals("mine", result.session.state.currentBusId)
+        assertEquals(9, result.session.state.stopsRemaining)
+        assertTrue(result.effects.isEmpty())
+        assertTrue(result.session.state.statusSummary.startsWith("闽A06303D"))
+    }
+
+    @Test
+    fun engine_pinned_aheadBusPassingTargetDoesNotAlertOrFinish() {
+        // 前车到站、开过目标站：都和指定的车无关
+        val arrivedAhead = singlePoll(beginPinned(), listOf(boardingBus("ahead", order = 10, arrived = true, progress = 1f, eta = 0), boardingBus("mine", order = 2)), fix = null, stopAfterBoarding = false)
+        assertTrue(arrivedAhead.effects.isEmpty())
+        val passedAhead = singlePoll(arrivedAhead.session, listOf(boardingBus("ahead", order = 11), boardingBus("mine", order = 3)), fix = null, stopAfterBoarding = false)
+        assertTrue(passedAhead.effects.isEmpty())
+        assertEquals("mine", passedAhead.session.state.currentBusId)
+    }
+
+    @Test
+    fun engine_pinned_missingBusKeepsWaitingWithoutSwitching() {
+        val seen = singlePoll(beginPinned(), listOf(boardingBus("mine", order = 4)), fix = null, stopAfterBoarding = false)
+        var session = seen.session
+        repeat(SingleLegTracker.MAX_MISSING_POLLS + 3) {
+            val result = singlePoll(session, listOf(boardingBus("other", order = 9)), fix = null, stopAfterBoarding = false)
+            assertTrue(result.effects.isEmpty())
+            session = result.session
+        }
+        assertEquals("mine", session.state.currentBusId)
+        assertEquals(6, session.state.stopsRemaining)
+    }
+
+    @Test
+    fun engine_pinned_alertsApproachingThenArrivedThenFinishesAfterPassing() {
+        val approaching = singlePoll(beginPinned(), listOf(boardingBus("mine", order = 8)), fix = null, stopAfterBoarding = false)
+        val alert = assertIs<TrackingEngine.Effect.Alert>(approaching.effects.single())
+        assertEquals(TrackingEngine.AlertKind.APPROACHING, alert.kind)
+
+        val arrived = singlePoll(approaching.session, listOf(boardingBus("mine", order = 10, arrived = true, progress = 1f, eta = 0)), fix = null, stopAfterBoarding = false)
+        val arrivedAlert = assertIs<TrackingEngine.Effect.Alert>(arrived.effects.single())
+        assertEquals(TrackingEngine.AlertKind.ARRIVED, arrivedAlert.kind)
+        assertTrue(arrivedAlert.forceStandalone)
+
+        val passed = singlePoll(arrived.session, listOf(boardingBus("mine", order = 11)), fix = null, stopAfterBoarding = false)
+        assertEquals(listOf<TrackingEngine.Effect>(TrackingEngine.Effect.Finished.Completed), passed.effects)
+    }
+
+    @Test
+    fun engine_pinned_skippedArrival_sendsArrivedAlertBeforeFinishing() {
+        // 两次轮询之间直接开过了目标站：先补发到站提醒，再结束
+        val far = singlePoll(beginPinned(), listOf(boardingBus("mine", order = 9)), fix = null, stopAfterBoarding = false)
+        val passed = singlePoll(far.session, listOf(boardingBus("mine", order = 12)), fix = null, stopAfterBoarding = false)
+        assertEquals(2, passed.effects.size)
+        assertEquals(TrackingEngine.AlertKind.ARRIVED, assertIs<TrackingEngine.Effect.Alert>(passed.effects[0]).kind)
+        assertEquals(TrackingEngine.Effect.Finished.Completed, passed.effects[1])
+    }
+
+    @Test
+    fun engine_pinned_neverUsesLocationOrBoardingDetection() {
+        val target = singleTarget().copy(pinnedBusId = "mine")
+        assertFalse(TrackingEngine.wantsLocation(target, stopAfterBoarding = true))
+        assertTrue(TrackingEngine.wantsLocation(singleTarget(), stopAfterBoarding = true))
+        assertEquals(LocationCadence.Tier.OFF, TrackingEngine.locationTier(beginPinned().state, locationEnabled = true, stopAfterBoarding = true))
+
+        // 开着「上车后自动结束追踪」、人在站上、车到站：不进入待确认、不因上车结束
+        val arrived = singlePoll(beginPinned(), listOf(boardingBus("mine", order = 10, metersNorth = 0, arrived = true)), serviceFixNorth(20))
+        assertNull(arrived.session.state.boardingCandidateBusId)
+        assertTrue(arrived.effects.none { it is TrackingEngine.Effect.Finished })
+    }
+
     // ================================================================ 上车后自动结束追踪（issue #32）
     // 单线路：候车站就是目标站（order 10），坐标 STOP_LAT/STOP_LNG
 

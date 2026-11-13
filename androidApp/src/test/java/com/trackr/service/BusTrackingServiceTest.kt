@@ -7,6 +7,7 @@ import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import com.trackr.TrackrApp
 import com.trackr.core.data.repository.TrackingRepository
+import com.trackr.core.domain.platform.Announcer
 import com.trackr.core.domain.platform.LocationSource
 import com.trackr.core.domain.tracking.LocationCadence
 import com.trackr.core.model.BusLineDetail
@@ -21,6 +22,7 @@ import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.WatchLine
 import com.trackr.core.model.TransitGroup
 import com.trackr.core.model.TransitLeg
+import com.trackr.core.testing.FakeAnnouncer
 import com.trackr.core.testing.FakeLocationSource
 import com.trackr.data.repository.FakeTransitRepository
 import com.trackr.data.repository.ITransitRepository
@@ -257,6 +259,46 @@ class BusTrackingServiceTest {
             "追踪结束后提醒不该留着",
             shadowOf(notificationManager).getNotification(arrivedId)
         )
+    }
+
+    /** issue #52：只追一辆车到下车站，开着「语音播报提醒」时到站会念出来，念完这次追踪结束 */
+    @Test
+    fun pinnedBus_arrives_speaksAlertWhenVoiceOn_andFinishes() {
+        val announcer = FakeAnnouncer()
+        loadKoinModules(module { single<Announcer> { announcer } })
+        transit.settings.setVoiceAlerts(true)
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail(
+                "L59",
+                listOf(
+                    // 前车先到站：不是指定的那辆，不提醒
+                    LiveBus(busId = "ahead", plateOrFleetNo = "闽B1", order = 7, segmentProgress = 1f, isArrived = true),
+                    LiveBus(busId = "mine", plateOrFleetNo = "闽B2", order = 8, segmentProgress = 0.2f)
+                )
+            )
+        )
+        val session = requireNotNull(
+            trackingRepository.start(singleTarget().copy(pinnedBusId = "mine", pinnedPlate = "闽B2"))
+        )
+        val service = startService(session.sessionId).get()
+
+        waitUntil("念出到站提醒") { announcer.spoken.isNotEmpty() }
+        assertEquals("59路，车牌闽B2 已到达站7，请下车", announcer.spoken.single())
+        waitUntil("指定的车开过下车站后追踪结束") { shadowOf(service).isStoppedBySelf }
+    }
+
+    @Test
+    fun voiceOff_alertIsNotSpoken() {
+        val announcer = FakeAnnouncer()
+        loadKoinModules(module { single<Announcer> { announcer } })
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 7, segmentProgress = 1f, isArrived = true)))
+        )
+        val session = requireNotNull(trackingRepository.start(singleTarget()))
+        startService(session.sessionId).get()
+        waitUntil("轮询过一轮") { trackingRepository.sessionById(session.sessionId)?.state?.hasTriggeredArrivedAlert == true }
+
+        assertTrue(announcer.spoken.isEmpty())
     }
 
     @Test

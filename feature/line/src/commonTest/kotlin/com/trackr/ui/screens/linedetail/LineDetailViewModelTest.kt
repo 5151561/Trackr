@@ -491,6 +491,50 @@ class LineDetailViewModelTest {
     }
 
     @Test
+    fun trackFollowedBus_pinsThatBusToSelectedStop() = runTest(main.dispatcher) {
+        // 下车提醒（issue #52）：选下车站（第 3 站），在单车跟随里点「追这辆车」
+        val viewModel = createViewModel(targetOrder = 3)
+        testScheduler.runCurrent()
+        viewModel.selectBusToFollow(buses.first())
+        assertTrue(viewModel.uiState.value.canTrackFollowedBus)
+        assertNull(viewModel.uiState.value.trackedPinnedBusId)
+
+        assertTrue(viewModel.startTrackingFollowedBus())
+        testScheduler.runCurrent()
+
+        val target = trackingController.started.single() as TrackingTarget.SingleLine
+        assertEquals(3, target.targetOrder)
+        assertEquals("上海体育馆", target.targetStopName)
+        assertEquals("b1", target.pinnedBusId)
+        assertEquals("沪A1234", target.pinnedPlate)
+        assertTrue(viewModel.uiState.value.isTrackingThisStop)
+        assertEquals("b1", viewModel.uiState.value.trackedPinnedBusId)
+    }
+
+    @Test
+    fun trackFollowedBus_refusesBusThatAlreadyPassedSelectedStop() = runTest(main.dispatcher) {
+        // b1 在第 2 站，已开过第 1 站
+        val viewModel = createViewModel(targetOrder = 1)
+        testScheduler.runCurrent()
+        viewModel.selectBusToFollow(buses.first())
+        assertFalse(viewModel.uiState.value.canTrackFollowedBus)
+
+        assertFalse(viewModel.startTrackingFollowedBus())
+        assertTrue(trackingController.started.isEmpty())
+    }
+
+    @Test
+    fun startTrackingSelectedStop_doesNotPinABus() = runTest(main.dispatcher) {
+        val viewModel = createViewModel(targetOrder = 2)
+        testScheduler.runCurrent()
+        assertTrue(viewModel.startTrackingSelectedStop())
+        val target = trackingController.started.single() as TrackingTarget.SingleLine
+        assertEquals("", target.pinnedBusId)
+        testScheduler.runCurrent()
+        assertNull(viewModel.uiState.value.trackedPinnedBusId)
+    }
+
+    @Test
     fun testStartTrackingSelectedStop_usesSelectedStopAndDefaultThreshold() = runTest(main.dispatcher) {
         val viewModel = createViewModel(targetOrder = 2)
         testScheduler.runCurrent()

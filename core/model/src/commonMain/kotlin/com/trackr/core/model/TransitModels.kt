@@ -407,8 +407,16 @@ data class TrackingSessionState(
     val recentDepartedAtMillis: Long = 0L,
     /** 单线路：候车站坐标（WGS-84，线路详情给的），0 = 还不知道；用来区分同名的对向站 */
     val targetStopLat: Double = 0.0,
-    val targetStopLng: Double = 0.0
+    val targetStopLng: Double = 0.0,
+    /** 单线路「追这辆车」（issue #52）：只追这一辆，不换车；null = 不指定 */
+    val pinnedBusId: String? = null,
+    /** [pinnedBusId] 的车牌 */
+    val pinnedPlate: String = ""
 ) {
+    /** 单线路只追指定的一辆车（issue #52） */
+    val isPinnedBus: Boolean
+        get() = legPhase == LegPhase.SINGLE && pinnedBusId != null
+
     /** 车已到上车站，正在用定位确认用户是否上车 */
     val isAwaitingBoardingConfirmation: Boolean
         get() = (legPhase == LegPhase.WAITING_BOARD || legPhase == LegPhase.SINGLE) && boardingCandidateBusId != null
