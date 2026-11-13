@@ -590,6 +590,108 @@ class BusTrackingServiceTest {
         }
     }
 
+    // ---------------------------------------------------------------- 前台服务不丢 location（issue #49）
+
+    /** 像真机那样：App 在后台时 startForeground 带 location 类型会被拒绝 */
+    private fun BusTrackingService.rejectLocationLikeBackground(): (Int, android.app.Notification, Int) -> Unit {
+        val real = foregroundStarter
+        foregroundStarter = { id, notification, type ->
+            if (type and ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION != 0) throw SecurityException("后台不能带 location")
+            real(id, notification, type)
+        }
+        return real
+    }
+
+    private val withLocation =
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+
+    private fun notificationText(id: Int, key: String): String? =
+        shadowOf(notificationManager).getNotification(id)?.extras?.getCharSequence(key)?.toString()
+
+    @Test
+    fun newTrackingStartedInBackground_keepsLocationTypeOnExistingForeground() {
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 6, segmentProgress = 0.5f)))
+        )
+        val first = requireNotNull(trackingRepository.start(singleTarget()))
+        val service = startService(first.sessionId).get()
+        waitUntil("第一项写回") { trackingRepository.sessionById(first.sessionId)?.state?.currentBusId == "b1" }
+        assertEquals(withLocation, service.lastForegroundServiceType)
+
+        // 定时提醒在后台又开了一项：挪前台通知会被拒绝带 location——以前退回 specialUse，两项都判不了上车
+        service.rejectLocationLikeBackground()
+        val second = requireNotNull(trackingRepository.start(singleTarget().copy(lineId = "L71", lineName = "71路")))
+        waitUntil("第二项写回") { trackingRepository.sessionById(second.sessionId)?.state?.currentBusId == "b1" }
+
+        val notifier: LiveProgressNotifier = GlobalContext.get().get()
+        assertEquals(withLocation, service.lastForegroundServiceType)
+        assertEquals("前台留在第一项那条通知上", notifier.notificationIdOf(first.sessionId), shadowOf(service).lastForegroundNotificationId)
+        assertNotNull(shadowOf(notificationManager).getNotification(notifier.notificationIdOf(second.sessionId)))
+        assertTrue(service.currentLocationTier != LocationCadence.Tier.OFF)
+        assertNull("定位没丢，不提示", notificationText(notifier.notificationIdOf(second.sessionId), "android.subText")
+            ?.takeIf { it == BusTrackingService.BOARDING_NOTICE_OPEN_APP })
+    }
+
+    @Test
+    fun foregroundItemEndsInBackground_nextItemTakesOverItsNotification_thenMovesBackWhenAppOpens() {
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 6, segmentProgress = 0.5f)))
+        )
+        val notifier: LiveProgressNotifier = GlobalContext.get().get()
+        val first = requireNotNull(trackingRepository.start(singleTarget()))
+        val service = startService(first.sessionId).get()
+        waitUntil("第一项写回") { trackingRepository.sessionById(first.sessionId)?.state?.currentBusId == "b1" }
+        val second = requireNotNull(trackingRepository.start(singleTarget().copy(lineId = "L71", lineName = "71路")))
+        waitUntil("第二项写回") { trackingRepository.sessionById(second.sessionId)?.state?.currentBusId == "b1" }
+        val firstId = notifier.notificationIdOf(first.sessionId)
+        val secondId = notifier.notificationIdOf(second.sessionId)
+        assertEquals("前台在最新的一项上", secondId, shadowOf(service).lastForegroundNotificationId)
+
+        // App 在后台时第二项（前台那项）结束：挪不动，第一项画在原来那条前台通知上，location 不丢
+        val real = service.rejectLocationLikeBackground()
+        trackingRepository.stop(second.sessionId)
+        waitUntil("第一项接替前台通知") { notificationText(secondId, "android.title")?.contains("59路") == true }
+        assertNull("第一项原来那条撤掉，不重复", shadowOf(notificationManager).getNotification(firstId))
+        assertEquals(withLocation, service.lastForegroundServiceType)
+        assertFalse(shadowOf(service).isStoppedBySelf)
+
+        // 打开 App：挪回第一项自己的通知
+        service.foregroundStarter = real
+        service.onAppForeground()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(firstId, shadowOf(service).lastForegroundNotificationId)
+        assertEquals(withLocation, service.lastForegroundServiceType)
+        assertNotNull(shadowOf(notificationManager).getNotification(firstId))
+        assertNull("接替用的那条撤掉", shadowOf(notificationManager).getNotification(secondId))
+    }
+
+    @Test
+    fun startedInBackgroundWithoutLocation_showsNotice_appForegroundRestoresIt() {
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 6, segmentProgress = 0.5f)))
+        )
+        val notifier: LiveProgressNotifier = GlobalContext.get().get()
+        val session = requireNotNull(trackingRepository.start(singleTarget()))
+        // 定时提醒在后台开始追踪：服务一创建就进前台（会话收集在 onCreate 里），所以要在 create 之前换上
+        val controller = Robolectric.buildService(BusTrackingService::class.java, BusTrackingService.startIntent(app, session.sessionId))
+        val service = controller.get()
+        val real = service.rejectLocationLikeBackground()
+        controller.create().startCommand(0, 1)
+        waitUntil("写回") { trackingRepository.sessionById(session.sessionId)?.state?.currentBusId == "b1" }
+
+        val id = notifier.notificationIdOf(session.sessionId)
+        assertEquals(ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE, service.lastForegroundServiceType)
+        assertEquals(BusTrackingService.BOARDING_NOTICE_OPEN_APP, notificationText(id, "android.subText"))
+        assertEquals(LocationCadence.Tier.OFF, service.currentLocationTier)
+
+        service.foregroundStarter = real
+        service.onAppForeground()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(withLocation, service.lastForegroundServiceType)
+        assertTrue(notificationText(id, "android.subText") != BusTrackingService.BOARDING_NOTICE_OPEN_APP)
+        assertEquals(LocationCadence.Tier.WAITING_NEAR, service.currentLocationTier)
+    }
+
     @Test
     fun stopFromNotification_onlyEndsThatLine() {
         transit.realtime.lineDetailResult = Result.success(
