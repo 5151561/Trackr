@@ -10,12 +10,14 @@ import com.trackr.core.database.entity.CandidateLineEntity
 import com.trackr.core.database.entity.FavoriteGroupEntity
 import com.trackr.core.database.entity.FavoriteItemEntity
 import com.trackr.core.database.entity.FavoriteLineEntity
+import com.trackr.core.database.entity.FavoriteStationEntity
 import com.trackr.core.database.entity.LineStopsCacheEntity
 import com.trackr.core.database.entity.ReminderEntity
 import com.trackr.core.database.entity.RouteEntity
 import com.trackr.core.database.entity.RouteLegEntity
 import com.trackr.core.database.entity.SearchHistoryEntity
 import com.trackr.core.database.entity.StoreMetaEntity
+import com.trackr.core.database.entity.StoreMetaKeys
 import kotlinx.coroutines.flow.Flow
 
 /*
@@ -147,9 +149,13 @@ interface RouteDao {
 /** 收藏合一要的全部行：车、路线（连同程和候选线）、收藏分组、合一索引。一个事务里读出 */
 data class FavoritesRows(
     val stops: List<FavoriteLineEntity>,
+    /** 收藏的站（issue #47） */
+    val stations: List<FavoriteStationEntity> = emptyList(),
     val routes: List<RouteRows>,
     val groups: List<FavoriteGroupEntity>,
-    val items: List<FavoriteItemEntity>
+    val items: List<FavoriteItemEntity>,
+    /** 分组建过没有（`store_meta`，见 [StoreMetaKeys.FAVORITE_GROUPS_INITIALIZED]） */
+    val groupsInitialized: Boolean
 )
 
 /**
@@ -195,6 +201,15 @@ interface FavoritesDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertStops(items: List<FavoriteLineEntity>)
+
+    @Query("SELECT * FROM favorite_station ORDER BY position")
+    suspend fun getStations(): List<FavoriteStationEntity>
+
+    @Query("DELETE FROM favorite_station")
+    suspend fun deleteAllStations()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertStations(items: List<FavoriteStationEntity>)
 
     @Query("SELECT * FROM route ORDER BY position")
     suspend fun getRoutes(): List<RouteEntity>
@@ -243,8 +258,22 @@ interface FavoritesDao {
                 candidates = candidatesByRoute[route.id].orEmpty()
             )
         }
-        return FavoritesRows(stops = getStops(), routes = routes, groups = getGroups(), items = getItems())
+        return FavoritesRows(
+            stops = getStops(),
+            stations = getStations(),
+            routes = routes,
+            groups = getGroups(),
+            items = getItems(),
+            groupsInitialized = getMeta(StoreMetaKeys.FAVORITE_GROUPS_INITIALIZED) != null
+        )
     }
+
+    /** `store_meta` 的键值（分组建过没有）；和收藏的写入放在同一个事务里 */
+    @Query("SELECT value FROM store_meta WHERE `key` = :key")
+    suspend fun getMeta(key: String): String?
+
+    @Upsert
+    suspend fun putMeta(entry: StoreMetaEntity)
 
     @Transaction
     suspend fun write(
@@ -252,11 +281,19 @@ interface FavoritesDao {
         routes: List<RouteRows>? = null,
         groups: List<FavoriteGroupEntity>? = null,
         items: List<FavoriteItemEntity>? = null,
-        itemUpdates: List<FavoriteItemEntity> = emptyList()
+        /** 收藏的站（issue #47）；null = 不动，给了整份替换 */
+        stations: List<FavoriteStationEntity>? = null,
+        itemUpdates: List<FavoriteItemEntity> = emptyList(),
+        /** 记下分组建过了：`favorite_group` 表空之后就不再是「从没建过」 */
+        markGroupsInitialized: Boolean = false
     ) {
         stops?.let {
             deleteAllStops()
             insertStops(it)
+        }
+        stations?.let {
+            deleteAllStations()
+            insertStations(it)
         }
         routes?.let { rows ->
             // 不靠外键级联，三张表都显式清空
@@ -276,6 +313,7 @@ interface FavoritesDao {
             insertItems(it)
         }
         if (itemUpdates.isNotEmpty()) upsertItems(itemUpdates)
+        if (markGroupsInitialized) putMeta(StoreMetaEntity(StoreMetaKeys.FAVORITE_GROUPS_INITIALIZED, "1"))
     }
 }
 

@@ -8,6 +8,7 @@ import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.CandidateLine
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.LiveBus
 import com.trackr.core.model.NearbyStopLineStatus
 import com.trackr.core.model.TransitCodeProvider
@@ -26,6 +27,7 @@ import com.trackr.core.testing.FakeFavoritesRepository
 import com.trackr.core.testing.FakeLocationRepository
 import com.trackr.core.testing.FakeRealtimeRepository
 import com.trackr.core.testing.FakeSettingsRepository
+import com.trackr.core.testing.FakeSystemSettingsLauncher
 import com.trackr.core.testing.FakeTrackingController
 import com.trackr.core.testing.FakeTransitCodeLauncher
 import com.trackr.core.testing.FakeUserLocationStore
@@ -78,6 +80,7 @@ class BusHomeViewModelTest {
     private lateinit var trackingRepository: DefaultTrackingRepository
     private lateinit var trackingController: FakeTrackingController
     private val transitCodeLauncher = FakeTransitCodeLauncher()
+    private val systemSettings = FakeSystemSettingsLauncher()
     private val shanghai = TransitCity(cityId = "034", cityName = "上海", pinyin = "shanghai", province = "直辖市")
     private val beijing = TransitCity(cityId = "001", cityName = "北京", pinyin = "beijing", province = "直辖市")
     private val hangzhou = TransitCity(cityId = "0571", cityName = "杭州", pinyin = "hangzhou", province = "浙江省")
@@ -115,6 +118,7 @@ class BusHomeViewModelTest {
                 trackingController = trackingController,
                 trackingRepository = trackingRepository,
                 transitCodeLauncher = transitCodeLauncher,
+                systemSettings = systemSettings,
                 enableAutoPolling = enableAutoPolling,
                 announcer = announcer
             )
@@ -128,6 +132,7 @@ class BusHomeViewModelTest {
                 trackingController = trackingController,
                 trackingRepository = trackingRepository,
                 transitCodeLauncher = transitCodeLauncher,
+                systemSettings = systemSettings,
                 enableAutoPolling = enableAutoPolling,
                 elapsedRealtimeMillis = elapsedRealtimeMillis,
                 announcer = announcer
@@ -471,7 +476,7 @@ class BusHomeViewModelTest {
         assertTrue(viewModel.uiState.value.activeTracking.isActive)
         assertEquals("line_71", viewModel.uiState.value.activeTracking.lineId)
 
-        viewModel.stopTracking()
+        viewModel.stopTracking(assertNotNull(trackingRepository.session.value).sessionId)
         testScheduler.runCurrent()
 
         assertEquals(1, trackingController.stopCount)
@@ -573,8 +578,128 @@ class BusHomeViewModelTest {
         testScheduler.runCurrent()
 
         assertNull(fakeRepository.userLocation.value)
-        assertEquals("定位不可用，已保留当前位置", viewModel.uiState.value.locationError)
+        assertEquals(LocationIssue.Unavailable, viewModel.uiState.value.locationIssue)
         assertFalse(viewModel.uiState.value.isLocating)
+    }
+
+    /** issue #34：权限和系统开关都没问题，只是这一轮没取到 */
+    @Test
+    fun testRefresh_noFixWithPermissionAndServiceOn_reportsUnavailable() = runTest(main.dispatcher) {
+        fakeRepository.location.bestFixResult = null
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(DefaultLocationRepository.LOCATION_WINDOW_MS + 500L)
+        testScheduler.runCurrent()
+
+        assertEquals(LocationIssue.Unavailable, viewModel.uiState.value.locationIssue)
+    }
+
+    /** issue #34：定位权限没给 → 提示说权限，按钮去应用详情页 */
+    @Test
+    fun testRefresh_noPermission_reportsPermissionMissingAndOpensAppSettings() = runTest(main.dispatcher) {
+        fakeRepository.location.bestFixResult = null
+        fakeRepository.location.permissionGranted = false
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(DefaultLocationRepository.LOCATION_WINDOW_MS + 500L)
+        testScheduler.runCurrent()
+
+        assertEquals(LocationIssue.PermissionMissing, viewModel.uiState.value.locationIssue)
+
+        viewModel.onEvent(BusHomeEvent.OpenAppSettings)
+        assertEquals(listOf("app"), systemSettings.opened)
+    }
+
+    /** issue #34 的主场景：权限给了，但手机「位置信息」总开关关着 → 提示说服务，按钮去位置信息页 */
+    @Test
+    fun testRefresh_permissionButServiceDisabled_reportsServiceDisabledAndOpensLocationSettings() = runTest(main.dispatcher) {
+        fakeRepository.location.bestFixResult = null
+        fakeRepository.location.systemLocationEnabled = false
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(DefaultLocationRepository.LOCATION_WINDOW_MS + 500L)
+        testScheduler.runCurrent()
+
+        assertEquals(LocationIssue.ServiceDisabled, viewModel.uiState.value.locationIssue)
+
+        viewModel.onEvent(BusHomeEvent.OpenLocationSettings)
+        assertEquals(listOf("location"), systemSettings.opened)
+    }
+
+    /** 没授权时就算系统总开关也关着，先说的是权限（否则用户被指去开一个不该先开的开关） */
+    @Test
+    fun testRefresh_bothMissing_reportsPermissionFirst() = runTest(main.dispatcher) {
+        fakeRepository.location.bestFixResult = null
+        fakeRepository.location.permissionGranted = false
+        fakeRepository.location.systemLocationEnabled = false
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(DefaultLocationRepository.LOCATION_WINDOW_MS + 500L)
+        testScheduler.runCurrent()
+
+        assertEquals(LocationIssue.PermissionMissing, viewModel.uiState.value.locationIssue)
+    }
+
+    /** 回到前台时，上次失败的原因被用户补上了，就静默重试一次（用户多半刚从系统设置里开了定位） */
+    @Test
+    fun testRetryLocationIfFailed_afterServiceTurnedOn_relocatesAndClearsIssue() = runTest(main.dispatcher) {
+        fakeRepository.location.bestFixResult = null
+        fakeRepository.location.systemLocationEnabled = false
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(DefaultLocationRepository.LOCATION_WINDOW_MS + 500L)
+        testScheduler.runCurrent()
+        assertEquals(LocationIssue.ServiceDisabled, viewModel.uiState.value.locationIssue)
+        val callsBefore = fakeRepository.location.bestFixCalls.size
+
+        // 用户在系统设置里开了「位置信息」，切回 App
+        fakeRepository.location.systemLocationEnabled = true
+        grantFreshGpsLocation(31.2, 121.4)
+        viewModel.retryLocationIfFailed()
+        testScheduler.runCurrent()
+
+        assertTrue(fakeRepository.location.bestFixCalls.size > callsBefore)
+        assertNull(viewModel.uiState.value.locationIssue)
+        assertEquals(31.2, fakeRepository.userLocation.value?.first)
+    }
+
+    /** 原因没变就不重试：不然每次从搜索页返回都空转 4.5 秒定位、再打一次附近站 */
+    @Test
+    fun testRetryLocationIfFailed_sameIssue_doesNotRelocate() = runTest(main.dispatcher) {
+        fakeRepository.location.bestFixResult = null
+        fakeRepository.location.systemLocationEnabled = false
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        testScheduler.advanceTimeBy(DefaultLocationRepository.LOCATION_WINDOW_MS + 500L)
+        testScheduler.runCurrent()
+        val callsBefore = fakeRepository.location.bestFixCalls.size
+
+        viewModel.retryLocationIfFailed()
+        testScheduler.runCurrent()
+
+        assertEquals(callsBefore, fakeRepository.location.bestFixCalls.size)
+    }
+
+    /** 没有失败过就不重试：每次回前台都定位一次会白烧电 */
+    @Test
+    fun testRetryLocationIfFailed_withoutFailure_doesNotRelocate() = runTest(main.dispatcher) {
+        grantFreshGpsLocation(31.2, 121.4)
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertNull(viewModel.uiState.value.locationIssue)
+        val callsBefore = fakeRepository.location.bestFixCalls.size
+
+        viewModel.retryLocationIfFailed()
+        testScheduler.runCurrent()
+
+        assertEquals(callsBefore, fakeRepository.location.bestFixCalls.size)
     }
 
     // ---- 第 19 步新加 ----
@@ -632,6 +757,26 @@ class BusHomeViewModelTest {
         testScheduler.runCurrent()
         assertNull(viewModel.uiState.value.selectedGroupId)
         assertEquals(3, viewModel.uiState.value.favoriteRows.size)
+    }
+
+    @Test
+    fun testFavorites_groupColorChange_updatesRows() = runTest(main.dispatcher) {
+        val repo = FakeFavoritesRepository(
+            initialFavorites = listOf(fav("f1", "325", "科技园站"), fav("f2", "M194", "深大北门")),
+            initialGroups = listOf(FavoriteGroup(id = "g_work", name = "上班"))
+        )
+        repo.setGroup(FavoriteItem.stopKey("f2"), "g_work")
+        fakeRepository = HomeFakes(shanghai, repo)
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertEquals(listOf<GroupColor?>(null, null), viewModel.uiState.value.favoriteRows.map { it.groupColor })
+
+        // 编辑页给分组设了颜色：首页卡片跟着有色条
+        repo.setGroupColor("g_work", GroupColor.Preset.GREEN)
+        testScheduler.runCurrent()
+        assertEquals(listOf(null, GroupColor.Preset.GREEN), viewModel.uiState.value.favoriteRows.map { it.groupColor })
+        assertEquals(GroupColor.Preset.GREEN, viewModel.uiState.value.favoriteGroups.single().color)
     }
 
     @Test
@@ -733,7 +878,7 @@ class BusHomeViewModelTest {
     fun testTrackingCard_singleLine_endedByStopTracking() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
         testScheduler.runCurrent()
-        assertNull(viewModel.uiState.value.trackingCard)
+        assertTrue(viewModel.uiState.value.trackingCards.isEmpty())
 
         trackingController.start(
             TrackingTarget.SingleLine(
@@ -749,7 +894,7 @@ class BusHomeViewModelTest {
         )
         testScheduler.runCurrent()
 
-        val card = assertNotNull(viewModel.uiState.value.trackingCard)
+        val card = viewModel.uiState.value.trackingCards.single()
         assertEquals("追踪 71路 · 人民广场", card.title)
         // 长辈版「读给我听」：还没选到车时读「正在查车」
         assertEquals("71路，正在查车", card.spoken)
@@ -758,11 +903,43 @@ class BusHomeViewModelTest {
         // 点卡片按会话里的数据源打开线路页（旧首页写死 CHELAILE）
         assertEquals(DataSourceType.MYGOLBS, card.open.source)
 
-        viewModel.onEvent(BusHomeEvent.StopTracking)
+        viewModel.onEvent(BusHomeEvent.StopTracking(card.sessionId))
         testScheduler.runCurrent()
         assertEquals(1, trackingController.stopCount)
-        assertNull(viewModel.uiState.value.trackingCard)
+        assertTrue(viewModel.uiState.value.trackingCards.isEmpty())
         assertNull(trackingRepository.groupSession.value)
+    }
+
+    @Test
+    fun testTrackingCards_twoLines_stopOnlyTheOne() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        fun target(lineId: String, lineName: String, order: Int) = TrackingTarget.SingleLine(
+            cityId = "034",
+            lineId = lineId,
+            lineName = lineName,
+            targetStopId = "stop_$order",
+            targetStopName = "人民广场",
+            targetOrder = order,
+            totalStops = 20
+        )
+        trackingController.start(target("line_71", "71路", 5))
+        trackingController.start(target("line_59", "59路", 9))
+        testScheduler.runCurrent()
+
+        // 两项同时追：两张卡，各写自己的线路、各点进自己的线路页
+        val cards = viewModel.uiState.value.trackingCards
+        assertEquals(listOf("追踪 71路 · 人民广场", "追踪 59路 · 人民广场"), cards.map { it.title })
+        assertEquals(listOf("line_71", "line_59"), cards.map { it.open.lineId })
+
+        // 结束第一张：只停那一项，第二项还在
+        viewModel.onEvent(BusHomeEvent.StopTracking(cards[0].sessionId))
+        testScheduler.runCurrent()
+
+        assertEquals(1, trackingController.stopCount)
+        assertEquals(listOf("line_59"), viewModel.uiState.value.trackingCards.map { it.open.lineId })
+        assertEquals(1, trackingRepository.sessions.value.size)
     }
 
     // ---- 第 33 步：读给我听 ----

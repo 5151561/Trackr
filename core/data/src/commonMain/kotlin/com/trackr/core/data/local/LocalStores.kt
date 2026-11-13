@@ -2,6 +2,7 @@ package com.trackr.core.data.local
 
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItemRecord
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitGroup
@@ -34,6 +35,8 @@ data class TransitLocalSnapshot(
     val transitCodeProvider: String? = null,
     /** 首页「乘车码」悬浮按钮显不显示；没存过为 null，按显示 */
     val showTransitCodeButton: Boolean? = null,
+    /** 上车后自动结束追踪（issue #32）；没存过为 null，按开 */
+    val autoStopAfterBoarding: Boolean? = null,
     val nearbyStopsCount: Int? = null,
     val liveNotificationEnabled: Boolean? = null,
     val showOnLockScreen: Boolean? = null,
@@ -42,6 +45,9 @@ data class TransitLocalSnapshot(
     val uiMode: String? = null,
     /** 走向条样式（`RailMode` 的名字）；没存过为 null，按横排 */
     val railMode: String? = null,
+    /** 深浅色偏好（`ThemeMode` 的名字）；没存过为 null，按跟随系统 */
+    val themeMode: String? = null,
+    val themeColorsJson: String? = null,
     val fontScalePromptDismissed: Boolean? = null,
     val favorites: List<FavoriteStationLine> = emptyList(),
     val searchHistory: List<String> = emptyList()
@@ -54,12 +60,15 @@ interface TransitLocalStore {
     suspend fun saveEngineMode(name: String)
     suspend fun saveTransitCodeProvider(id: String)
     suspend fun saveShowTransitCodeButton(enabled: Boolean)
+    suspend fun saveAutoStopAfterBoarding(enabled: Boolean)
     suspend fun saveNearbyStopsCount(count: Int)
     suspend fun saveLiveNotificationEnabled(enabled: Boolean)
     suspend fun saveShowOnLockScreen(enabled: Boolean)
     suspend fun saveAlertThresholdStops(stops: Int)
     suspend fun saveUiMode(name: String)
     suspend fun saveRailMode(name: String)
+    suspend fun saveThemeMode(name: String)
+    suspend fun saveThemeColors(json: String)
     suspend fun saveFontScalePromptDismissed(dismissed: Boolean)
     suspend fun saveSearchHistory(list: List<String>)
     suspend fun clearSearchHistory()
@@ -74,14 +83,19 @@ interface TransitLocalStore {
  *
  * @param stops 收藏的车，按存的顺序
  * @param routes 路线，按存的顺序；从没存过时为 null。旧实现里 JSON 损坏时先备份原文再给空列表
- * @param groups 收藏分组；没存过或损坏时为 null（仓库会写入两个默认分组）
+ * @param groups 收藏分组；没存过或损坏时为 null
  * @param items 合一索引（顺序 + 分组）；没存过时为 null（仓库按车和路线现有的顺序推出来，见 FavoriteItemOrder）
+ * @param stations 收藏的站（issue #47），按存的顺序
+ * @param groupsInitialized 收藏分组建过没有（写过默认分组，或者用户自己建过 / 删过分组）。为 true 时 [groups] 空就是
+ *   「用户把分组删光了」，仓库不再补默认分组（见 [com.trackr.core.data.repository.DefaultFavoritesRepository.create]）
  */
 data class FavoritesSnapshot(
     val stops: List<FavoriteStationLine> = emptyList(),
     val routes: List<TransitGroup>? = null,
     val groups: List<FavoriteGroup>? = null,
-    val items: List<FavoriteItemRecord>? = null
+    val items: List<FavoriteItemRecord>? = null,
+    val groupsInitialized: Boolean = false,
+    val stations: List<FavoriteStation> = emptyList()
 )
 
 /**
@@ -95,10 +109,17 @@ data class FavoritesWrite(
     val routes: List<TransitGroup>? = null,
     val groups: List<FavoriteGroup>? = null,
     val items: List<FavoriteItemRecord>? = null,
-    val itemUpdates: List<FavoriteItemRecord> = emptyList()
+    val itemUpdates: List<FavoriteItemRecord> = emptyList(),
+    /** 收藏的站（issue #47），按合一顺序排好；null = 不动 */
+    val stations: List<FavoriteStation>? = null,
+    /**
+     * 顺手记下「分组建过了」（[FavoritesSnapshot.groupsInitialized]）。仓库每次写入都带上，
+     * 所以 [groups] 写成空列表之后，下次启动读回来就知道那是用户删空的，不是没建过。
+     */
+    val markGroupsInitialized: Boolean = false
 )
 
-/** DefaultFavoritesRepository 的存储：收藏的车、路线、收藏分组、合一索引 */
+/** DefaultFavoritesRepository 的存储：收藏的车、路线、收藏的站、收藏分组、合一索引 */
 interface FavoritesStore {
     suspend fun load(): FavoritesSnapshot
     suspend fun write(change: FavoritesWrite)
@@ -122,6 +143,8 @@ interface ReminderScheduleStateStore {
 
 /** 高德 Key 两槽（Android 槽、Web 槽，严格分开、互不回落）。值为 null 表示没填 */
 interface AmapKeyStore {
+    suspend fun loadIosKey(): String? = null
+    suspend fun saveIosKey(key: String?) = Unit
     suspend fun loadAndroidKey(): String?
     suspend fun loadWebKey(): String?
     suspend fun saveAndroidKey(key: String?)

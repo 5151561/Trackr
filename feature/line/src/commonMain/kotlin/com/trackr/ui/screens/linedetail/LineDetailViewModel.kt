@@ -26,8 +26,10 @@ import com.trackr.core.model.LineTimetable
 import com.trackr.core.model.LiveBus
 import com.trackr.core.model.RailMode
 import com.trackr.core.model.ScheduledReminder
+import com.trackr.core.model.TrackingSession
 import com.trackr.core.model.TrackingSessionState
 import com.trackr.core.model.TrackingTarget
+import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.displayLineName
 import com.trackr.data.repository.IScheduledReminderRepository
@@ -105,6 +107,7 @@ data class LineUserMessage(
  * 线路详情页 UI 状态。高频部分只在 [live] 里。
  */
 data class LineDetailUiState(
+    val supportsAutoStartReminders: Boolean = true,
     /** 进页面时带来的线路名（数据回来前顶栏先显示它） */
     val lineNameHint: String = "",
     /** 进页面时带来的站序（从某个站点点进来才有）；页面据此把走向条直接滚到那一站 */
@@ -136,6 +139,8 @@ data class LineDetailUiState(
     val isReminderDialogOpen: Boolean = false,
     val preferredTransitCodeProvider: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
     val isTransitCodeSheetOpen: Boolean = false,
+    /** 底栏「乘车码」圆钮显不显示（「我的」里的开关，和首页悬浮按钮同一个） */
+    val showTransitCodeButton: Boolean = true,
     /** 走向条样式（「我的」全局设置）：横排只有横条，竖排是时间轴列表 */
     val railMode: RailMode = RailMode.Horizontal,
     /** 当前追踪会话（页面据此判断「本站是否正在追踪」） */
@@ -163,6 +168,12 @@ class LineDetailViewModel(
     private val initialStationId: String? = null,
     private val initialSource: DataSourceType = if (initialLineId.startsWith("mg:")) DataSourceType.MYGOLBS else DataSourceType.CHELAILE,
     private val lineNameHint: String = "",
+    /**
+     * 进页面时带来的上车站 / 下车站名（路线规划、路线详情点线路进来）。有它时按站名定候车站、判方向，
+     * 不信 [initialTargetOrder]：高德方案没对齐时站序是占位的 1。
+     */
+    private val entryBoardStopName: String = "",
+    private val entryAlightStopName: String = "",
     private val settings: SettingsRepository,
     private val favorites: FavoritesRepository,
     private val realtime: RealtimeRepository,
@@ -184,12 +195,18 @@ class LineDetailViewModel(
 
     private val _uiState = MutableStateFlow(
         LineDetailUiState(
+            supportsAutoStartReminders = reminderRepository.supportsAutoStart,
             lineNameHint = lineNameHint,
-            entryStopOrder = initialTargetOrder?.takeIf { it > 0 }
+            // 按站名定站时站序要等站表回来才知道，先不滚
+            entryStopOrder = initialTargetOrder?.takeIf { it > 0 && entryBoardStopName.isBlank() }
         )
     )
+
+    /** 入口按站名定候车站（见 [entryBoardStopName]） */
+    private val hasEntryStopName: Boolean = entryBoardStopName.isNotBlank()
     val uiState: StateFlow<LineDetailUiState> = _uiState.asStateFlow()
 
+    private val entryLineId: String = initialLineId
     private var currentLineId: String = initialLineId
     private var currentSource: DataSourceType = initialSource
 
@@ -240,8 +257,9 @@ class LineDetailViewModel(
     val isPollingActive: Boolean
         get() = pollingCoordinator.isPollingActive
 
-    /** 当前追踪会话 */
-    val activeTrackingSession: StateFlow<TrackingSessionState> = trackingRepository.legState
+    /** 这条线（当前方向）正在追的那一份会话的状态；没在追时 `isActive = false` */
+    private val _trackedSession = MutableStateFlow(TrackingSessionState())
+    val activeTrackingSession: StateFlow<TrackingSessionState> = _trackedSession.asStateFlow()
 
     init {
         viewModelScope.launch {
@@ -260,21 +278,60 @@ class LineDetailViewModel(
                 _uiState.update { it.copy(preferredTransitCodeProvider = provider) }
             }
         }
+        // 底栏的「乘车码」圆钮和首页悬浮按钮共用一个开关（用 NFC 的人两边都不用看它）
+        viewModelScope.launch {
+            settings.showTransitCodeButton.collectLatest { visible ->
+                _uiState.update { it.copy(showTransitCodeButton = visible) }
+            }
+        }
         viewModelScope.launch {
             settings.railMode.collectLatest { mode ->
                 _uiState.update { it.copy(railMode = mode) }
             }
         }
+        // 同时可能追着好几项：只认这条线自己的那一份（一起等里含这条线也算）
         viewModelScope.launch {
-            trackingRepository.legState.collectLatest { session ->
-                _uiState.update { it.copy(trackingSession = session) }
-            }
+            trackingRepository.sessions.collectLatest { publishTrackingState() }
         }
 
         // 站表先读磁盘缓存：网络还没回来时先画站序（只用来先显示，不挡请求）
         viewModelScope.launch { showCachedStops() }
 
         loadLineDetail(isInitial = true)
+    }
+
+    /**
+     * 这份会话里这条线此刻的状态：单线路、路线、一起等里含这条线都算。
+     * 一起等排第一的不是这条线时，用 [TrackingSession.watchedLines] 里这条线自己的数据拼一份。
+     */
+    private fun TrackingSession.stateForLine(lineId: String): TrackingSessionState? {
+        if (interrupted || !state.isActive) return null
+        if (state.lineId == lineId) return state
+        val watched = watchedLines.firstOrNull { it.line.lineId == lineId } ?: return null
+        return state.copy(
+            lineId = lineId,
+            lineName = watched.line.lineName,
+            endStopName = watched.line.endStopName,
+            targetOrder = watched.line.stopOrder,
+            totalStops = watched.line.stopOrder,
+            startTrackingOrder = (watched.line.stopOrder - 1).coerceAtLeast(1),
+            boardStopOrder = watched.line.stopOrder,
+            currentBusId = watched.busId,
+            currentBusOrder = watched.busOrder,
+            currentBusProgress = watched.busProgress,
+            stopsRemaining = watched.stopsRemaining,
+            etaSeconds = watched.etaSeconds,
+            isBusArrivedAtStop = watched.isArrived
+        )
+    }
+
+    /** 重新算「这条线是否在追」，写进页面状态 */
+    private fun publishTrackingState() {
+        val state = trackingRepository.sessions.value
+            .firstNotNullOfOrNull { it.stateForLine(currentLineId) }
+            ?: TrackingSessionState()
+        _trackedSession.value = state
+        _uiState.update { it.copy(trackingSession = state) }
     }
 
     private suspend fun showCachedStops() {
@@ -290,7 +347,11 @@ class LineDetailViewModel(
                 state.copy(
                     static = static,
                     selectedStop = state.selectedStop
-                        ?: initialTargetOrder?.takeIf { it > 0 }?.let { order -> cached.stops.find { it.order == order } }
+                        ?: if (hasEntryStopName) {
+                            resolveEntryStop(cached.stops, entryBoardStopName, entryAlightStopName, initialTargetOrder)
+                        } else {
+                            initialTargetOrder?.takeIf { it > 0 }?.let { order -> entryStopIn(cached.stops, order) }
+                        }
                 )
             }
         }
@@ -340,9 +401,29 @@ class LineDetailViewModel(
         )
     }
 
-    /** 结束追踪 */
+    /**
+     * 这条线正在追的那一份会话（结束追踪只停它，别的线路继续追）。
+     * 同一条线在两个站各追一份时，优先取当前候车站那一份。
+     */
+    private val trackedSession: TrackingSession?
+        get() {
+            val order = _uiState.value.selectedStop?.order
+            val candidates = trackingRepository.sessions.value.mapNotNull { session ->
+                session.stateForLine(currentLineId)?.let { session to it }
+            }
+            val sameStop = candidates.firstOrNull { it.second.targetOrder == order }
+            return (sameStop ?: candidates.firstOrNull())?.first
+        }
+
+    /** 结束这条线的追踪（同时追着别的线路时不影响它们；一起等里只去掉这一条） */
     fun stopTracking() {
-        trackingController.stopTracking()
+        // 页面上这条线已经不在追了（比如状态还没刷过来）：什么都不做，别把别的追踪一起停掉
+        val session = trackedSession ?: return
+        if (session.watchTarget != null) {
+            trackingController.removeWatchLine(session.sessionId, currentLineId)
+        } else {
+            trackingController.stopTracking(session.sessionId)
+        }
     }
 
     /** 当前所选城市名（保存定时提醒时写进提醒） */
@@ -375,35 +456,62 @@ class LineDetailViewModel(
                 ?: _uiState.value.selectedStop?.order
                 ?: initialTargetOrder
 
+            val requestLineId = currentLineId
+            // 入口带的站 id 只对应入口那一站：换过站或换过向后再传，上游会按旧站算到站时间
+            val stationId = initialStationId.takeIf { !userPickedStop && requestLineId == entryLineId }
             val result = realtime.getLineDetail(
                 city = currentCity,
-                lineId = currentLineId,
+                lineId = requestLineId,
                 targetOrder = targetOrder,
-                stationId = initialStationId,
+                stationId = stationId,
                 source = currentSource,
                 lineNameHint = lineNameHint
             )
 
-            result.onSuccess { detail ->
+            result.onSuccess { fetched ->
+                // 请求期间换了向：这份是旧方向的数据，按站序套到新方向会选错站
+                if (requestLineId != currentLineId) {
+                    _uiState.update { it.copy(isRefreshing = false) }
+                    return@onSuccess
+                }
+                // 入口带了站名：按站名找候车站，这个方向没有（或上车站在下车站后面）就换反向找
+                val byName = if (isInitial && !userPickedStop && hasEntryStopName) {
+                    resolveEntryDirection(fetched, currentCity)
+                } else {
+                    null
+                }
+                if (byName != null && byName.first.line.lineId != requestLineId) {
+                    currentLineId = byName.first.line.lineId
+                    currentSource = byName.first.line.source
+                    publishTrackingState()
+                }
+                val detail = byName?.first ?: fetched
                 val selected = _uiState.value.selectedStop
                 // 初次加载或无选中站时，计算默认选中的候车站（首车前面一站）；用户已经在缓存的站表上点过站就保留
-                val targetStop = if (selected == null || (isInitial && !userPickedStop)) {
+                val targetStop = if (byName != null) {
+                    byName.second
+                } else if (selected == null || (isInitial && !userPickedStop)) {
                     if (initialTargetOrder != null && initialTargetOrder > 0) {
-                        detail.stops.find { it.order == initialTargetOrder } ?: calculateDefaultStop(detail)
+                        entryStopIn(detail.stops, initialTargetOrder) ?: calculateDefaultStop(detail)
                     } else {
                         calculateDefaultStop(detail)
                     }
                 } else {
-                    detail.stops.find { it.order == selected.order } ?: calculateDefaultStop(detail)
+                    sameStopIn(detail.stops, selected) ?: calculateDefaultStop(detail)
                 }
 
                 applyDetail(detail, targetStop)
+                if (byName != null) {
+                    _uiState.update { it.copy(entryStopOrder = byName.second.order) }
+                }
 
                 refreshFallbackNextDeparture(detail, targetStop)
 
-                // 初次加载未指定候车站时，需要再按默认候车站请求一次才能拿到到该站的精确 ETA；
-                // 在同一协程内顺序执行并重新计时，避免轮询紧接着再发一次
-                if (isInitial && targetStop != null && targetOrder == null) {
+                // 初次加载未指定候车站（或按站名定的站和请求时带的站序 / 方向不一样）时，需要再按候车站请求一次
+                // 才能拿到到该站的精确 ETA；在同一协程内顺序执行并重新计时，避免轮询紧接着再发一次
+                val entryStopMoved = byName != null &&
+                    (byName.second.order != targetOrder || detail.line.lineId != requestLineId)
+                if (isInitial && targetStop != null && (targetOrder == null || entryStopMoved)) {
                     pollingCoordinator.restart()
                     fetchLineDetail(isInitial = false, targetOrderOverride = targetStop.order)
                 }
@@ -423,6 +531,46 @@ class LineDetailViewModel(
         } finally {
             activeLoads.decrementAndFetch()
         }
+    }
+
+    /**
+     * 按入口站名定方向和候车站：当前方向找得到就用它；找不到再请求一次反向线路，在反向里找。
+     * @return 用哪份数据 + 哪一站；两个方向都找不到返回 null（退回原来的站序 / 默认候车站逻辑）
+     */
+    private suspend fun resolveEntryDirection(
+        detail: BusLineDetail,
+        city: TransitCity
+    ): Pair<BusLineDetail, BusStop>? {
+        resolveEntryStop(detail.stops, entryBoardStopName, entryAlightStopName, initialTargetOrder)
+            ?.let { return detail to it }
+        val reverse = detail.reverseDirection?.takeIf { it.lineId.isNotBlank() } ?: return null
+        val revDetail = realtime.getLineDetail(
+            city = city,
+            lineId = reverse.lineId,
+            source = reverse.source,
+            lineNameHint = reverse.name
+        ).getOrNull() ?: return null
+        val stop = resolveEntryStop(revDetail.stops, entryBoardStopName, entryAlightStopName) ?: return null
+        return revDetail to stop
+    }
+
+    /** 入口指定的那一站：个别数据源站序会重复，能用站 id 区分时优先用站 id */
+    private fun entryStopIn(stops: List<BusStop>, order: Int): BusStop? {
+        val sameOrder = stops.filter { it.order == order }
+        return sameOrder.firstOrNull { it.stopId == initialStationId } ?: sameOrder.firstOrNull()
+    }
+
+    /**
+     * 在新站表里找回 [picked] 这一站。站序可能重复（掌上公交的站 id 又就是站序），也可能因站表调整整体移动，
+     * 所以先比站序 + 站名，再按 id / 唯一的站名找；都找不到才认站序（比如站改了名）。
+     */
+    private fun sameStopIn(stops: List<BusStop>, picked: BusStop): BusStop? {
+        val sameOrder = stops.filter { it.order == picked.order }
+        return sameOrder.firstOrNull { it.stopId == picked.stopId && it.name == picked.name }
+            ?: sameOrder.firstOrNull { it.name == picked.name }
+            ?: stops.firstOrNull { it.stopId == picked.stopId && it.name == picked.name }
+            ?: stops.singleOrNull { it.name == picked.name }
+            ?: sameOrder.firstOrNull()
     }
 
     /** 把一份新数据拆成静态 / 实时两半写进状态；静态没变就沿用旧实例 */
@@ -641,12 +789,13 @@ class LineDetailViewModel(
 
         // 换向换掉了线路方向，原来追的「本站」就不成立了：先结束追踪，别让后台继续追旧方向
         val wasTracking = state.isTrackingThisStop
-        if (wasTracking) trackingController.stopTracking()
+        if (wasTracking) stopTracking()
 
         viewModelScope.launch {
             _uiState.update { it.copy(isSwitchingDirection = true, isLoading = true) }
             try {
                 currentLineId = reverse.lineId
+                publishTrackingState()
                 currentSource = reverse.source
 
                 val currentCity = settings.selectedCity.value
@@ -679,6 +828,7 @@ class LineDetailViewModel(
                 }.onFailure {
                     // 线路 id 已经换成反向，回滚掉，否则接下来的轮询会一直请求错的方向
                     currentLineId = detail.line.lineId
+                    publishTrackingState()
                     currentSource = detail.line.source
                     _uiState.update { it.copy(isLoading = false, errorMessage = "换向失败，请稍后重试") }
                 }
@@ -792,6 +942,7 @@ class LineDetailViewModel(
 
     /** 顶栏时钟：定时提醒 */
     fun openReminderDialog() {
+        reminderRepository.unavailableReason?.let { postMessage(it); return }
         if (_uiState.value.static == null || _uiState.value.selectedStop == null) return
         _uiState.update { it.copy(isReminderDialogOpen = true) }
     }
@@ -803,6 +954,7 @@ class LineDetailViewModel(
     /** 保存定时提醒（当前线路 + 候车站），保存后提示条报时间 */
     @OptIn(ExperimentalUuidApi::class)
     fun saveReminder(hour: Int, minute: Int, daysOfWeek: Set<Int>, autoStartTracking: Boolean) {
+        reminderRepository.unavailableReason?.let { postMessage(it); return }
         val state = _uiState.value
         val static = state.static ?: return
         val stop = state.selectedStop ?: return
@@ -828,8 +980,13 @@ class LineDetailViewModel(
             autoStartLiveTracking = autoStartTracking
         )
         viewModelScope.launch {
-            reminderRepository.saveReminder(reminder)
-            postMessage("已设好定时提醒：${reminder.formatTime()}（${reminder.formatRepeatSummary()}）")
+            try {
+                reminderRepository.saveReminder(reminder)
+                postMessage("已设好定时提醒：${reminder.formatTime()}（${reminder.formatRepeatSummary()}）")
+            } catch (error: Exception) {
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                postMessage(error.message ?: "提醒保存失败，请重试")
+            }
         }
     }
 

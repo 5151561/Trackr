@@ -23,7 +23,18 @@ sealed interface BusHomeEvent {
     // ---- 交给 ViewModel ----
     data object Refresh : BusHomeEvent
     data object RetryLocation : BusHomeEvent
-    data object StopTracking : BusHomeEvent
+
+    /** 定位提示里的「去开启」：跳系统位置信息页（总开关 / 定位模式在那里） */
+    data object OpenLocationSettings : BusHomeEvent
+
+    /** 定位提示里的「去授权」：跳本应用的系统设置页（权限在那里） */
+    data object OpenAppSettings : BusHomeEvent
+
+    /**
+     * 一张追踪卡上的「结束」：只停这一项。
+     * @param watchLineId 一起等里的哪一条线（只去掉这条）；null = 结束整份会话
+     */
+    data class StopTracking(val sessionId: String, val watchLineId: String? = null) : BusHomeEvent
     data class SelectGroup(val groupId: String?) : BusHomeEvent
     data object TransitCodeClicked : BusHomeEvent
     data class TransitCodeChosen(val provider: TransitCodeProvider, val saveAsDefault: Boolean) : BusHomeEvent

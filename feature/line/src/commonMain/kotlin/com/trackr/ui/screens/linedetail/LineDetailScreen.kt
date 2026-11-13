@@ -92,6 +92,7 @@ import com.trackr.core.designsystem.resources.ic_star_filled
 import com.trackr.core.designsystem.resources.ic_swap
 import com.trackr.core.designsystem.resources.transit_code
 import com.trackr.core.designsystem.theme.busColors
+import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusStop
 import com.trackr.core.model.LineOperatingState
@@ -99,9 +100,12 @@ import com.trackr.core.model.LiveBus
 import com.trackr.core.model.RailMode
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.displayLineName
+import com.trackr.core.model.displayLineNameWithoutDiversion
+import com.trackr.core.model.diversionNote
 import com.trackr.feature.line.resources.Res as LineRes
 import com.trackr.feature.line.resources.line_detail_error
 import com.trackr.feature.line.resources.line_detail_fare
+import com.trackr.feature.line.resources.line_detail_diversion_body
 import com.trackr.feature.line.resources.line_detail_hours
 import com.trackr.feature.line.resources.line_detail_loading
 import com.trackr.feature.line.resources.line_detail_reminder
@@ -123,6 +127,7 @@ import com.trackr.ui.screens.linedetail.components.BusFollowContent
 import com.trackr.ui.screens.linedetail.components.BusListContent
 import com.trackr.ui.screens.linedetail.components.FavoriteGroupPickerSheet
 import com.trackr.ui.screens.linedetail.components.StationArrivalContent
+import com.trackr.ui.screens.linedetail.components.overflowMarquee
 import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
@@ -254,7 +259,7 @@ fun LineDetailScreen(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             LineTopBar(
-                title = static?.line?.displayLineName?.takeIf { it.isNotBlank() } ?: state.lineNameHint,
+                title = static?.line?.displayLineNameWithoutDiversion?.takeIf { it.isNotBlank() } ?: state.lineNameHint,
                 isFavorite = state.isFavorite,
                 actionsEnabled = static != null && state.selectedStop != null,
                 onBack = { onEvent(LineDetailEvent.Back) },
@@ -270,6 +275,8 @@ fun LineDetailScreen(
                     // 没有反向线路（单程 / 环线 / 上游缺数据）就不占位；lineId 为空同样当没有
                     canSwitchDirection = static.reverseDirection?.lineId?.isNotBlank() == true,
                     isSwitchingDirection = state.isSwitchingDirection,
+                    // 「我的」里关掉「显示乘车码按钮」后，底栏这个圆钮和首页悬浮按钮一起消失
+                    showTransitCode = state.showTransitCodeButton,
                     onToggleTracking = { onEvent(LineDetailEvent.ToggleTracking) },
                     onSwitchDirection = { onEvent(LineDetailEvent.SwitchDirection) },
                     onOpenTransitCode = { onEvent(LineDetailEvent.OpenTransitCode) }
@@ -345,6 +352,7 @@ fun LineDetailScreen(
                                 static = static,
                                 onOpenTimetable = { onEvent(LineDetailEvent.OpenTimetable) }
                             )
+                            static.line.diversionNote?.let { DiversionBanner(note = it) }
                             if (hasError) {
                                 ErrorBanner(
                                     text = state.errorMessage.orEmpty(),
@@ -451,6 +459,7 @@ fun LineDetailScreen(
     val selectedStop = state.selectedStop
     if (state.isReminderDialogOpen && static != null && selectedStop != null) {
         ScheduledReminderDialog(
+            supportsAutoStart = state.supportsAutoStartReminders,
             lineName = static.line.name,
             endStopName = static.line.endStop,
             targetStopName = selectedStop.name,
@@ -525,14 +534,15 @@ private fun DirectionHeader(
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
     ) {
-        // 换向已经挪到底栏，方向行整行留给站名，长站名不再被按钮挤掉
+        // 换向已经挪到底栏，方向行整行留给站名；站名太长时在行里滚，不打省略号
         Text(
             text = "${line.startStop} → ${line.endStop}",
             style = MaterialTheme.typography.bodyLarge,
             fontWeight = FontWeight.SemiBold,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis
+            softWrap = false,
+            modifier = Modifier.overflowMarquee()
         )
         Row(verticalAlignment = Alignment.CenterVertically) {
             val meta = listOfNotNull(
@@ -549,6 +559,33 @@ private fun DirectionHeader(
             TextButton(onClick = onOpenTimetable) {
                 Text(text = stringResource(LineRes.string.line_detail_timetable), fontSize = 13.sp)
             }
+        }
+    }
+}
+
+/** 临时改道提示条：线路名里带「（临时改道）」时显示，标题已去掉这截括号 */
+@Composable
+private fun DiversionBanner(note: String) {
+    Surface(
+        color = TrackrTheme.colors.warn.copy(alpha = 0.14f),
+        shape = RoundedCornerShape(12.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .semantics(mergeDescendants = true) {}
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+            Text(
+                text = note,
+                color = TrackrTheme.colors.warn,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                text = stringResource(LineRes.string.line_detail_diversion_body, note),
+                color = MaterialTheme.colorScheme.onSurface,
+                fontSize = 12.sp
+            )
         }
     }
 }
@@ -675,6 +712,7 @@ private fun rememberLineDetail(static: LineStatic, live: LineLive?): BusLineDeta
 /**
  * 底栏：主按钮 + 换向 + 乘车码（和首页悬浮按钮同一个位置）；自己让开系统导航栏。
  * 换向是高频动作，从方向行挪到这里常驻；反向线路不存在时不渲染，主按钮自动撑满。
+ * [showTransitCode] 是「我的」里的开关（关掉后乘车码圆钮不占位，主按钮和换向铺满）。
  */
 @Composable
 private fun LineBottomBar(
@@ -682,6 +720,7 @@ private fun LineBottomBar(
     canTrack: Boolean,
     canSwitchDirection: Boolean,
     isSwitchingDirection: Boolean,
+    showTransitCode: Boolean,
     onToggleTracking: () -> Unit,
     onSwitchDirection: () -> Unit,
     onOpenTransitCode: () -> Unit
@@ -774,16 +813,18 @@ private fun LineBottomBar(
                     }
                 }
             }
-            FilledTonalIconButton(
-                onClick = onOpenTransitCode,
-                shape = CircleShape,
-                modifier = Modifier.size(52.dp)
-            ) {
-                Icon(
-                    imageVector = vectorResource(Res.drawable.ic_qr_code),
-                    contentDescription = stringResource(Res.string.transit_code),
-                    modifier = Modifier.size(24.dp)
-                )
+            if (showTransitCode) {
+                FilledTonalIconButton(
+                    onClick = onOpenTransitCode,
+                    shape = CircleShape,
+                    modifier = Modifier.size(52.dp)
+                ) {
+                    Icon(
+                        imageVector = vectorResource(Res.drawable.ic_qr_code),
+                        contentDescription = stringResource(Res.string.transit_code),
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
             }
         }
     }

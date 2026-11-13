@@ -30,6 +30,7 @@ import androidx.compose.material3.TopAppBarScrollBehavior
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import com.trackr.ui.bottombar.LocalBottomBarHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,7 +45,6 @@ import androidx.compose.ui.unit.dp
 import com.trackr.ui.components.message.HostMessage
 import com.trackr.ui.components.message.UserMessageHost
 import com.trackr.core.designsystem.resources.Res
-import com.trackr.core.designsystem.resources.action_relocate
 import com.trackr.core.designsystem.resources.ic_arrow_drop_down
 import com.trackr.core.designsystem.resources.ic_my_location
 import com.trackr.core.designsystem.resources.ic_search
@@ -68,11 +68,16 @@ internal object BusHomeTags {
     const val SEARCH = "bus_home_search"
     const val TRACKING_CARD = "bus_home_tracking"
     const val STOP_TRACKING = "bus_home_stop_tracking"
-    const val WATCH_MORE = "bus_home_watch_more"
     const val EDIT_FAVORITES = "bus_home_edit_favorites"
     const val NEARBY_HEADER = "bus_home_nearby_header"
     fun favoriteRow(key: String) = "bus_home_fav_$key"
     fun groupChip(id: String?) = "bus_home_group_${id ?: "all"}"
+
+    /** 分组 chip 前的色点（分组设了颜色才有） */
+    fun groupChipDot(id: String) = "bus_home_group_dot_$id"
+
+    /** 卡片左边的分组色条，[cardTag] 是那张卡的 testTag */
+    fun accentStripe(cardTag: String) = "${cardTag}_accent"
     fun nearbyStop(key: String) = "bus_home_nearby_$key"
 }
 
@@ -113,7 +118,7 @@ fun BusHomeScreen(
                     onClick = { onEvent(BusHomeEvent.TransitCodeClicked) },
                     // 底栏（页签）盖在页面上面，按钮要让开它；底栏收起时再把它挪到系统导航栏上方
                     modifier = Modifier
-                        .padding(bottom = BOTTOM_BAR_HEIGHT)
+                        .padding(bottom = LocalBottomBarHeight.current)
                         .offset { IntOffset(0, bottomBarCollapseOffset().roundToInt()) }
                 )
             }
@@ -123,7 +128,7 @@ fun BusHomeScreen(
             UserMessageHost(
                 message = state.userMessages.firstOrNull()?.let { HostMessage(key = it.id, text = it.text) },
                 onResult = { key, _ -> onEvent(BusHomeEvent.MessageShown(key as Long)) },
-                modifier = Modifier.padding(bottom = BOTTOM_BAR_HEIGHT)
+                modifier = Modifier.padding(bottom = LocalBottomBarHeight.current)
             )
         }
     ) { innerPadding ->
@@ -153,17 +158,18 @@ fun BusHomeScreen(
                     end = innerPadding.calculateEndPadding(layoutDirection),
                     top = innerPadding.calculateTopPadding(),
                     // 留出底栏和悬浮按钮的高度，最后一个站不被挡住（按钮关掉了就不用留）
-                    bottom = innerPadding.calculateBottomPadding() + BOTTOM_BAR_HEIGHT +
+                    bottom = innerPadding.calculateBottomPadding() + LocalBottomBarHeight.current +
                         if (state.showTransitCodeButton) FAB_CLEARANCE else 0.dp
                 ),
                 verticalArrangement = Arrangement.spacedBy(TrackrTheme.dimens.spaceS)
             ) {
-                state.trackingCard?.let { card ->
-                    item(key = "tracking", contentType = "tracking") {
+                // 同时追多项时一项一张卡（一起等的每条线也各一张），各自点进自己的线路页
+                state.trackingCards.forEach { card ->
+                    item(key = card.key, contentType = "tracking") {
                         TrackingCard(
                             card = card,
                             onOpen = { onEvent(BusHomeEvent.OpenLine(card.open)) },
-                            onStop = { onEvent(BusHomeEvent.StopTracking) }
+                            onStop = { onEvent(BusHomeEvent.StopTracking(card.sessionId, card.watchLineId)) }
                         )
                     }
                 }
@@ -172,9 +178,9 @@ fun BusHomeScreen(
                     SearchEntry(onClick = { onEvent(BusHomeEvent.OpenSearch) })
                 }
 
-                state.locationError?.let { error ->
+                state.locationIssue?.let { issue ->
                     item(key = "location_hint", contentType = "location_hint") {
-                        LocationHint(message = error, onRetry = { onEvent(BusHomeEvent.RetryLocation) })
+                        LocationHint(issue = issue, onEvent = onEvent)
                     }
                 }
 
@@ -280,9 +286,9 @@ private fun SearchEntry(onClick: () -> Unit) {
     }
 }
 
-/** 定位不可用时的常驻提示（是状态，不是一次性消息） */
+/** 定位拿不到时的常驻提示（是状态，不是一次性消息）：文案和按钮跟着原因变，见 [LocationIssue] */
 @Composable
-private fun LocationHint(message: String, onRetry: () -> Unit) {
+private fun LocationHint(issue: LocationIssue, onEvent: (BusHomeEvent) -> Unit) {
     val dimens = TrackrTheme.dimens
     Row(
         modifier = Modifier
@@ -298,14 +304,14 @@ private fun LocationHint(message: String, onRetry: () -> Unit) {
         )
         Spacer(modifier = Modifier.width(dimens.spaceS))
         Text(
-            text = message,
+            text = stringResource(issue.messageRes),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
+            maxLines = 2,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f)
         )
-        TextButton(onClick = onRetry) { Text(stringResource(Res.string.action_relocate)) }
+        TextButton(onClick = { onEvent(issue.actionEvent) }) { Text(stringResource(issue.actionRes)) }
     }
 }
 
@@ -328,9 +334,6 @@ internal fun SectionHeader(
         }
     }
 }
-
-/** 底栏（页签）高度：它盖在页面上面，列表和悬浮按钮要让开 */
-private val BOTTOM_BAR_HEIGHT = 80.dp
 
 /** 悬浮按钮的高度 + 间距 */
 private val FAB_CLEARANCE = 72.dp

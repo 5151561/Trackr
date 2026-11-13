@@ -25,6 +25,8 @@ import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.TransitSearchResult
 import com.trackr.core.model.RailMode
+import com.trackr.core.model.ThemeColors
+import com.trackr.core.model.ThemeMode
 import com.trackr.core.model.UiMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -99,6 +101,9 @@ class TransitRepository(
     private val _showTransitCodeButton = MutableStateFlow(initial.showTransitCodeButton ?: true)
     override val showTransitCodeButton: StateFlow<Boolean> = _showTransitCodeButton.asStateFlow()
 
+    private val _autoStopAfterBoarding = MutableStateFlow(initial.autoStopAfterBoarding ?: true)
+    override val autoStopAfterBoarding: StateFlow<Boolean> = _autoStopAfterBoarding.asStateFlow()
+
     private val _nearbyStopsCount = MutableStateFlow((initial.nearbyStopsCount ?: 4).coerceIn(1, 16))
     override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
 
@@ -118,6 +123,14 @@ class TransitRepository(
 
     private val _railMode = MutableStateFlow(RailMode.entries.firstOrNull { it.name == initial.railMode } ?: RailMode.Horizontal)
     override val railMode: StateFlow<RailMode> = _railMode.asStateFlow()
+
+    private val _themeColors = MutableStateFlow(
+        initial.themeColorsJson?.let { runCatching { json.decodeFromString<ThemeColors>(it).normalized() }.getOrNull() } ?: ThemeColors()
+    )
+    override val themeColors: StateFlow<ThemeColors> = _themeColors.asStateFlow()
+
+    private val _themeMode = MutableStateFlow(ThemeMode.entries.firstOrNull { it.name == initial.themeMode } ?: ThemeMode.System)
+    override val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
 
     private val _fontScalePromptDismissed = MutableStateFlow(initial.fontScalePromptDismissed ?: false)
     override val fontScalePromptDismissed: StateFlow<Boolean> = _fontScalePromptDismissed.asStateFlow()
@@ -176,6 +189,11 @@ class TransitRepository(
         writer.enqueue { store.saveShowTransitCodeButton(enabled) }
     }
 
+    override fun setAutoStopAfterBoarding(enabled: Boolean) {
+        _autoStopAfterBoarding.value = enabled
+        writer.enqueue { store.saveAutoStopAfterBoarding(enabled) }
+    }
+
     override fun setAlertThresholdStops(stops: Int) {
         val clamped = stops.coerceIn(AlertThreshold.MIN_STOPS, AlertThreshold.MAX_STOPS)
         _alertThresholdStops.value = clamped
@@ -190,6 +208,17 @@ class TransitRepository(
     override fun setRailMode(mode: RailMode) {
         _railMode.value = mode
         writer.enqueue { store.saveRailMode(mode.name) }
+    }
+
+    override fun setThemeColors(colors: ThemeColors) {
+        val normalized = colors.normalized()
+        _themeColors.value = normalized
+        writer.enqueue { store.saveThemeColors(json.encodeToString(normalized)) }
+    }
+
+    override fun setThemeMode(mode: ThemeMode) {
+        _themeMode.value = mode
+        writer.enqueue { store.saveThemeMode(mode.name) }
     }
 
     override fun dismissFontScalePrompt() {

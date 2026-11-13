@@ -153,6 +153,32 @@ class HorizontalRouteRailUiTest {
     }
 
     @Test
+    fun bracketedStopName_drawsBracketsInsteadOfText() {
+        // #23：整段还是一个 Text（拆成单字会被逐个截底），括号那两行换成占位空格，
+        // 横版括号画在占位上；读屏仍读完整站名
+        val name = "人民广场（武胜路）"
+        composeTestRule.setContent {
+            TrackrTheme {
+                HorizontalRouteRail(
+                    stops = listOf(BusStop(stopId = "1", name = name, order = 1)),
+                    buses = emptyList(),
+                    selectedStop = null,
+                    selectedBusId = null,
+                    scrollState = rememberScrollState(),
+                    onSelectStop = {},
+                    onSelectBus = {}
+                )
+            }
+        }
+
+        composeTestRule.onNodeWithContentDescription(name).assertIsDisplayed()
+        // 括号不再是文字，位置留成全角空格
+        composeTestRule.onNodeWithText("（", useUnmergedTree = true).assertDoesNotExist()
+        composeTestRule.onNodeWithText("）", useUnmergedTree = true).assertDoesNotExist()
+        composeTestRule.onNodeWithText(railVerticalNameText(name), useUnmergedTree = true).assertExists()
+    }
+
+    @Test
     fun rail_fillsFullWidthWithoutCard() {
         composeTestRule.setContent {
             TrackrTheme {

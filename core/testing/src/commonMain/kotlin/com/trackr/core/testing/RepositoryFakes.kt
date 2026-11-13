@@ -1,6 +1,8 @@
 package com.trackr.core.testing
 
+import com.trackr.core.model.ThemeColors
 import com.trackr.core.data.repository.FavoritesRepository
+import com.trackr.core.data.repository.LineDetailUpdate
 import com.trackr.core.data.repository.LocationRepository
 import com.trackr.core.data.repository.RealtimeRepository
 import com.trackr.core.data.repository.SearchHistoryRepository
@@ -11,7 +13,9 @@ import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteGroup
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.FavoriteStation
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LineTimetable
 import com.trackr.core.model.NearbyStop
@@ -20,6 +24,7 @@ import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.TransitGroup
 import com.trackr.core.model.TransitSearchResult
 import com.trackr.core.model.RailMode
+import com.trackr.core.model.ThemeMode
 import com.trackr.core.model.UiMode
 import com.trackr.core.model.UserFix
 import kotlinx.coroutines.flow.Flow
@@ -63,6 +68,9 @@ class FakeSettingsRepository(
     private val _showTransitCodeButton = MutableStateFlow(true)
     override val showTransitCodeButton: StateFlow<Boolean> = _showTransitCodeButton.asStateFlow()
 
+    private val _autoStopAfterBoarding = MutableStateFlow(true)
+    override val autoStopAfterBoarding: StateFlow<Boolean> = _autoStopAfterBoarding.asStateFlow()
+
     private val _nearbyStopsCount = MutableStateFlow(4)
     override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
 
@@ -81,6 +89,16 @@ class FakeSettingsRepository(
     private val _railMode = MutableStateFlow(RailMode.Horizontal)
     override val railMode: StateFlow<RailMode> = _railMode.asStateFlow()
 
+    private val _themeColors = MutableStateFlow(ThemeColors())
+    override val themeColors: StateFlow<ThemeColors> = _themeColors.asStateFlow()
+
+    override fun setThemeColors(colors: ThemeColors) {
+        _themeColors.value = colors.normalized()
+    }
+
+    private val _themeMode = MutableStateFlow(ThemeMode.System)
+    override val themeMode: StateFlow<ThemeMode> = _themeMode.asStateFlow()
+
     private val _fontScalePromptDismissed = MutableStateFlow(false)
     override val fontScalePromptDismissed: StateFlow<Boolean> = _fontScalePromptDismissed.asStateFlow()
 
@@ -90,6 +108,10 @@ class FakeSettingsRepository(
 
     override fun setRailMode(mode: RailMode) {
         _railMode.value = mode
+    }
+
+    override fun setThemeMode(mode: ThemeMode) {
+        _themeMode.value = mode
     }
 
     override fun dismissFontScalePrompt() {
@@ -116,6 +138,10 @@ class FakeSettingsRepository(
         _showTransitCodeButton.value = enabled
     }
 
+    override fun setAutoStopAfterBoarding(enabled: Boolean) {
+        _autoStopAfterBoarding.value = enabled
+    }
+
     override fun setAlertThresholdStops(stops: Int) {
         _alertThresholdStops.value = stops.coerceIn(1, 3)
     }
@@ -137,11 +163,15 @@ class FakeSettingsRepository(
 class FakeFavoritesRepository(
     initialFavorites: List<FavoriteStationLine> = emptyList(),
     initialRoutes: List<TransitGroup> = emptyList(),
-    initialGroups: List<FavoriteGroup> = emptyList()
+    initialGroups: List<FavoriteGroup> = emptyList(),
+    initialStations: List<FavoriteStation> = emptyList()
 ) : FavoritesRepository {
 
     private val _favorites = MutableStateFlow(initialFavorites)
     override val favorites: StateFlow<List<FavoriteStationLine>> = _favorites.asStateFlow()
+
+    private val _favoriteStations = MutableStateFlow(initialStations)
+    override val favoriteStations: StateFlow<List<FavoriteStation>> = _favoriteStations.asStateFlow()
 
     private val _routes = MutableStateFlow(initialRoutes)
     override val routes: StateFlow<List<TransitGroup>> = _routes.asStateFlow()
@@ -161,7 +191,9 @@ class FakeFavoritesRepository(
     private var nextGroupId = 1
 
     private fun buildItems(): List<FavoriteItem> {
-        val all = _favorites.value.map { FavoriteItem.stopKey(it.id) to it } + _routes.value.map { FavoriteItem.routeKey(it.id) to it }
+        val all = _favorites.value.map { FavoriteItem.stopKey(it.id) to it } +
+            _favoriteStations.value.map { FavoriteItem.stationKey(it.id) to it } +
+            _routes.value.map { FavoriteItem.routeKey(it.id) to it }
         val rank = order.withIndex().associate { it.value to it.index }
         return all.withIndex()
             .sortedWith(compareBy({ rank[it.value.first] ?: (order.size + it.index) }, { it.index }))
@@ -169,6 +201,7 @@ class FakeFavoritesRepository(
                 val (key, value) = entry.value
                 when (value) {
                     is FavoriteStationLine -> FavoriteItem.Stop(value, groupOf[key], index)
+                    is FavoriteStation -> FavoriteItem.Station(value, groupOf[key], index)
                     else -> {
                         val route = value as TransitGroup
                         // 显式设成 null（拖到「不分组」）要盖掉路线自己的 customGroupId
@@ -198,6 +231,23 @@ class FakeFavoritesRepository(
 
     override suspend fun removeFavorite(id: String) {
         _favorites.update { list -> list.filterNot { it.id == id } }
+        refresh()
+    }
+
+    override suspend fun toggleStation(station: FavoriteStation): Boolean {
+        val exists = _favoriteStations.value.any { it.id == station.id }
+        _favoriteStations.update { list -> if (exists) list.filterNot { it.id == station.id } else list + station }
+        refresh()
+        return !exists
+    }
+
+    override suspend fun updateStation(station: FavoriteStation) {
+        _favoriteStations.update { list -> list.map { if (it.id == station.id) station else it } }
+        refresh()
+    }
+
+    override suspend fun removeStation(id: String) {
+        _favoriteStations.update { list -> list.filterNot { it.id == id } }
         refresh()
     }
 
@@ -235,14 +285,23 @@ class FakeFavoritesRepository(
         refresh()
     }
 
-    override suspend fun createGroup(name: String): FavoriteGroup {
-        val group = FavoriteGroup(id = "fake_group_${nextGroupId++}", name = name.trim(), sortOrder = _favoriteGroups.value.size)
+    override suspend fun createGroup(name: String, color: GroupColor?): FavoriteGroup {
+        val group = FavoriteGroup(
+            id = "fake_group_${nextGroupId++}",
+            name = name.trim(),
+            sortOrder = _favoriteGroups.value.size,
+            color = color
+        )
         _favoriteGroups.update { it + group }
         return group
     }
 
     override suspend fun renameGroup(groupId: String, newName: String) {
         _favoriteGroups.update { list -> list.map { if (it.id == groupId) it.copy(name = newName.trim()) else it } }
+    }
+
+    override suspend fun setGroupColor(groupId: String, color: GroupColor?) {
+        _favoriteGroups.update { list -> list.map { if (it.id == groupId) it.withColor(color) else it } }
     }
 
     override suspend fun deleteGroup(groupId: String) {
@@ -316,6 +375,14 @@ class FakeRealtimeRepository(
     /** [getLineDetail] 返回前先跑一下（测试用来挂起、数并发）；null = 直接返回 */
     var lineDetailHook: (suspend (lineId: String) -> Unit)? = null
 
+    /** 每次 [getLineDetail] 请求的候车站序（按调用顺序） */
+    val lineDetailTargetOrders: MutableList<Int?> = mutableListOf()
+
+    /** 测试推「别处刚拿到的线路详情」 */
+    val lineDetailUpdateFlow = MutableSharedFlow<LineDetailUpdate>(extraBufferCapacity = 16)
+
+    override val lineDetailUpdates: Flow<LineDetailUpdate> get() = lineDetailUpdateFlow
+
     /** 记录每次附近站点查询的 (城市, 纬度, 经度) */
     val nearbyStopsCalls: MutableList<Triple<TransitCity, Double, Double>> = mutableListOf()
 
@@ -375,6 +442,7 @@ class FakeRealtimeRepository(
         directionHint: Int
     ): Result<BusLineDetail> {
         lineDetailCalls += lineId
+        lineDetailTargetOrders += targetOrder
         lineDetailHook?.invoke(lineId)
         lineDetailsMap[lineId]?.let { return Result.success(it) }
         lineDetailResult?.let { return it }
@@ -423,6 +491,16 @@ class FakeLocationRepository(
     }
 
     override fun lastKnown(maxAgeMillis: Long): UserFix? = lastKnownResult
+
+    /** 有没有定位权限；首页提示「没有定位权限」时置 false */
+    var permissionGranted: Boolean = true
+
+    /** 系统「位置信息」总开关；首页提示「手机定位服务未开启」时置 false */
+    var systemLocationEnabled: Boolean = true
+
+    override fun hasPermission(): Boolean = permissionGranted
+
+    override fun isSystemLocationEnabled(): Boolean = systemLocationEnabled
 
     override fun fixes(tier: LocationCadence.Tier): Flow<UserFix> =
         if (tier == LocationCadence.Tier.OFF) emptyFlow() else live

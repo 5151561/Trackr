@@ -10,11 +10,13 @@ import com.trackr.core.database.entity.CandidateLineEntity
 import com.trackr.core.database.entity.FavoriteGroupEntity
 import com.trackr.core.database.entity.FavoriteItemEntity
 import com.trackr.core.database.entity.FavoriteLineEntity
+import com.trackr.core.database.entity.FavoriteStationEntity
 import com.trackr.core.database.entity.ReminderEntity
 import com.trackr.core.database.entity.RouteEntity
 import com.trackr.core.database.entity.RouteLegEntity
 import com.trackr.core.database.entity.SearchHistoryEntity
 import com.trackr.core.database.entity.StoreMetaEntity
+import com.trackr.core.database.entity.StoreMetaKeys
 
 /**
  * 一次导入的旧数据。某一项为 null 表示这次不动那张表（旧文件里没有这个 key，或者 JSON 坏了跳过）。
@@ -27,6 +29,8 @@ data class LegacyImport(
     val reminders: List<ReminderEntity>? = null,
     /** 收藏合一索引（旧存储里的 `favorite_items_json`，第 14 步起才有）。null = 不动，启动时仓库按车和路线对账补齐 */
     val favoriteItems: List<FavoriteItemEntity>? = null,
+    /** 收藏的站（旧存储里的 `favorite_stations_json`，issue #47 起才有）。null = 不动 */
+    val favoriteStations: List<FavoriteStationEntity>? = null,
     /** 写进 store_meta 的导入标记 */
     val meta: StoreMetaEntity
 )
@@ -83,6 +87,12 @@ interface LegacyImportDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFavoriteItems(items: List<FavoriteItemEntity>)
 
+    @Query("DELETE FROM favorite_station")
+    suspend fun deleteFavoriteStations()
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFavoriteStations(items: List<FavoriteStationEntity>)
+
     @Upsert
     suspend fun putMeta(entry: StoreMetaEntity)
 
@@ -107,6 +117,8 @@ interface LegacyImportDao {
         data.favoriteGroups?.let {
             deleteFavoriteGroups()
             insertFavoriteGroups(it)
+            // 旧文件里有这个 key 就说明分组建过（旧版存成 "[]" 就是用户删光了），迁过来之后不再补默认分组
+            putMeta(StoreMetaEntity(StoreMetaKeys.FAVORITE_GROUPS_INITIALIZED, "1"))
         }
         data.reminders?.let {
             deleteReminders()
@@ -115,6 +127,10 @@ interface LegacyImportDao {
         data.favoriteItems?.let {
             deleteFavoriteItems()
             insertFavoriteItems(it)
+        }
+        data.favoriteStations?.let {
+            deleteFavoriteStations()
+            insertFavoriteStations(it)
         }
         putMeta(data.meta)
     }

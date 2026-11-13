@@ -48,6 +48,19 @@ class AndroidLocationSource(context: Context) : LocationSource {
             ContextCompat.checkSelfPermission(appContext, Manifest.permission.ACCESS_COARSE_LOCATION) ==
             PackageManager.PERMISSION_GRANTED
 
+    /**
+     * 系统「位置信息」总开关。关着时所有 provider 都拿不到数据（权限给了也一样），
+     * 首页据此把提示写成「手机定位服务未开启」而不是笼统的「定位不可用」。
+     */
+    override fun isLocationEnabled(): Boolean {
+        val lm = locationManager ?: return false
+        return try {
+            LocationManagerCompat.isLocationEnabled(lm)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     /** 各个已开启的 provider 缓存的最近定位（fused / network / gps / passive，各一个） */
     override fun lastKnownFixes(): List<UserFix> {
         if (!hasAnyPermission()) return emptyList()
@@ -85,6 +98,8 @@ class AndroidLocationSource(context: Context) : LocationSource {
                 close()
                 return@callbackFlow
             }
+            // 先发出各 provider 缓存的最近定位，避免刚开定位或切档位时丢掉刚拿到的有效定位
+            lastKnownFixes().forEach { trySend(it) }
             val request = LocationRequestCompat.Builder(tier.intervalMillis)
                 .setQuality(
                     if (tier.highAccuracy) LocationRequestCompat.QUALITY_HIGH_ACCURACY
@@ -113,10 +128,10 @@ class AndroidLocationSource(context: Context) : LocationSource {
 
     private fun pickTrackingProviders(lm: LocationManager, tier: LocationCadence.Tier): List<String> {
         val enabled = runCatching { lm.getProviders(true) }.getOrDefault(emptyList())
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && LocationManager.FUSED_PROVIDER in enabled) {
-            return listOf(LocationManager.FUSED_PROVIDER)
-        }
         return buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && LocationManager.FUSED_PROVIDER in enabled) {
+                add(LocationManager.FUSED_PROVIDER)
+            }
             if (tier.highAccuracy && LocationManager.GPS_PROVIDER in enabled) add(LocationManager.GPS_PROVIDER)
             if (LocationManager.NETWORK_PROVIDER in enabled) add(LocationManager.NETWORK_PROVIDER)
             if (isEmpty() && LocationManager.GPS_PROVIDER in enabled) add(LocationManager.GPS_PROVIDER)

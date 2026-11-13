@@ -76,7 +76,7 @@ Koin 由 `TrackrApp.onCreate` 启动，Robolectric 用例里每个用例都会�
 | `deeplink` | `DeepLinkIntentsTest` | Intent ↔ `trackr://` 链接（第 18 步）：data 里的新链接；旧版 6 个 extra、两种拼法的旧 `OPEN_TRANSIT_CODE` action 兼容（只有 alipay 是支付宝）；`consume` 后同一个 Intent 不重放、不碰非 `trackr` 的 data；别的 App 传来的坏 Intent 忽略；动态快捷方式发的是 `ACTION_VIEW` + `trackr://line` | Robolectric (JVM) |
 | `data/remote/amap` | `AmapSdkManagerTest` | 高德 Key 本地持久化（`AmapKeyStorage`）：Android / Web 两槽分开存、读 Android Key 不回落到 Web 槽、旧 Key 从 `trackr_prefs` 挪出只做一次、新文件里已有的 Key 不被旧值覆盖（SDK 封装的用例第 17 步搬到 `:feature:route`） | Robolectric (JVM) |
 |  | `AmapSdkKeySyncTest` | 改了 Android Key 才重新注入 SDK：跳过启动时的值、改 Web Key 不注入、重复 `start()` 不开第二个收集 | 本地 JVM |
-| `data/remote/update` | `GithubUpdateCheckerTest` | 更新检查多源回退、强制更新判定、下载地址 https 与域名白名单校验、取消后不再试剩下的源（Ktor `MockEngine`） | Robolectric (JVM) |
+| `data/remote/update` | `GithubUpdateCheckerTest` | 更新检查并发多源择新（旧缓存 / 已最新响应不遮挡新版本）、部分源失败或无效时保留有效结果、强制更新判定、下载地址 https 与域名白名单校验、取消全部在途请求（Ktor `MockEngine`） | Robolectric (JVM) |
 | `data/local` | `StorageBackendTest` | 整套存储端到端：同一份旧数据经新存储和旧存储读出来完全相同、旧文件不被改动、新存储写入重开读回、USE_NEW_STORE 关了再开能带回旧存储期间的改动、库打不开时退回旧存储、旧的聚合配置在新旧存储里读成同一个主数据源 | Robolectric (JVM) |
 |  | `BackupRulesTest` | `backup_rules.xml` 和 `data_extraction_rules.xml` 两段：排除高德 Key（新旧两个文件）和追踪会话、不排除 `trackr.db` 和设置、没有 include、三段一样、Manifest 都接上了 | Robolectric (JVM) |
 | `data/repository` | `RouteGroupRepositoryTest` | 旧存储（SharedPreferences）上：路线分组与收藏分组增删改排序、并发写入不丢更新、JSON 损坏备份（第 14 步起经收藏合一仓库） | Robolectric (JVM) |
@@ -86,10 +86,10 @@ Koin 由 `TrackrApp.onCreate` 启动，Robolectric 用例里每个用例都会�
 | `di` | `KoinGraphVerifyTest` | Koin 依赖图：`appModule`、`platformBridgeModule`、`routeDataModule`、各 feature 的 `xxxModule` 和 `routeAndroidModule` 各自 `verify()`，静态检查构造参数都有绑定；`appModules` 就是这些模块按顺序拼起来；Robolectric 里把每个定义实际取一次（带参数的 ViewModel 用样例 key；`SearchViewModel` 给一个 `SavedStateHandle`） | Robolectric (JVM) |
 | `receiver` | `ScheduledReminderReceiverTest` | 定时提醒触发、自动跟车需精确闹钟、传给 `TrackingController` 的单线路目标；降级：非精确闹钟或启动被拒时改发通知并追加「系统限制未能自动开启跟车」提示，点「开启实时追踪」仍失败时保留通知、成功才关掉；点通知发 `trackr://line` 链接、解析出同一条线路详情（第 18 步） | Robolectric (JVM) |
 |  | `BootCompletedReceiverTest` | 开机禁用已错过的一次性提醒、时间变化重新调度、无关广播忽略 | Robolectric (JVM) |
-| `service` | `ArrivalAlertManagerTest` | 到站/临近提醒与实时通知并存时的去重 | Robolectric (JVM) |
+| `service` | `ArrivalAlertManagerTest` | 到站/临近提醒与实时通知并存时的去重、提醒自己过期（setTimeoutAfter）与结束追踪后按会话清场（#28） | Robolectric (JVM) |
 |  | `AndroidTrackingControllerTest` | 开始追踪时把「我的」里的到站前提醒写进目标、每次重读设置、后台不让启动前台服务时不留会话 | Robolectric (JVM) |
 |  | `LiveProgressNotificationHelperTest` | 实时进度通知进度计算与文案；一起等通知：标题写最先到的、正文只带第 2 条线、「我上车了 / 乘车码 / 结束」（乘车码发 `trackr://transit-code` 打开 App）、「上了哪辆？」和乘车中文字；有「上了哪辆？」待选时点通知发 `trackr://tracking/board?session=`、显式指向 `MainActivity`，没有待选照旧只拉起 App | Robolectric (JVM) |
-|  | `BusTrackingServiceTest` | 追踪服务：路线且有精确定位时前台服务带 `location` 类型、等车近站开定位；没有精确定位退回 `specialUse` 且不开定位；单线路不要 `location`；结束追踪时关定位并停服务；过时的启动请求先进前台再停；服务销毁时结束会话；一起等：3 条线每轮只 1 次站点请求、最先到的写进会话、带 `location` 类型，上车后只请求那一条线并以终点为目标 | Robolectric (JVM) |
+|  | `BusTrackingServiceTest` | 追踪服务：路线且有精确定位时前台服务带 `location` 类型、等车近站开定位；没有精确定位退回 `specialUse` 且不开定位；单线路不要 `location`；结束追踪时关定位、停服务并撤掉这一项的到站提醒（#28）；过时的启动请求先进前台再停；服务销毁时结束会话；一起等：3 条线每轮只 1 次站点请求、最先到的写进会话、带 `location` 类型，上车后只请求那一条线并以终点为目标 | Robolectric (JVM) |
 | `service/vendor` | `LiveUpdatePromotionTest` | Android 16 Live Update 推广通知构建与厂商识别 | Robolectric (JVM) |
 |  | `XiaomiFocusAdapterTest` | 小米焦点通知 JSON 负载构建 | Robolectric (JVM) |
 | `ui` | `ScreenshotGeneratorTest` | 主要页面明暗主题截图生成 | Robolectric Compose UI |
@@ -119,8 +119,11 @@ Koin 由 `TrackrApp.onCreate` 启动，Robolectric 用例里每个用例都会�
 |  | `ChooseBoardedBusViewModelTest` | 「上了哪辆？」导航弹层（`ScreenKey.ChooseBoardedBus`）：有待选时显示每辆车和终点、选了交给 `TrackingController`、「还没上」后关；没有待选、链接里是别的会话、追踪结束都关 | commonTest（JVM；iOS 未验） |
 | `:feature:line` `ui/screens/linedetail` | `LineDetailViewModelTest` | 线路详情（第 20 步 v3）：初次加载拆成静态 / 实时两半（带目标站序只请求一次、不带时为默认站补一次）；选站 / 手动刷新后下一轮从那一刻起再等 10 秒；下拉刷新只在下拉时画圈；站表先读磁盘缓存（网络没回来先显示、不挡请求、站表变了才写回、静态部分沿用旧实例、缓存上点过的站不被初次结果改掉）；跟车；收藏切换及提示条（有分组时带「换分组」、换分组后提示）；定时提醒保存并提示；换向找同名站；乘车码弹层与偏好；追踪当前站（提前 2 站）和「追踪本站」判断；车都过了用时刻表补下一班（快来的车不用）；上一轮没回来跳过；回到页面只在过时时刷新 | commonTest（JVM；iOS 只编译和链接测试，不跑） |
 |  | `BusFollowContentTest` | 跟车内容渲染与空车辆处理 | Robolectric Compose UI |
-|  | `StationArrivalContentTest` | 线路页主卡：在路上（大字分钟、小字站数、车牌、预计到达、下一辆）、到站了、车都过了只给下一班始发时间（没有时用时刻表或提示）、首班、末班已过、实时没回来显示「正在查车…」、追踪中标记、预警 chips 已去掉、「全线 N 辆车在途 · 查看」与「XX站上车」点击；反向切换按钮不在主卡 | Robolectric Compose UI |
-| `:feature:line` `ui/components` | `ExpressiveRouteRailUiTest` | 竖向走向条（第 20 步删了横向）渲染与点击、「候车中」标记、放进 `LazyColumn` 的 `routeRailItems` 渲染与点击、车辆标签不进文字、线段颜色 |
+|  | `LineDetailEntryScrollTest` | 从某个站点点进线路页：整页（含走向条）直接跳到那一站、主卡不被裁、收起 / 展开卡片、横排竖排两种走向条都跳到位；顶上「始发 → 终点」站名太长时滚动而不是打省略号 | Robolectric Compose UI |
+|  | `StationArrivalContentTest` | 线路页主卡：在路上（大字分钟、小字站数、车牌、预计到达、下一辆）、到站了、车都过了只给下一班始发时间（没有时用时刻表或提示）、首班、末班已过、实时没回来显示「正在查车…」、追踪中标记、预警 chips 已去掉、「全线 N 辆车在途 · 查看」与候车站胶囊（只写站名、长站名在胶囊里滚动不省略）点击；反向切换按钮不在主卡 | Robolectric Compose UI |
+| `:feature:line` `ui/components` | `ExpressiveRouteRailUiTest` | 竖向走向条（第 20 步删了横向）渲染与点击、「候车中」标记、放进 `LazyColumn` 的 `routeRailItems` 渲染与点击、车辆标签不进文字、线段颜色 | Robolectric Compose UI |
+|  | `HorizontalRouteRailUiTest` | 横排走向条：站名竖排但读屏读完整站名、点站换候车、点车标跟随、空站表不画、长站名按字数给足高度不被省略号吃、贴满整宽；带括号的站名整段一个 Text、括号那几行换全角空格占位再画上横版括号（对齐字心、不再拆成单字，见 #23） | Robolectric Compose UI |
+|  | `BusRailPositionTest` / `RailVerticalNameTest` | 横排走向条的车位置（按 `segmentProgress` 插值、没坐标贴站、站序认不出不画）与竖排站名的括号转换（哪些字换成横版括号、其余不换、一字一行） | commonTest（JVM；iOS 只编译和链接测试，不跑） |
 |  | `TransitCodeBottomSheetTest` | 乘车码选择弹层：两个渠道都显示，点支付宝回调 `(ALIPAY, 不记住)` | Robolectric Compose UI |
 | `:feature:line` `ui/components/timetable` | `TimetableBottomSheetTest` | 时刻表底部弹窗渲染 | Robolectric Compose UI |
 | `:feature:route` `ui/screens/routeplan` | `RoutePlanViewModelTest` | 路线规划：输入提示防抖只请求最后一个词、太短的词不请求并清空、同城同词命中 LRU 缓存；算路取消上一次、相同查询走缓存、「我的位置」不可用时报错且不查 POI、跨城才带 `cityd`；高德 Key 跟着仓库走、旧 Web 槽不当 Android Key；存入收藏没选分组时用当前选中的收藏分组 | commonTest（JVM；iOS 只编译和链接测试，不跑） |
@@ -172,7 +175,7 @@ Koin 由 `TrackrApp.onCreate` 启动，Robolectric 用例里每个用例都会�
 |  | `LocationRepositoryTest` | 首页取定位：够新够准直接用、强制刷新 10 秒 / 平时 60 秒、4.5 秒窗口取最准且 ≤100 m 提前结束、超过 10 分钟的旧定位不用、无权限不定位；规划页 lastKnown 取 10 分钟内最准的 | commonTest（JVM + iOS 模拟器） |
 |  | `CountyLevelCityMatchTest` | 县级市/县城匹配与省份校验 | commonTest（JVM + iOS 模拟器） |
 | `:core:data` `route` | `RoutePlanRepositoryTest` | `DefaultRoutePlanRepository` 缓存（第 17 步）：同城、同坐标、同一 15 分钟时间桶的算路命中缓存，跨时间桶重新算；输入提示按城市 + 关键字缓存，空结果不缓存 | commonTest（JVM + iOS 模拟器） |
-| `:core:data` `repository` | `FavoritesRepositoryTest` | 收藏合一（第 14 步）在 Room 内存库上：车和路线合并排序（新车在最前、新路线在最后）、拖动排序（跨类型、只给几条）、改分组、删分组后车和路线都变不分组、旧数据迁入后顺序和分组不变、启动对账（删孤儿行、补缺的）、默认分组、清理假数据、并发写不丢 | Robolectric（只 JVM） |
+| `:core:data` `repository` | `FavoritesRepositoryTest` | 收藏合一（第 14 步）在 Room 内存库上：车和路线合并排序（新车在最前、新路线在最后）、拖动排序（跨类型、只给几条）、改分组、删分组后车和路线都变不分组、旧数据迁入后顺序和分组不变、启动对账（删孤儿行、补缺的）、默认分组（只在从没建过分组时写，删光后重开不再补回来）、清理假数据、并发写不丢 | Robolectric（只 JVM） |
 | `:core:data` | `TrackrDatabaseMigrationTest` | 库 1 -> 2：按 `schemas/.../1.json` 手工建版本 1 的库再用正式 builder 打开，`favorite_item` 按原顺序生成（车在前、路线按 sortOrder），分组按收藏页原来的规则补，旧表一行不变，仓库读出的顺序和分组和升级前一样；空库、重开 | Robolectric（只 JVM） |
 | `:core:data` `legacy` | `LegacyLibraryMigrationTest` | 旧 SharedPreferences -> Room / DataStore：每个旧 key 一条（收藏、搜索历史、路线、收藏分组、收藏合一索引 `favorite_items_json`、提醒 + 计划触发时刻、6 个设置（聚合优先级不导入）、两个 Key 槽，含 0a4fdab 之前存在 `trackr_prefs` 的 Key 与「Key 文件优先」）；旧文件前后一字不差；损坏 JSON 不崩、只跳过那一项、原文复制到 `legacy_backup/`；已有 `_corrupt_backup_` 原样复制；同一代只跑一次、换代只替换旧文件里有的项；库重建后重新导入 | Robolectric（只 JVM） |
 |  | `SettingsMigrationTest` | 设置和 Key 的只读 DataMigration：按类型搬、旧的聚合配置（`engine_mode = ALL` 或没存 + 优先级）落成主数据源（D1）、类型不对跳过、旧 key 不删、同一代不重跑、再导只覆盖旧文件里有的 key、空的旧 Key 不清掉新 Key、Key 不进设置文件 | Robolectric（只 JVM） |

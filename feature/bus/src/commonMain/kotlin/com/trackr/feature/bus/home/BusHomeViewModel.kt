@@ -11,11 +11,14 @@ import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.data.repository.UserLocationStore
 import com.trackr.core.domain.platform.Announcer
 import com.trackr.core.domain.platform.NoAnnouncer
+import com.trackr.core.domain.platform.NoSystemSettingsLauncher
 import com.trackr.core.domain.platform.ProcessMonotonicClock
+import com.trackr.core.domain.platform.SystemSettingsLauncher
 import com.trackr.core.domain.platform.TrackingController
 import com.trackr.core.domain.platform.TransitCodeLauncher
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
+import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
@@ -27,6 +30,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -38,7 +42,7 @@ import kotlin.concurrent.Volatile
  * - 附近站固定 6 个；附近站 + 收藏实时每 15 秒轮询一次，由 [BusHomeRoute] 随 STARTED 开关（§4.4），
  *   恢复时距上次刷新超过一个周期就立即补刷。
  * - 定位走 [LocationRepository.bestFix]（4.5 秒窗口内取最准）。
- * - 追踪卡读整个会话（一起等的几条线都在里面）；「结束」调 [TrackingController.stopTracking]，路线状态一起清。
+ * - 追踪卡读所有会话（同时可以追多项，一项一张卡）；「结束」只停那一项。
  * - 乘车码按钮：「我的」里选了平台就直接打开，选了「每次询问」才弹选择。
  */
 class BusHomeViewModel(
@@ -55,6 +59,8 @@ class BusHomeViewModel(
     private val trackingRepository: TrackingRepository,
     /** 打开支付宝 / 云闪付乘车码 */
     private val transitCodeLauncher: TransitCodeLauncher,
+    /** 定位提示里的「去授权 / 去开启」跳系统设置页；不传（测试、还没做的平台）就什么都不打开 */
+    private val systemSettings: SystemSettingsLauncher = NoSystemSettingsLauncher,
     private val enableAutoPolling: Boolean = true,
     /** 单调时钟（毫秒），用于判断恢复轮询时距上次刷新是否已超过一个周期；测试可替换 */
     private val elapsedRealtimeMillis: () -> Long = { ProcessMonotonicClock.elapsedMillis() },
@@ -178,6 +184,17 @@ class BusHomeViewModel(
             }
         }
 
+        // 新收藏了站（issue #47）：马上查一次，不用等下一轮刷新才从「正在查车」变成到站
+        viewModelScope.launch {
+            favorites.favoriteStations
+                .map { list -> list.map { it.id }.toSet() }
+                .distinctUntilChanged()
+                .drop(1)
+                .collect { ids ->
+                    if (ids.any { FavoriteItem.stationKey(it) !in _uiState.value.favoritesRealtime }) refreshFavoritesRealtime()
+                }
+        }
+
         // 收藏分组；选中的分组被删了就回到「全部」
         viewModelScope.launch {
             favorites.favoriteGroups.collect { groups ->
@@ -188,15 +205,15 @@ class BusHomeViewModel(
             }
         }
 
-        // 追踪：当前这一程 + 整个会话（一起等的几条线）
+        // 追踪：所有会话（可以同时追多项，首页一项一张卡）+ 主会话这一程的状态
         viewModelScope.launch {
-            trackingRepository.legState.collect { session ->
-                edit { it.copy(activeTracking = session) }
+            trackingRepository.sessions.collect { sessions ->
+                edit { it.copy(trackingSessions = sessions) }
             }
         }
         viewModelScope.launch {
-            trackingRepository.session.collect { session ->
-                edit { it.copy(trackingSession = session) }
+            trackingRepository.legState.collect { session ->
+                edit { it.copy(activeTracking = session) }
             }
         }
 
@@ -232,7 +249,7 @@ class BusHomeViewModel(
         when (event) {
             BusHomeEvent.Refresh -> refresh()
             BusHomeEvent.RetryLocation -> refreshLocationAndNearby()
-            BusHomeEvent.StopTracking -> stopTracking()
+            is BusHomeEvent.StopTracking -> stopTracking(event.sessionId, event.watchLineId)
             is BusHomeEvent.SelectGroup -> selectGroup(event.groupId)
             BusHomeEvent.TransitCodeClicked -> onTransitCodeClicked()
             is BusHomeEvent.TransitCodeChosen -> onTransitCodeChosen(event.provider, event.saveAsDefault)
@@ -245,6 +262,8 @@ class BusHomeViewModel(
             is BusHomeEvent.ProvinceSelected -> selectProvince(event.province)
             is BusHomeEvent.CitySelected -> selectCity(event.city)
             BusHomeEvent.RelocateCity -> refreshLocationAndNearby(switchCity = true)
+            BusHomeEvent.OpenLocationSettings -> systemSettings.openLocationSettings()
+            BusHomeEvent.OpenAppSettings -> systemSettings.openAppSettings()
             BusHomeEvent.OpenSearch,
             is BusHomeEvent.OpenLine,
             is BusHomeEvent.OpenStop,
@@ -284,6 +303,32 @@ class BusHomeViewModel(
      */
     fun refreshLocationAndNearby(switchCity: Boolean = false) {
         refresh(switchCity)
+    }
+
+    /**
+     * 回到前台时调用：上次定位失败、且失败的原因已经变了，就静默再定位一次（issue #34）。
+     *
+     * 「原因变了」= 用户去系统设置里把那一层补上了（没授权→授权了、总开关关着→开了）。
+     * 原因没变就不重试：每次从搜索页返回都空转 4.5 秒定位窗口、再打一次附近站，纯属白烧电。
+     */
+    fun retryLocationIfFailed() {
+        val state = _uiState.value
+        val issue = state.locationIssue ?: return
+        if (state.isLocating || state.isRefreshing) return
+        if (diagnoseLocationIssue() == issue) return
+        refresh()
+    }
+
+    /**
+     * [locationRepository.bestFix] 没给定位时，分清是哪一层的锅（提示文案和按钮都为它服务）。
+     *
+     * 顺序不能反：没授权时说「手机定位服务未开启」是误导（用户第一件事该是授权）；
+     * 两层都正常时才是「这一轮没取到」。
+     */
+    private fun diagnoseLocationIssue(): LocationIssue = when {
+        !locationRepository.hasPermission() -> LocationIssue.PermissionMissing
+        !locationRepository.isSystemLocationEnabled() -> LocationIssue.ServiceDisabled
+        else -> LocationIssue.Unavailable
     }
 
     private fun loadNearbyStops(
@@ -327,7 +372,7 @@ class BusHomeViewModel(
      */
     fun refresh(switchCity: Boolean = false) {
         viewModelScope.launch {
-            edit { it.copy(isRefreshing = true, isLocating = true, locationError = null) }
+            edit { it.copy(isRefreshing = true, isLocating = true, locationIssue = null) }
 
             val favJob = launch {
                 val favResult = realtime.refreshFavoritesRealtime()
@@ -364,7 +409,7 @@ class BusHomeViewModel(
                                 currentLat = lat,
                                 currentLng = lng,
                                 isLocating = false,
-                                locationError = null
+                                locationIssue = null
                             )
                         }
                         Triple(lat, lng, resolvedCity)
@@ -376,7 +421,7 @@ class BusHomeViewModel(
                                 currentLat = lat,
                                 currentLng = lng,
                                 isLocating = false,
-                                locationError = null
+                                locationIssue = null
                             )
                         }
                         Triple(lat, lng, settings.selectedCity.value)
@@ -391,7 +436,7 @@ class BusHomeViewModel(
                             currentLat = lat,
                             currentLng = lng,
                             isLocating = false,
-                            locationError = LOCATION_UNAVAILABLE
+                            locationIssue = diagnoseLocationIssue()
                         )
                     }
                     Triple(lat, lng, currentCity)
@@ -606,10 +651,17 @@ class BusHomeViewModel(
         }
     }
 
-    fun stopTracking() {
-        // 停止追踪（单线路、路线、一起等一样）；仓库会立刻变成未追踪（路线状态一起清），追踪卡随之消失
+    /**
+     * 一张追踪卡上的「结束」：只停这一项，别的追踪继续。
+     * @param watchLineId 一起等里的哪一条线（只去掉这条）；null = 结束整份会话
+     */
+    fun stopTracking(sessionId: String, watchLineId: String? = null) {
         try {
-            trackingController.stopTracking()
+            if (watchLineId != null) {
+                trackingController.removeWatchLine(sessionId, watchLineId)
+            } else {
+                trackingController.stopTracking(sessionId)
+            }
         } catch (_: Exception) {
         }
     }
@@ -660,7 +712,6 @@ class BusHomeViewModel(
         const val NEARBY_STOPS_LIMIT = 6
         const val POLLING_INTERVAL_MS = 15_000L
 
-        const val LOCATION_UNAVAILABLE = "定位不可用，已保留当前位置"
         const val NEARBY_FAILED = "附近站没刷出来，下拉再试一次"
 
         /** 长辈首页没有下拉刷新：附近站空着时下面有「重新定位」按钮（第 32 步遗留） */

@@ -43,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberBottomSheetState
+import com.trackr.ui.bottombar.LocalBottomBarHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +67,11 @@ import com.trackr.core.designsystem.resources.transit_code
 import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.RailMode
+import com.trackr.core.model.ThemeMode
+import com.trackr.feature.me.resources.theme_title
+import com.trackr.feature.me.resources.me_theme_system
+import com.trackr.feature.me.resources.me_theme_light
+import com.trackr.feature.me.resources.me_theme_dark
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.feature.me.resources.Res as MeRes
@@ -74,6 +80,8 @@ import com.trackr.feature.me.resources.me_about_title
 import com.trackr.feature.me.resources.me_amap_title
 import com.trackr.feature.me.resources.me_arrival_alert
 import com.trackr.feature.me.resources.me_arrival_alert_desc
+import com.trackr.feature.me.resources.me_auto_stop_after_boarding
+import com.trackr.feature.me.resources.me_auto_stop_after_boarding_desc
 import com.trackr.feature.me.resources.me_data_source
 import com.trackr.feature.me.resources.me_elder_mode
 import com.trackr.feature.me.resources.me_elder_mode_desc
@@ -88,18 +96,25 @@ import com.trackr.feature.me.resources.me_live_notify_desc
 import com.trackr.feature.me.resources.me_lockscreen
 import com.trackr.feature.me.resources.me_lockscreen_full
 import com.trackr.feature.me.resources.me_lockscreen_hidden
+import com.trackr.feature.me.resources.me_notify_broken
+import com.trackr.feature.me.resources.me_notify_broken_channel
+import com.trackr.feature.me.resources.me_notify_broken_live
+import com.trackr.feature.me.resources.me_notify_broken_permission
+import com.trackr.feature.me.resources.me_notify_fix
 import com.trackr.feature.me.resources.me_reminders
 import com.trackr.feature.me.resources.me_reminders_count
 import com.trackr.feature.me.resources.me_reminders_empty
 import com.trackr.feature.me.resources.me_reminders_empty_hint
 import com.trackr.feature.me.resources.me_reminders_none
-import com.trackr.feature.me.resources.me_status_chip
+import com.trackr.feature.me.resources.me_live_update_desc
+import com.trackr.feature.me.resources.me_live_update_name
 import com.trackr.feature.me.resources.me_status_chip_off
 import com.trackr.feature.me.resources.me_status_chip_on
 import com.trackr.feature.me.resources.me_status_chip_settings
 import com.trackr.feature.me.resources.me_status_chip_unsupported
 import com.trackr.feature.me.resources.me_title
 import com.trackr.feature.me.resources.me_transit_code_button
+import com.trackr.feature.me.resources.me_transit_code_button_desc
 import com.trackr.feature.me.resources.me_version
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.resources.vectorResource
@@ -119,15 +134,22 @@ fun MeScreen(
     var showRailModeDialog by rememberSaveable { mutableStateOf(false) }
     var showEngineModeDialog by rememberSaveable { mutableStateOf(false) }
     var showRemindersSheet by rememberSaveable { mutableStateOf(false) }
+    // 状态栏胶囊「去开启」的说明弹窗：只有用户自己点进来时才出现，开始追踪时不弹（issue #29）
+    var showLiveUpdateGuide by rememberSaveable { mutableStateOf(false) }
 
 
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     val layoutDirection = LocalLayoutDirection.current
+    val themeModeLabels = mapOf(
+        ThemeMode.System to stringResource(MeRes.string.me_theme_system),
+        ThemeMode.Light to stringResource(MeRes.string.me_theme_light),
+        ThemeMode.Dark to stringResource(MeRes.string.me_theme_dark)
+    )
 
     Scaffold(
         modifier = modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         contentWindowInsets = WindowInsets.safeDrawing,
-        snackbarHost = { MeMessageHost(state.userMessages) { onEvent(MeEvent.MessageShown(it)) } },
+        snackbarHost = { MeMessageHost(state.userMessages, Modifier.padding(bottom = LocalBottomBarHeight.current)) { onEvent(MeEvent.MessageShown(it)) } },
         topBar = {
             LargeTopAppBar(
                 title = { Text(text = stringResource(MeRes.string.me_title), fontWeight = FontWeight.Bold) },
@@ -147,7 +169,7 @@ fun MeScreen(
                 start = innerPadding.calculateStartPadding(layoutDirection) + 16.dp,
                 top = innerPadding.calculateTopPadding() + 8.dp,
                 end = innerPadding.calculateEndPadding(layoutDirection) + 16.dp,
-                bottom = innerPadding.calculateBottomPadding() + 24.dp
+                bottom = innerPadding.calculateBottomPadding() + LocalBottomBarHeight.current + 24.dp
             ),
             verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
@@ -167,6 +189,12 @@ fun MeScreen(
                         value = railModeLabel(state.railMode),
                         onClick = { showRailModeDialog = true }
                     )
+                    GroupDivider()
+                    SettingRow(
+                        title = stringResource(MeRes.string.theme_title),
+                        value = themeModeLabels.getValue(state.themeMode),
+                        onClick = { onEvent(MeEvent.OpenThemeSettings) }
+                    )
                 }
             }
 
@@ -180,7 +208,7 @@ fun MeScreen(
                     GroupDivider()
                     SwitchRow(
                         title = stringResource(MeRes.string.me_transit_code_button),
-                        subtitle = null,
+                        subtitle = stringResource(MeRes.string.me_transit_code_button_desc),
                         checked = state.showTransitCodeButton,
                         onCheckedChange = { onEvent(MeEvent.SetShowTransitCodeButton(it)) }
                     )
@@ -196,6 +224,13 @@ fun MeScreen(
                         subtitle = stringResource(MeRes.string.me_arrival_alert_desc),
                         value = alertThresholdLabel(state.alertThresholdStops),
                         onClick = { showAlertThresholdDialog = true }
+                    )
+                    GroupDivider()
+                    SwitchRow(
+                        title = stringResource(MeRes.string.me_auto_stop_after_boarding),
+                        subtitle = stringResource(MeRes.string.me_auto_stop_after_boarding_desc),
+                        checked = state.autoStopAfterBoarding,
+                        onCheckedChange = { onEvent(MeEvent.SetAutoStopAfterBoarding(it)) }
                     )
                     GroupDivider()
                     SettingRow(
@@ -226,12 +261,29 @@ fun MeScreen(
                         checked = state.showOnLockScreen,
                         onCheckedChange = { onEvent(MeEvent.SetShowOnLockScreen(it)) }
                     )
+                    // 系统那边把提醒关了 / 降级了：说清楚是哪一项，点一下直达对应设置页
+                    state.notificationHealth?.let { health ->
+                        GroupDivider()
+                        SettingRow(
+                            title = stringResource(MeRes.string.me_notify_broken),
+                            subtitle = when {
+                                !health.notificationsEnabled ->
+                                    stringResource(MeRes.string.me_notify_broken_permission)
+                                !health.alertChannelAudible ->
+                                    stringResource(MeRes.string.me_notify_broken_channel)
+                                else -> stringResource(MeRes.string.me_notify_broken_live)
+                            },
+                            value = stringResource(MeRes.string.me_notify_fix),
+                            valueColor = TrackrTheme.colors.warn,
+                            onClick = { onEvent(MeEvent.OpenAlertChannelSettings) }
+                        )
+                    }
                     state.liveUpdate?.let { liveUpdate ->
                         GroupDivider()
                         SettingRow(
-                            title = stringResource(MeRes.string.me_status_chip),
+                            title = stringResource(MeRes.string.me_live_update_name),
                             subtitle = if (liveUpdate.supported) {
-                                liveUpdate.systemName
+                                stringResource(MeRes.string.me_live_update_desc)
                             } else {
                                 stringResource(MeRes.string.me_status_chip_unsupported)
                             },
@@ -245,7 +297,14 @@ fun MeScreen(
                             } else {
                                 null
                             },
-                            onClick = { onEvent(MeEvent.OpenLiveUpdateSettings) }
+                            // 支持但没开：先说明开了有什么用，再去系统设置；已开 / 不支持直接跳设置
+                            onClick = {
+                                if (liveUpdate.supported && !liveUpdate.allowed) {
+                                    showLiveUpdateGuide = true
+                                } else {
+                                    onEvent(MeEvent.OpenLiveUpdateSettings)
+                                }
+                            }
                         )
                     }
                 }
@@ -273,6 +332,17 @@ fun MeScreen(
                 }
             }
         }
+    }
+
+    val liveUpdateStatus = state.liveUpdate
+    if (showLiveUpdateGuide && liveUpdateStatus != null) {
+        LiveUpdateGuideDialog(
+            onDismissRequest = { showLiveUpdateGuide = false },
+            onGoToSettings = {
+                showLiveUpdateGuide = false
+                onEvent(MeEvent.OpenLiveUpdateSettings)
+            }
+        )
     }
 
     if (showTransitCodeDialog) {

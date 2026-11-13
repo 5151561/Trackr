@@ -1,7 +1,11 @@
 package com.trackr.feature.bus.home
 
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -12,6 +16,8 @@ import com.trackr.core.designsystem.theme.TrackrTheme
 import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
+import com.trackr.core.model.FavoriteStation
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LiveBus
 import com.trackr.core.model.NearbyStop
@@ -24,6 +30,7 @@ import com.trackr.core.model.TransitCity
 import com.trackr.core.model.WatchLine
 import com.trackr.core.model.WatchedLine
 import com.trackr.ui.components.transitcode.TRANSIT_CODE_FAB_TAG
+import com.trackr.ui.bottombar.LocalBottomBarHeight
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -75,7 +82,8 @@ class BusHomeScreenTest {
         session: TrackingSession? = null,
         withFavorites: Boolean = true,
         groups: List<FavoriteGroup> = emptyList(),
-        nearbyLineName: String = "19"
+        nearbyLineName: String = "19",
+        favGroupId: String? = null
     ): BusHomeUiState {
         val nearby = NearbyStop(
             stopId = "n1",
@@ -94,9 +102,9 @@ class BusHomeScreenTest {
         val raw = BusHomeUiState(
             currentCity = shenzhen,
             favorites = if (withFavorites) listOf(fav) else emptyList(),
-            favoriteItems = if (withFavorites) listOf(FavoriteItem.Stop(fav, groupId = null, sortOrder = 0)) else emptyList(),
+            favoriteItems = if (withFavorites) listOf(FavoriteItem.Stop(fav, groupId = favGroupId, sortOrder = 0)) else emptyList(),
             favoriteGroups = groups,
-            trackingSession = session,
+            trackingSessions = listOfNotNull(session),
             nearbyStops = listOf(nearby)
         )
         return BusHomeMapper.derive(BusHomeUiState(), raw)
@@ -108,6 +116,69 @@ class BusHomeScreenTest {
                 BusHomeScreen(state = state, onEvent = { events += it })
             }
         }
+    }
+
+    @Test
+    fun transitCodeFab_tracksPlatformBarHeight_withoutFixedMaterialClearance() {
+        val height = mutableStateOf(80.dp)
+        composeTestRule.setContent {
+            TrackrTheme {
+                CompositionLocalProvider(LocalBottomBarHeight provides height.value) {
+                    BusHomeScreen(state = stateOf(), onEvent = {})
+                }
+            }
+        }
+        val fab = composeTestRule.onNodeWithTag(TRANSIT_CODE_FAB_TAG)
+        val materialBottom = fab.getUnclippedBoundsInRoot().bottom
+        composeTestRule.runOnIdle { height.value = 49.dp }
+        val nativeBottom = fab.getUnclippedBoundsInRoot().bottom
+        assertEquals(31f, (nativeBottom - materialBottom).value, 0.5f)
+        composeTestRule.runOnIdle { height.value = 0.dp }
+        assertEquals(49f, (fab.getUnclippedBoundsInRoot().bottom - nativeBottom).value, 0.5f)
+    }
+
+    @Test
+    fun favoriteStation_showsOneRow_withFirstLines_andOpensStop() {
+        val station = FavoriteStation(
+            id = "051_CHELAILE_科技园站", cityId = "051", stopName = "科技园站", stopId = "s1", physicalStId = "p1",
+            platformLabel = "往北"
+        )
+        val item = FavoriteItem.Station(station, groupId = null, sortOrder = 0)
+        fun status(name: String, eta: Int) = NearbyStopLineStatus(
+            line = BusLineDirection(lineId = "l$name", name = name, startStop = "A", endStop = "B"),
+            targetOrder = 5, targetStopId = "s1", targetStopName = "科技园站",
+            approachingBuses = listOf(LiveBus(busId = "b$name", plateOrFleetNo = "", order = 4, etaSeconds = eta))
+        )
+        val raw = BusHomeUiState(
+            currentCity = shenzhen,
+            favoriteItems = listOf(item),
+            favoritesRealtime = mapOf(item.key to NearbyStop(stopId = "s1", name = "科技园站", lines = listOf(status("325", 240), status("19", 120))))
+        )
+        setContent(BusHomeMapper.derive(BusHomeUiState(), raw))
+
+        composeTestRule.onNodeWithText("科技园站 · 往北").assertIsDisplayed()
+        composeTestRule.onNodeWithText("19 2 分", substring = true).assertIsDisplayed()
+        composeTestRule.onNodeWithText("2 条线").assertIsDisplayed()
+
+        composeTestRule.onNodeWithTag(BusHomeTags.favoriteRow(item.key)).performClick()
+        val open = events.filterIsInstance<BusHomeEvent.OpenStop>().single().target
+        assertEquals("s1", open.stopId)
+        assertEquals("p1", open.physicalStId)
+    }
+
+    @Test
+    fun favoriteStation_notFound_saysSo() {
+        val station = FavoriteStation(id = "x", cityId = "051", stopName = "改道站", stopId = "s9")
+        val item = FavoriteItem.Station(station, groupId = null, sortOrder = 0)
+        val raw = BusHomeUiState(
+            currentCity = shenzhen,
+            favoriteItems = listOf(item),
+            favoritesRealtime = mapOf(item.key to NearbyStop(stopId = "s9", name = "改道站"))
+        )
+        setContent(BusHomeMapper.derive(BusHomeUiState(), raw))
+
+        composeTestRule.onNodeWithText("改道站").assertIsDisplayed()
+        composeTestRule.onNodeWithText("这个站暂时查不到，可能临时改道").assertIsDisplayed()
     }
 
     @Test
@@ -167,6 +238,27 @@ class BusHomeScreenTest {
     }
 
     @Test
+    fun groupColor_stripeOnCard_dotOnChip() {
+        val colored = FavoriteGroup(id = "g1", name = "上班", color = GroupColor.Preset.BLUE)
+        val plain = FavoriteGroup(id = "g2", name = "回家")
+        setContent(stateOf(groups = listOf(colored, plain), favGroupId = "g1"))
+
+        val cardTag = BusHomeTags.favoriteRow("stop_f1")
+        composeTestRule.onNodeWithTag(BusHomeTags.accentStripe(cardTag), useUnmergedTree = true).assertExists()
+        composeTestRule.onNodeWithTag(BusHomeTags.groupChipDot("g1"), useUnmergedTree = true).assertExists()
+        composeTestRule.onNodeWithTag(BusHomeTags.groupChipDot("g2"), useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
+    fun groupWithoutColor_noStripe() {
+        setContent(stateOf(groups = listOf(FavoriteGroup(id = "g1", name = "上班")), favGroupId = "g1"))
+
+        val cardTag = BusHomeTags.favoriteRow("stop_f1")
+        composeTestRule.onNodeWithTag(cardTag).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(BusHomeTags.accentStripe(cardTag), useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @Test
     fun noFavorites_showsOneLineHint_noEditButton() {
         setContent(stateOf(withFavorites = false))
 
@@ -176,30 +268,27 @@ class BusHomeScreenTest {
     }
 
     @Test
-    fun watchTogetherCard_foldsExtraLines_andExpandsOnTap() {
-        setContent(stateOf(session = watchSession(lineCount = 5)))
+    fun watchTogether_oneCardPerLine_eachOpensItsOwnLine() {
+        setContent(stateOf(session = watchSession(lineCount = 3)))
 
-        composeTestRule.onNodeWithText("一起等 5 条 · 科技园站").assertIsDisplayed()
-        composeTestRule.onNodeWithText("2 分钟").assertIsDisplayed()
-        composeTestRule.onNodeWithText("L1 先到 · 还有 1 站").assertIsDisplayed()
-        // 大字 1 条 + 下面 2 条，剩下 2 条折叠
-        composeTestRule.onNodeWithText("L2").assertIsDisplayed()
-        composeTestRule.onNodeWithText("L3").assertIsDisplayed()
-        composeTestRule.onNodeWithText("L4").assertDoesNotExist()
-        composeTestRule.onNodeWithText("还有 2 条").performClick()
-        composeTestRule.onNodeWithText("L4").assertIsDisplayed()
-        composeTestRule.onNodeWithText("L5").assertIsDisplayed()
+        composeTestRule.onNodeWithText("追踪 L1 · 科技园站").assertIsDisplayed()
+        composeTestRule.onNodeWithText("追踪 L3 · 科技园站").assertIsDisplayed()
 
-        composeTestRule.onNodeWithTag(BusHomeTags.STOP_TRACKING).performClick()
-        assertEquals(BusHomeEvent.StopTracking, events.last())
+        // 第二张卡点进去是 L2 的线路页
+        composeTestRule.onAllNodesWithTag(BusHomeTags.TRACKING_CARD)[1].performClick()
+        val opened = events.last() as BusHomeEvent.OpenLine
+        assertEquals("w2", opened.target.lineId)
+        assertEquals("L2", opened.target.lineName)
     }
 
     @Test
-    fun watchTogetherCard_fewLines_noFoldButton() {
-        setContent(stateOf(session = watchSession(lineCount = 2)))
+    fun watchTogether_stopOnlyRemovesThatLine() {
+        setContent(stateOf(session = watchSession(lineCount = 3)))
 
-        composeTestRule.onNodeWithText("一起等 2 条 · 科技园站").assertIsDisplayed()
-        composeTestRule.onNodeWithTag(BusHomeTags.WATCH_MORE).assertDoesNotExist()
+        val stops = composeTestRule.onAllNodesWithTag(BusHomeTags.STOP_TRACKING)
+        assertEquals(3, stops.fetchSemanticsNodes().size)
+        stops[0].performClick()
+        assertEquals(BusHomeEvent.StopTracking("x", "w1"), events.last())
     }
 
     @Test
@@ -240,6 +329,34 @@ class BusHomeScreenTest {
         val stop = events.last() as BusHomeEvent.OpenStop
         assertEquals("n1", stop.target.stopId)
         assertTrue(events.none { it is BusHomeEvent.Refresh })
+    }
+
+    /** issue #34：三种定位失败原因各说各的话，按钮各去各的地方 */
+    @Test
+    fun locationIssue_showsOwnMessage_andButtonGoesToTheRightPlace() {
+        setContent(stateOf().copy(locationIssue = LocationIssue.ServiceDisabled))
+
+        composeTestRule.onNodeWithText("手机定位服务未开启，附近用的是上次位置").assertIsDisplayed()
+        composeTestRule.onNodeWithText("去开启").performClick()
+        assertEquals(listOf<BusHomeEvent>(BusHomeEvent.OpenLocationSettings), events)
+    }
+
+    @Test
+    fun locationIssue_permissionMissing_goesToAppSettings() {
+        setContent(stateOf().copy(locationIssue = LocationIssue.PermissionMissing))
+
+        composeTestRule.onNodeWithText("没有定位权限，附近用的是上次位置").assertIsDisplayed()
+        composeTestRule.onNodeWithText("去授权").performClick()
+        assertEquals(listOf<BusHomeEvent>(BusHomeEvent.OpenAppSettings), events)
+    }
+
+    @Test
+    fun locationIssue_unavailable_stillOffersRelocate() {
+        setContent(stateOf().copy(locationIssue = LocationIssue.Unavailable))
+
+        composeTestRule.onNodeWithText("定位不可用，已保留当前位置").assertIsDisplayed()
+        composeTestRule.onNodeWithText("重新定位").performClick()
+        assertEquals(listOf<BusHomeEvent>(BusHomeEvent.RetryLocation), events)
     }
 
 }

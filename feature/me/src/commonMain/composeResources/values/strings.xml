@@ -1,6 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- feature/me 的页面文案（第 28 步从代码里搬出来）。 -->
 <resources>
+    <string name="me_theme_mode">深浅色模式</string>
+    <string name="me_theme_system">跟随系统</string>
+    <string name="me_theme_light">浅色</string>
+    <string name="me_theme_dark">深色</string>
     <string name="me_about_title">关于</string>
     <string name="me_app_name">追客</string>
     <string name="me_about_version_unknown">版本未知</string>
@@ -8,9 +12,9 @@
     <string name="me_about_license">开源协议</string>
     <string name="me_about_data_title">数据声明</string>
     <string name="me_about_data_body">公交实时数据来源于公开网络接口，仅供出行参考。</string>
-    <string name="me_about_live_title">实时通知与灵动胶囊支持</string>
-    <string name="me_about_live_body_1">支持 Android 16 原生实时活动 (Live Updates)、小米澎湃OS 焦点通知（超级岛）与 OPPO ColorOS 流体云。</string>
-    <string name="me_about_live_body_2">若未在挖孔旁显示小胶囊，请前往系统设置为本应用开启「置顶通知 / 实时活动」或「允许焦点通知」。</string>
+    <string name="me_about_live_title">实时活动通知</string>
+    <string name="me_about_live_body_1">追踪时把到站倒计时和站点进度常驻在状态栏/通知栏。各家系统的叫法不同：Android 16 叫实时活动，小米澎湃OS 叫焦点通知（OS3 起是超级岛），OPPO 叫流体云。</string>
+    <string name="me_about_live_body_2">若没看到常驻进度，去系统设置为本应用开启对应开关；系统本身没有这项功能时（例如 MIUI 全系），进度只在通知栏里显示。</string>
     <string name="me_about_check_update">检查新版本</string>
     <string name="me_about_checking">正在检查...</string>
     <string name="me_about_new_version">发现新版本</string>
@@ -21,7 +25,7 @@
     <string name="me_about_publish_time">发布时间: %1$s</string>
     <string name="me_about_changelog">更新内容：</string>
     <string name="me_about_download">下载并安装</string>
-    <string name="me_about_downloading">正在下载… %1$d%%</string>
+    <string name="me_about_downloading">正在下载… %1$d%</string>
     <string name="me_about_downloading_bytes">正在下载… %1$d MB</string>
     <string name="me_about_cancel_download">取消下载</string>
     <string name="me_about_install_permission">系统还没允许追客安装应用。去设置里打开「允许安装未知应用」，回来会自动继续。</string>
@@ -59,22 +63,29 @@
     <string name="me_rail_mode_desc">线路详情页的站点怎么排</string>
     <string name="me_group_travel">出行</string>
     <string name="me_transit_code_button">显示乘车码按钮</string>
+    <string name="me_transit_code_button_desc">关掉后首页、线路页、站点页都不再显示</string>
     <string name="me_arrival_alert">到站前提醒</string>
     <string name="me_arrival_alert_desc">车离上车站还剩几站时震动提醒</string>
+    <string name="me_auto_stop_after_boarding">上车后自动结束追踪</string>
+    <string name="me_auto_stop_after_boarding_desc">定位判断你已上车就结束追踪，不再等下一班；路线仍跟到下车站</string>
     <string name="me_reminders">定时提醒</string>
     <string name="me_reminders_none">没有</string>
     <string name="me_reminders_count">%1$s 个</string>
     <string name="me_group_notify">通知</string>
     <string name="me_live_notify">实时通知</string>
-    <string name="me_live_notify_desc">追踪时在通知栏显示车还有几站</string>
+    <string name="me_live_notify_desc">追踪时显示车辆位置与到站进度</string>
     <string name="me_lockscreen">锁屏显示追踪</string>
     <string name="me_lockscreen_full">锁屏能看到线路和还有几站</string>
     <string name="me_lockscreen_hidden">锁屏只显示「追踪中」</string>
-    <string name="me_status_chip">状态栏胶囊</string>
     <string name="me_status_chip_unsupported">这台手机不支持，只在通知栏显示</string>
     <string name="me_status_chip_settings">通知设置</string>
     <string name="me_status_chip_on">已开启</string>
     <string name="me_status_chip_off">去开启</string>
+    <string name="me_notify_broken">提醒可能收不到</string>
+    <string name="me_notify_broken_permission">系统里没给通知权限，到站时既没有横幅也不会响</string>
+    <string name="me_notify_broken_channel">「到站强提醒」被调成静音了，到站时没有横幅和声音</string>
+    <string name="me_notify_broken_live">「实时通知」渠道被关掉了，追踪进度不会显示</string>
+    <string name="me_notify_fix">去开启</string>
     <string name="me_group_map">地图</string>
     <string name="me_about_app">关于追客</string>
     <string name="me_version">版本 %1$s</string>
@@ -102,4 +113,14 @@
     <string name="me_reminder_no_alarm_permission">没开「闹钟和提醒」权限，到点只发通知，不会自动开始追踪。</string>
     <string name="me_reminder_go_settings">去设置</string>
     <string name="me_reminder_set_time">设定时间</string>
+
+    <!-- 各家系统叫法不同（小米焦点通知 / 超级岛、OPPO 流体云、Android 实时活动），界面统一叫「实时活动通知」 -->
+    <string name="me_live_update_name">实时活动通知</string>
+    <string name="me_live_update_desc">在系统界面显示追踪进度</string>
+    <string name="me_live_guide_title">开启实时活动通知</string>
+    <string name="me_live_guide_body">开启后，系统可在锁屏或其他系统界面显示追踪进度。请留意更新时间和暂停提示；过期后打开应用刷新。开关在系统设置里。</string>
+    <string name="me_live_guide_fallback">未开启也能正常追踪，只是进度只在通知栏里。</string>
+    <string name="me_live_guide_go">前往开启</string>
+    <string name="me_live_guide_later">暂不开启</string>
+    <string name="me_amap_ios_intro">用自己的高德账号申请 Key。「iOS 平台 Key」用于地图，需绑定下方 Bundle ID；「Web 服务 Key」用于搜地点和公交规划，两者不能混填。只有 Web Key 时也能规划路线。</string>
 </resources>

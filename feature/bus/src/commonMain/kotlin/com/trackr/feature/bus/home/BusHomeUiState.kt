@@ -5,6 +5,7 @@ import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteGroup
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.FavoriteStationLine
+import com.trackr.core.model.GroupColor
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TrackingSession
@@ -14,9 +15,23 @@ import com.trackr.core.model.isLenzOnlyCity
 import com.trackr.ui.components.arrival.ArrivalUi
 
 /**
+ * 定位失败的原因（issue #34：小米 14 上权限给了还是提示「定位不可用」，用户不知道该去哪开）。
+ *
+ * 三个原因对应三句文案、两个去处：
+ * - [PermissionMissing]：应用没有定位权限 → 去应用详情页授权
+ * - [ServiceDisabled]：权限有，但系统「位置信息」总开关关着 → 去系统位置信息页开
+ * - [Unavailable]：权限和开关都正常，这一轮没取到（室内、冷启动、GPS 没星） → 再试一次
+ */
+enum class LocationIssue {
+    PermissionMissing,
+    ServiceDisabled,
+    Unavailable
+}
+
+/**
  * 公交首页的状态（v3「公交」页）。
  *
- * 上半部分是数据（ViewModel 自己用、测试断言用），下半部分 [trackingCard]、[favoriteRows]、[nearbyCards]
+ * 上半部分是数据（ViewModel 自己用、测试断言用），下半部分 [trackingCards]、[favoriteRows]、[nearbyCards]
  * 是给页面画的扁平 UI 模型（重构计划 §4.1）：每次数据变了由 [BusHomeMapper] 重新算，没变的行沿用旧实例。
  */
 data class BusHomeUiState(
@@ -29,7 +44,8 @@ data class BusHomeUiState(
     val currentLat: Double = 31.2304,
     val currentLng: Double = 121.4737,
     val isLocating: Boolean = false,
-    val locationError: String? = null,
+    /** 定位失败的原因；null = 正常或还没定位过。文案和按钮由页面按它决定（[LocationIssue]） */
+    val locationIssue: LocationIssue? = null,
     val nearbyStops: List<NearbyStop> = emptyList(),
     val isLoadingNearby: Boolean = false,
     /** 收藏的车（站 + 线），小组件 / 快捷方式也用这份 */
@@ -41,10 +57,10 @@ data class BusHomeUiState(
     val favoriteGroups: List<FavoriteGroup> = emptyList(),
     /** 分组 chips 选中的分组；null =「全部」 */
     val selectedGroupId: String? = null,
-    /** 当前这一程的追踪状态（单线路、路线、一起等排第一的那条） */
+    /** 当前这一程的追踪状态（主会话：单线路、路线、一起等排第一的那条） */
     val activeTracking: TrackingSessionState = TrackingSessionState(),
-    /** 整个追踪会话（一起等的几条线在这里）；没在追踪时为 null */
-    val trackingSession: TrackingSession? = null,
+    /** 全部追踪会话（可以同时追多项）；没在追踪时为空 */
+    val trackingSessions: List<TrackingSession> = emptyList(),
     val isRefreshing: Boolean = false,
     val engineMode: EngineMode = EngineMode.CHELAILE,
     /** 当前连不上数据源的城市名（掌上出行一城一服务器，常在线的没几台） */
@@ -60,7 +76,7 @@ data class BusHomeUiState(
     val userMessages: List<UserMessage> = emptyList(),
 
     // ---- 给页面画的 UI 模型 ----
-    val trackingCard: TrackingCardUi? = null,
+    val trackingCards: List<TrackingCardUi> = emptyList(),
     val favoriteRows: List<FavoriteRowUi> = emptyList(),
     val nearbyCards: List<NearbyStopUi> = emptyList()
 ) {
@@ -149,33 +165,35 @@ data class StopTarget(
 )
 
 /**
- * 首页顶上的追踪卡。
+ * 首页顶上的一张追踪卡。同时追多项时每项一张（一起等的几条线也各一张），各自点进自己的线路页。
  *
- * @param title 第一行（「追踪 325 · 科技园站」「一起等 3 条 · 科技园站」「路线 家 → 公司 · 第 1 程，共 2 程」）
- * @param arrival 大字（最先到的那辆）
- * @param detail 大字下面一行（「325 先到 · 还有 2 站」）
- * @param otherLines 一起等的其他线，直接显示的几条
- * @param foldedLines 一起等条数多时折叠起来的，显示成「还有 N 条」
+ * @param key LazyColumn 的 key（一起等按线拆开，所以是「会话 + 线」）
+ * @param sessionId 这张卡属于哪一份追踪会话（点「结束」用）
+ * @param title 第一行（「追踪 325 · 科技园站」「路线 家 → 公司 · 第 1 程，共 2 程」）
+ * @param arrival 大字（这项最先到的那辆）
+ * @param detail 大字下面一行（「还有 2 站 · 约 4 分钟」「到站了，快去上车」）
  * @param open 点卡片去哪个线路页
  * @param spoken「读给我听」读的整句（长辈版）；空串 = 不给读（已经在车上）
+ * @param watchLineId 一起等里的一条线：点「结束」只去掉这一条；null = 结束整份会话
  */
 data class TrackingCardUi(
+    val key: String,
+    val sessionId: String,
     val title: String,
     val arrival: ArrivalUi,
     val detail: String,
-    val otherLines: List<WatchLineUi> = emptyList(),
-    val foldedLines: List<WatchLineUi> = emptyList(),
     val open: LineTarget,
-    val spoken: String = ""
+    val spoken: String = "",
+    val watchLineId: String? = null
 )
-
-/** 一起等里的一条线 */
-data class WatchLineUi(val key: String, val lineName: String, val arrival: ArrivalUi)
 
 /** 收藏合一列表里的一行 */
 sealed interface FavoriteRowUi {
-    /** 合一列表的 key（`stop_x` / `route_x`，两种类型间不重复） */
+    /** 合一列表的 key（`stop_x` / `route_x` / `station_x`，类型之间不重复） */
     val key: String
+
+    /** 所在分组的颜色（issue #38），卡片左边画一条色条；不分组或分组没设颜色时为 null */
+    val groupColor: GroupColor?
 
     /**
      * 收藏的车：「325 · 科技园站上车 · → 科技园」+ 到站。
@@ -189,7 +207,29 @@ sealed interface FavoriteRowUi {
         val direction: String,
         val arrival: ArrivalUi,
         val open: LineTarget,
-        val spoken: String = ""
+        val spoken: String = "",
+        override val groupColor: GroupColor? = null
+    ) : FavoriteRowUi
+
+    /**
+     * 收藏的站（issue #47）：「科技园站 · 往北」+ 最先到的几条线「19 2 分 · 325 4 分」+ 最先到那辆的大字。
+     *
+     * @param lines 按到站先后最多 [com.trackr.feature.bus.home.BusHomeMapper.STATION_PREVIEW_LINES] 条
+     * @param lineCount 这个站台一共几条线；还没查到时为 0
+     * @param status 还在查 / 查到了 / 查不到这个站
+     * @param arrival 最先到那辆的大字；查不到时为 null
+     * @param spoken「读给我听」读的整句（长辈版）
+     */
+    data class Station(
+        override val key: String,
+        val title: String,
+        val lines: List<StationLineUi>,
+        val lineCount: Int,
+        val status: StationStatus,
+        val arrival: ArrivalUi?,
+        val open: StopTarget,
+        val spoken: String = "",
+        override val groupColor: GroupColor? = null
     ) : FavoriteRowUi
 
     /** 收藏的路线：「家 → 公司」+「325 › 19 · 换乘 1 次」 */
@@ -197,9 +237,21 @@ sealed interface FavoriteRowUi {
         override val key: String,
         val routeId: String,
         val title: String,
-        val linesText: String
+        val linesText: String,
+        override val groupColor: GroupColor? = null
     ) : FavoriteRowUi
 }
+
+/** 收藏的站有没有拿到数据 */
+enum class StationStatus { Loading, Ready, NotFound }
+
+/** 收藏的站里的一条线：「19」「2 分」（[short] 是到站的短写） */
+data class StationLineUi(
+    val lineName: String,
+    val direction: String,
+    val short: String,
+    val arrival: ArrivalUi
+)
 
 /** 附近的一个站 */
 data class NearbyStopUi(

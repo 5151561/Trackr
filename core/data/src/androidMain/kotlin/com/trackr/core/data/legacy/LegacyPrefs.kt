@@ -28,6 +28,8 @@ object LegacyPrefs {
     const val KEY_SHOW_ON_LOCK_SCREEN = "show_on_lock_screen"
     const val KEY_ALERT_THRESHOLD_STOPS = "alert_threshold_stops"
     const val KEY_UI_MODE = "ui_mode"
+    const val KEY_THEME_MODE = "theme_mode"
+    const val KEY_THEME_COLORS = "theme_colors"
     const val KEY_FONT_SCALE_PROMPT_DISMISSED = "font_scale_prompt_dismissed"
     const val KEY_FAVORITES_GROUP_MIGRATION_VERSION = "favorites_group_migration_version"
 
@@ -37,6 +39,9 @@ object LegacyPrefs {
 
     /** 收藏合一索引（第 14 步起，旧存储模式下才写）：`List<FavoriteItemRecord>` 的 JSON */
     const val KEY_FAVORITE_ITEMS = "favorite_items_json"
+
+    /** 收藏的站（issue #47 起，旧存储模式下才写）：`List<FavoriteStation>` 的 JSON */
+    const val KEY_FAVORITE_STATIONS = "favorite_stations_json"
 
     // trackr_scheduled_reminders
     const val KEY_REMINDERS = "reminders_list_json"

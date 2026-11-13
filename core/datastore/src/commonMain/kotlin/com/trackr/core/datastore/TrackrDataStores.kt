@@ -51,11 +51,21 @@ object SettingsKeys {
     /** 到站前提醒：车离上车站还有几站时提醒（第 25 步「我的」全局设置，1–3，旧存储没有这个键）；没有 = 2 */
     val ALERT_THRESHOLD_STOPS = intPreferencesKey("alert_threshold_stops")
 
+    /**
+     * 上车后自动结束追踪（issue #32）：定位判断用户已经坐上这班车，就直接结束本次追踪。
+     * 只对「没有下车站」的追踪生效（单线路、站点页一起等）；没有 = 开。
+     */
+    val AUTO_STOP_AFTER_BOARDING = booleanPreferencesKey("auto_stop_after_boarding")
+
     /** 界面模式（`UiMode` 的名字，第 30 步新加，旧存储没有这个键）；没有或认不出 = 标准版 */
     val UI_MODE = stringPreferencesKey("ui_mode")
 
     /** 线路详情走向条样式（`RailMode` 的名字）；没有或认不出 = 横排 */
     val RAIL_MODE = stringPreferencesKey("rail_mode")
+
+    /** 深浅色偏好（`ThemeMode` 的名字）；没有或认不出 = 跟随系统 */
+    val THEME_MODE = stringPreferencesKey("theme_mode")
+    val THEME_COLORS = stringPreferencesKey("theme_colors")
 
     /** 系统字体放大时的「试试长辈版」提示点过了（第 30 步新加）；没有 = 还没点过 */
     val FONT_SCALE_PROMPT_DISMISSED = booleanPreferencesKey("font_scale_prompt_dismissed")
@@ -73,6 +83,7 @@ object SettingsKeys {
 
 /** `trackr_amap_keys` 的键，和旧 SharedPreferences `trackr_amap_keys` 同名 */
 object AmapKeyKeys {
+    val IOS = stringPreferencesKey("custom_amap_ios_key")
     val ANDROID = stringPreferencesKey("custom_amap_android_key")
     val WEB = stringPreferencesKey("custom_amap_web_key")
     val PRIVACY_CONSENT = booleanPreferencesKey("privacy_consent")
@@ -101,16 +112,16 @@ fun createPreferencesDataStore(
     produceFile = { path.toPath() }
 )
 
-/** 建追踪会话的 DataStore（JSON 单对象，没有会话时是 null） */
+/** 建追踪会话的 DataStore（JSON 数组，没有会话时是空列表） */
 fun createTrackingSessionDataStore(
     path: String,
     scope: CoroutineScope
-): DataStore<com.trackr.core.model.TrackingSession?> = DataStoreFactory.create(
+): DataStore<List<com.trackr.core.model.TrackingSession>> = DataStoreFactory.create(
     storage = OkioStorage(
         fileSystem = systemFileSystem(),
         serializer = TrackingSessionSerializer,
         producePath = { path.toPath() }
     ),
-    corruptionHandler = ReplaceFileCorruptionHandler { null },
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyList() },
     scope = scope
 )

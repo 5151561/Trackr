@@ -74,11 +74,11 @@ internal object StationArrivalTags {
 /**
  * 主卡：站点到站（v3「线路详情」hero）。
  *
- * 「XX站上车」→ 大字（[ArrivalText] 8 种状态）→ 小字 + 车牌 / 预计到达 / 车速 → 分隔线 →「下一辆 …」+「全线 N 辆车在途 · 查看」。
+ * 候车站胶囊（站名）→ 大字（[ArrivalText] 8 种状态）→ 小字 + 车牌 / 预计到达 / 车速 → 分隔线 →「下一辆 …」+「全线 N 辆车在途 · 查看」。
  * 全部车过站时只给下一班始发发车时间，不估到站；实时没给下一班就用时刻表补的 [LineLive.fallbackNextDeparture]。
  * 实时还没回来（[live] 为 null，站表来自缓存）时显示「正在查车…」。
  *
- * @param onPickStop 点「XX站上车」：滚到走向条上这一站，在那儿换站
+ * @param onPickStop 点候车站胶囊：滚到走向条上这一站，在那儿换站
  * @param now 判「已过末班」用的本地时刻；默认取这次数据的刷新时刻
  * @param collapsed 收起主卡：只留一行「候车站 + 到站 + 展开」
  * @param onToggleCollapsed 收起 / 展开；null = 不显示按钮（长辈版或测试）
@@ -161,23 +161,32 @@ fun StationArrivalContent(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            StopPickChip(stop = selectedStop, onClick = onPickStop)
-            if (!selectedStop?.statusNote.isNullOrEmpty()) {
-                Spacer(modifier = Modifier.width(6.dp))
-                Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.busColors.conditionStopBorder.copy(alpha = 0.15f)
-                ) {
-                    Text(
-                        text = selectedStop.statusNote.orEmpty(),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.busColors.conditionStopBorder,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
+            // 站名太长时先省站名（省略号），别把右边的「追踪中 / 第 N 站」和收起按钮挤出卡片（#23）
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                StopPickChip(
+                    stop = selectedStop,
+                    onClick = onPickStop,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (!selectedStop?.statusNote.isNullOrEmpty()) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = MaterialTheme.busColors.conditionStopBorder.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = selectedStop.statusNote.orEmpty(),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.busColors.conditionStopBorder,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
                 }
             }
-            Spacer(modifier = Modifier.weight(1f))
             if (isTrackingActive) {
                 TrackingBadge()
             } else if (selectedStop != null) {
@@ -256,23 +265,33 @@ fun StationArrivalContent(
     }
 }
 
-/** 「XX站上车」 */
+/**
+ * 候车站胶囊：只写站名。
+ *
+ * 以前是「XX站上车」，遇上「人民东路学海路（南汇大学城）」这种长站名，主卡一行就被挤满了（#23）；
+ * 上车点是主卡本身的意思，不必每个字都写出来，点它仍可以换站。
+ *
+ * 站名长到装不下时不打省略号，而是在胶囊里慢慢滚过去（见 [overflowMarquee]），
+ * 这样多长的站名都能看全，也不会顶掉右边的「追踪中 / 第 N 站」。
+ */
 @Composable
-private fun StopPickChip(stop: BusStop?, onClick: () -> Unit) {
+private fun StopPickChip(stop: BusStop?, onClick: () -> Unit, modifier: Modifier = Modifier) {
     Surface(
         onClick = onClick,
         shape = MaterialTheme.shapes.small,
         color = MaterialTheme.colorScheme.primaryContainer,
         contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        modifier = Modifier.testTag(StationArrivalTags.PICK_STOP)
+        modifier = modifier.testTag(StationArrivalTags.PICK_STOP)
     ) {
         Text(
-            text = stop?.let { boardingLabel(it.name) } ?: stringResource(LineRes.string.line_station_pick_stop),
+            text = stop?.name ?: stringResource(LineRes.string.line_station_pick_stop),
             fontSize = 15.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+            softWrap = false,
+            modifier = Modifier
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+                .overflowMarquee()
         )
     }
 }
@@ -361,10 +380,6 @@ internal fun stationArrivalState(static: LineStatic, live: LineLive?, targetOrde
         now = now
     )
 }
-
-/** 站名已经以「站」结尾就不再加 */
-internal fun boardingLabel(stopName: String): String =
-    if (stopName.endsWith("站")) "$stopName 上车" else "${stopName}站上车"
 
 /** 最近那辆车的车牌、距本站距离、预计到达、车速（拿不到的不显示） */
 @Composable

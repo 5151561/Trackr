@@ -2,6 +2,7 @@ package com.trackr.ui.screens.me
 
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.RailMode
+import com.trackr.core.model.ThemeMode
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.UiMode
@@ -110,6 +111,20 @@ class MeViewModelTest {
     }
 
     @Test
+    fun themeMode_readsSavedChoice_andFollowsChanges() = runTest(main.dispatcher) {
+        settings.setThemeMode(ThemeMode.Dark)
+        val viewModel = createViewModel()
+        assertEquals(ThemeMode.Dark, viewModel.uiState.value.themeMode)
+
+        for (mode in listOf(ThemeMode.Light, ThemeMode.System, ThemeMode.Dark)) {
+            viewModel.onEvent(MeEvent.SetThemeMode(mode))
+            testScheduler.advanceUntilIdle()
+            assertEquals(mode, settings.themeMode.value)
+            assertEquals(mode, viewModel.uiState.value.themeMode)
+        }
+    }
+
+    @Test
     fun elderMode_setElsewhere_showsOn() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
         // 比如字号提示里点了「打开长辈版」
@@ -162,6 +177,23 @@ class MeViewModelTest {
         viewModel.onEvent(MeEvent.SetShowTransitCodeButton(true))
         testScheduler.advanceUntilIdle()
         assertTrue(viewModel.uiState.value.showTransitCodeButton)
+    }
+
+    @Test
+    fun autoStopAfterBoarding_switchWritesSetting_andDefaultsOn() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        // 默认开：这本来才是该有的行为（issue #32）
+        assertTrue(viewModel.uiState.value.autoStopAfterBoarding)
+
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(false))
+        testScheduler.advanceUntilIdle()
+        assertFalse(settings.autoStopAfterBoarding.value)
+        assertFalse(viewModel.uiState.value.autoStopAfterBoarding)
+
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(true))
+        testScheduler.advanceUntilIdle()
+        assertTrue(settings.autoStopAfterBoarding.value)
+        assertTrue(viewModel.uiState.value.autoStopAfterBoarding)
     }
 
     @Test
@@ -225,7 +257,7 @@ class MeViewModelTest {
     fun liveUpdateRow_hiddenWhenLiveNotificationOff_orNoPlatformSupport() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
         testScheduler.advanceUntilIdle()
-        assertEquals(LiveUpdateStatus(supported = true, allowed = false, systemName = "小米焦点通知"), viewModel.uiState.value.liveUpdate)
+        assertEquals(LiveUpdateStatus(supported = true, allowed = false), viewModel.uiState.value.liveUpdate)
 
         // 和原来一样：实时通知关着时不显示胶囊权限
         viewModel.onEvent(MeEvent.SetLiveNotificationEnabled(false))
@@ -247,7 +279,7 @@ class MeViewModelTest {
         assertEquals(1, liveUpdate.openCount)
 
         // 用户在系统设置里开了，回到前台重查
-        liveUpdate.current = LiveUpdateStatus(supported = true, allowed = true, systemName = "小米焦点通知")
+        liveUpdate.current = LiveUpdateStatus(supported = true, allowed = true)
         viewModel.onScreenResumed()
         testScheduler.advanceUntilIdle()
         assertTrue(viewModel.uiState.value.liveUpdate!!.allowed)
@@ -315,7 +347,7 @@ class MeViewModelTest {
 
 /** 状态栏胶囊的 Fake：默认小米、没开权限 */
 class FakeLiveUpdateAccess(
-    var current: LiveUpdateStatus = LiveUpdateStatus(supported = true, allowed = false, systemName = "小米焦点通知")
+    var current: LiveUpdateStatus = LiveUpdateStatus(supported = true, allowed = false)
 ) : LiveUpdateAccess {
     var openCount: Int = 0
         private set

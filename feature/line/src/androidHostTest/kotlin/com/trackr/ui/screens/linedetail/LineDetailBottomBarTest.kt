@@ -54,7 +54,8 @@ class LineDetailBottomBarTest {
 
     private fun stateOf(
         reverse: BusLineDirection?,
-        isSwitchingDirection: Boolean = false
+        isSwitchingDirection: Boolean = false,
+        showTransitCode: Boolean = true
     ) = LineDetailUiState(
         lineNameHint = line.name,
         isLoading = false,
@@ -62,7 +63,8 @@ class LineDetailBottomBarTest {
         selectedStop = stops[2],
         live = LineLive(buses = emptyList()),
         railMode = RailMode.Horizontal,
-        isSwitchingDirection = isSwitchingDirection
+        isSwitchingDirection = isSwitchingDirection,
+        showTransitCodeButton = showTransitCode
     )
 
     private fun show(state: LineDetailUiState, onEvent: (LineDetailEvent) -> Unit = {}) {
@@ -113,5 +115,25 @@ class LineDetailBottomBarTest {
         composeTestRule.onNodeWithContentDescription("换向").performClick()
 
         assertEquals(LineDetailEvent.SwitchDirection, lastEvent)
+    }
+
+    // ---- 乘车码按钮跟着「我的」里的开关 ----
+
+    @Test
+    fun transitCodeButton_shownByDefault() {
+        show(stateOf(reverse = reverseLine))
+
+        composeTestRule.onNodeWithContentDescription("乘车码").assertIsDisplayed()
+    }
+
+    @Test
+    fun transitCodeButton_hiddenWhenSettingOff() {
+        // 「我的」里关掉「显示乘车码按钮」：首页悬浮按钮去掉后，线路页底栏这个圆钮也不留
+        show(stateOf(reverse = reverseLine, showTransitCode = false))
+
+        composeTestRule.onNodeWithContentDescription("乘车码").assertDoesNotExist()
+        // 其余动作照旧
+        composeTestRule.onNodeWithText("追踪这班车").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("换向").assertIsDisplayed()
     }
 }

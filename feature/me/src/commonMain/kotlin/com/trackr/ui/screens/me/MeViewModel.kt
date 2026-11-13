@@ -8,10 +8,13 @@ import com.trackr.core.model.EngineMode
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.RailMode
+import com.trackr.core.model.ThemeMode
 import com.trackr.core.model.UiMode
 import com.trackr.data.repository.IScheduledReminderRepository
 import com.trackr.ui.platform.LiveUpdateAccess
 import com.trackr.ui.platform.LiveUpdateStatus
+import com.trackr.ui.platform.NotificationHealth
+import com.trackr.ui.platform.NotificationHealthAccess
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -24,26 +27,32 @@ import kotlinx.coroutines.launch
  *
  * @param alertThresholdStops 到站前提醒：车离上车站还有几站时提醒（1–3）
  * @param remindersSubtitle 「定时提醒」那一行的副标题（最早一条开着的提醒）；没有提醒为 null
- * @param liveUpdate 状态栏胶囊的系统状态；平台没有这项（iOS）或实时通知关着时为 null，不显示那一行
+ * @param liveUpdate 实时活动通知支持没支持、开没开；平台没有这项（iOS）或实时通知关着时为 null，不显示那一行
+ * @param notificationHealth 通知可靠性体检；全正常或平台没有这项（iOS）时为 null，不显示那一行
  * @param amapKeyStatus 「高德 Key」那一行的状态文字
  * @param versionName 「关于」那一行显示的版本号；读不到为 null
- * @param showTransitCodeButton 首页右下角的「乘车码」悬浮按钮显不显示（`SettingsRepository.showTransitCodeButton`）
+ * @param showTransitCodeButton 「乘车码」按钮显不显示：首页悬浮按钮和线路页、站点页底栏的圆钮都听它（`SettingsRepository.showTransitCodeButton`）
+ * @param autoStopAfterBoarding 上车后自动结束追踪（issue #32）：单线路和一起等判出已上车就结束，路线不受影响
  * @param elderMode 长辈版开关（`SettingsRepository.uiMode` 是不是 Elder）
  */
 data class MeUiState(
     val engineMode: EngineMode = EngineMode.CHELAILE,
     val preferredTransitCode: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
     val showTransitCodeButton: Boolean = true,
+    val autoStopAfterBoarding: Boolean = true,
     val alertThresholdStops: Int = 2,
     val reminders: List<ScheduledReminder> = emptyList(),
     val remindersSubtitle: String? = null,
     val isLiveNotificationEnabled: Boolean = true,
     val showOnLockScreen: Boolean = true,
     val liveUpdate: LiveUpdateStatus? = null,
+    /** 只在系统那边确实断了（没权限 / 渠道被降级）时才有值，正常时 null */
+    val notificationHealth: NotificationHealth? = null,
     val amapKeyStatus: String = amapKeyStatusText(hasMapKey = false, canShowMap = false),
     val versionName: String? = null,
     val elderMode: Boolean = false,
     val railMode: RailMode = RailMode.Horizontal,
+    val themeMode: ThemeMode = ThemeMode.System,
     val userMessages: List<UserMessage> = emptyList()
 )
 
@@ -52,18 +61,24 @@ sealed interface MeEvent {
     data class SetEngineMode(val mode: EngineMode) : MeEvent
     data class SetTransitCode(val provider: TransitCodeProvider) : MeEvent
     data class SetShowTransitCodeButton(val visible: Boolean) : MeEvent
+    data class SetAutoStopAfterBoarding(val enabled: Boolean) : MeEvent
     data class SetAlertThresholdStops(val stops: Int) : MeEvent
     data class ToggleReminder(val id: String, val enabled: Boolean) : MeEvent
     data class SetLiveNotificationEnabled(val enabled: Boolean) : MeEvent
     data class SetShowOnLockScreen(val enabled: Boolean) : MeEvent
     data object OpenLiveUpdateSettings : MeEvent
+
+    /** 到站强提醒被系统降级 / 关掉时，那一行的「去开启」 */
+    data object OpenAlertChannelSettings : MeEvent
     data class SetElderMode(val enabled: Boolean) : MeEvent
     data class SetRailMode(val mode: RailMode) : MeEvent
+    data class SetThemeMode(val mode: ThemeMode) : MeEvent
     data class MessageShown(val id: Long) : MeEvent
 
     data class OpenReminder(val id: String) : MeEvent
     data object OpenAmapKey : MeEvent
     data object OpenAbout : MeEvent
+    data object OpenThemeSettings : MeEvent
 }
 
 /** 到站前提醒能选的站数（和通知上「切换」按钮的 1 → 2 → 3 一致） */
@@ -75,10 +90,16 @@ class MeViewModel(
     private val amapKeys: AmapKeyRepository,
     private val notices: MeNotices,
     private val liveUpdateAccess: LiveUpdateAccess? = null,
-    private val versionName: String? = null
+    private val versionName: String? = null,
+    private val notificationHealthAccess: NotificationHealthAccess? = null
 ) : ViewModel() {
 
     private val liveUpdateStatus = MutableStateFlow(liveUpdateAccess?.status())
+
+    private val notificationHealthStatus = MutableStateFlow(notificationHealthAccess?.status())
+
+    /** 两个平台状态的合流：`combine` 的 5 参数重载已经用满，先把这两个并成一个 */
+    private val platformStatus = combine(liveUpdateStatus, notificationHealthStatus) { live, health -> live to health }
 
     private val settingsPart = combine(
         settings.engineMode,
@@ -88,8 +109,10 @@ class MeViewModel(
         settings.showOnLockScreen
     ) { engine, code, stops, live, lock -> SettingsPart(engine, code, stops, live, lock) }
         .combine(settings.showTransitCodeButton) { part, visible -> part.copy(showTransitCodeButton = visible) }
+        .combine(settings.autoStopAfterBoarding) { part, enabled -> part.copy(autoStopAfterBoarding = enabled) }
         .combine(settings.uiMode) { part, mode -> part.copy(elderMode = mode == UiMode.Elder) }
         .combine(settings.railMode) { part, mode -> part.copy(railMode = mode) }
+        .combine(settings.themeMode) { part, mode -> part.copy(themeMode = mode) }
 
     private val mapKeyStatus = combine(amapKeys.hasMapKey, amapKeys.canShowMap) { has, canShow ->
         amapKeyStatusText(has, canShow)
@@ -98,11 +121,11 @@ class MeViewModel(
     val uiState: StateFlow<MeUiState> = combine(
         settingsPart,
         reminderRepository.reminders,
-        liveUpdateStatus,
+        platformStatus,
         mapKeyStatus,
         notices.messages
-    ) { part, reminders, liveUpdate, keyStatus, messages ->
-        buildState(part, reminders, liveUpdate, keyStatus, messages)
+    ) { part, reminders, platform, keyStatus, messages ->
+        buildState(part, reminders, platform.first, platform.second, keyStatus, messages)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
@@ -115,14 +138,23 @@ class MeViewModel(
                 settings.showOnLockScreen.value,
                 settings.showTransitCodeButton.value,
                 settings.uiMode.value == UiMode.Elder,
-                settings.railMode.value
+                settings.railMode.value,
+                settings.autoStopAfterBoarding.value,
+                settings.themeMode.value
             ),
             reminderRepository.reminders.value,
             liveUpdateStatus.value,
+            notificationHealthStatus.value,
             amapKeyStatusText(amapKeys.hasMapKey.value, amapKeys.canShowMap.value),
             notices.messages.value
         )
     )
+
+    init {
+        notificationHealthAccess?.changes?.let { changes ->
+            viewModelScope.launch { changes.collect { notificationHealthStatus.value = it } }
+        }
+    }
 
     fun onEvent(event: MeEvent) {
         when (event) {
@@ -132,36 +164,47 @@ class MeViewModel(
             }
             is MeEvent.SetAlertThresholdStops -> settings.setAlertThresholdStops(event.stops)
             is MeEvent.SetShowTransitCodeButton -> settings.setShowTransitCodeButton(event.visible)
+            is MeEvent.SetAutoStopAfterBoarding -> settings.setAutoStopAfterBoarding(event.enabled)
             is MeEvent.ToggleReminder -> viewModelScope.launch {
-                reminderRepository.toggleReminder(event.id, event.enabled)
+                try {
+                    reminderRepository.toggleReminder(event.id, event.enabled)
+                } catch (error: Exception) {
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    notices.post(error.message ?: "提醒更新失败，请重试")
+                }
             }
             is MeEvent.SetLiveNotificationEnabled -> settings.setLiveNotificationEnabled(event.enabled)
             is MeEvent.SetShowOnLockScreen -> settings.setShowOnLockScreen(event.enabled)
             MeEvent.OpenLiveUpdateSettings -> liveUpdateAccess?.openSettings()
+            MeEvent.OpenAlertChannelSettings -> notificationHealthAccess?.openAlertChannelSettings()
             // 第 30 步只换主题；长辈版导航和页面在第 31–34 步
             is MeEvent.SetElderMode -> settings.setUiMode(if (event.enabled) UiMode.Elder else UiMode.Standard)
             is MeEvent.SetRailMode -> settings.setRailMode(event.mode)
+            is MeEvent.SetThemeMode -> settings.setThemeMode(event.mode)
             is MeEvent.MessageShown -> notices.consume(event.id)
             // 导航事件由 Route 处理
-            is MeEvent.OpenReminder, MeEvent.OpenAmapKey, MeEvent.OpenAbout -> Unit
+            is MeEvent.OpenReminder, MeEvent.OpenAmapKey, MeEvent.OpenAbout, MeEvent.OpenThemeSettings -> Unit
         }
     }
 
-    /** 回到前台时重查状态栏胶囊权限（用户可能刚从系统设置回来） */
+    /** 回到前台时重查实时活动通知的权限和通知体检（用户可能刚从系统设置回来） */
     fun onScreenResumed() {
         liveUpdateStatus.value = liveUpdateAccess?.status()
+        notificationHealthStatus.value = notificationHealthAccess?.status()
     }
 
     private fun buildState(
         part: SettingsPart,
         reminders: List<ScheduledReminder>,
         liveUpdate: LiveUpdateStatus?,
+        notificationHealth: NotificationHealth?,
         keyStatus: String,
         messages: List<UserMessage>
     ) = MeUiState(
         engineMode = part.engineMode,
         preferredTransitCode = part.transitCode,
         showTransitCodeButton = part.showTransitCodeButton,
+        autoStopAfterBoarding = part.autoStopAfterBoarding,
         alertThresholdStops = part.alertThresholdStops,
         reminders = reminders,
         remindersSubtitle = remindersRowSubtitle(reminders),
@@ -169,8 +212,11 @@ class MeViewModel(
         showOnLockScreen = part.showOnLockScreen,
         elderMode = part.elderMode,
         railMode = part.railMode,
+        themeMode = part.themeMode,
         // 和原来一样：实时通知关着时不显示胶囊权限
         liveUpdate = liveUpdate?.takeIf { part.liveNotification },
+        // 只在真有问题时出现，正常时那一行不该占地方
+        notificationHealth = notificationHealth?.takeIf { !it.healthy },
         amapKeyStatus = keyStatus,
         versionName = versionName,
         userMessages = messages
@@ -184,6 +230,8 @@ class MeViewModel(
         val showOnLockScreen: Boolean,
         val showTransitCodeButton: Boolean = true,
         val elderMode: Boolean = false,
-        val railMode: RailMode = RailMode.Horizontal
+        val railMode: RailMode = RailMode.Horizontal,
+        val autoStopAfterBoarding: Boolean = true,
+        val themeMode: ThemeMode = ThemeMode.System
     )
 }

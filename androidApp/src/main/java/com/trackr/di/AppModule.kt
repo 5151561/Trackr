@@ -141,7 +141,13 @@ val appModule: Module = module {
             transitCodeProviderSetting = { get<ITransitRepository>().preferredTransitCodeProvider.value }
         )
     }
-    single { ArrivalAlertNotifier(get()) }
+    single {
+        ArrivalAlertNotifier(
+            liveProgressNotifier = get(),
+            // 强提醒的锁屏可见性跟常驻通知同一份设置（D3）
+            showOnLockScreenSetting = { get<ITransitRepository>().showOnLockScreen.value }
+        )
+    }
     single<ReminderAlarms> { ReminderAlarmScheduler(androidContext(), get()) }
 
     // 追踪会话的唯一数据源（第 12 步）：UI、通知动作、追踪服务都读写它
