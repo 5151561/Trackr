@@ -3,10 +3,16 @@ package com.trackr.core.data.repository
 import com.trackr.core.domain.arrival.StopOrderResolver
 import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.domain.platform.MonotonicClock
+import com.trackr.core.domain.tracking.LocationCadence
 import com.trackr.core.domain.tracking.TrackingEngine
 import com.trackr.core.model.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlin.time.Clock
 
 /** One generation of one session. Platforms own jobs, lifecycle, location and presentation. */
@@ -114,11 +120,12 @@ class TrackingPoller(
             effects.forEach { onEffect(it, sessionId) }
             onUpdate()
             val next = current() ?: return
-            val interval = TrackingEngine.pollingIntervalMillis(next.state, failures, operating)
-            shared = if (next.watchTarget == null) awaitSharedDetail(next, interval) else {
-                delay(interval)
-                null
-            }
+            // 轮询跟着定位档位走：车的数据和人的定位一样新，判上车 / 下车才对得上
+            val tier = TrackingEngine.locationTier(next.state, locationEnabled(), settings.autoStopAfterBoarding.value)
+            val interval = TrackingEngine.pollingIntervalMillis(next.state, failures, operating, tier)
+            // 取定位时定位一来就轮询（失败退避期间不跟，免得越失败打得越勤）
+            val followFixes = tier != LocationCadence.Tier.OFF && failures == 0
+            shared = awaitNextRound(next, interval, followFixes)
         }
     }
 
@@ -137,18 +144,44 @@ class TrackingPoller(
             update.lineId == session.leg.lineId &&
             update.targetOrder == requestOrder(session)
 
+    /** 是什么叫醒了下一轮 */
+    private sealed interface Wake {
+        /** 别处刚拿到的同一份线路数据，这一轮直接用 */
+        class Shared(val update: LineDetailUpdate) : Wake
+        /** 来了一个新定位：马上拉一次车的数据 */
+        data object Fix : Wake
+    }
+
     /**
-     * 等下一轮（最多 [interval]）。等的时候别处请求了同一条线、同一个候车站（线路页 10 秒一轮、收藏卡 15 秒一轮），
-     * 就提前用那一份刷新：通知和页面看到的是同一份数据，也不多打请求（issue #41「通知和应用内数据不一致」）。
-     * 离上一轮不到 [MIN_SHARED_GAP_MS] 的不要，免得几个页面一起刷时通知跳得太勤。
+     * 等下一轮，返回别处刚拿到、这一轮可以直接用的线路数据（没有就是 null，照常请求）。
+     *
+     * - [followFixes]：定位一来就开始下一轮（issue #49：车的数据和人的定位同一时刻，判上车 / 下车不会错开）。
+     *   离上一轮不到半个间隔的定位不跟，免得几路定位一起来时打得太勤；计时器放宽到 1.5 个间隔兜底（定位断了照样轮询）。
+     * - 单线路 / 路线：等的时候别处请求了同一条线、同一个候车站（线路页、首页收藏卡都是 3 秒一轮），
+     *   就提前用那一份刷新：通知和页面看到的是同一份数据，也不多打请求（issue #41「通知和应用内数据不一致」）。
+     *   离上一轮不到 [MIN_SHARED_GAP_MS] 的不要，免得几个页面一起刷时通知跳得太勤。
      */
-    private suspend fun awaitSharedDetail(session: TrackingSession, interval: Long): LineDetailUpdate? {
+    private suspend fun awaitNextRound(session: TrackingSession, interval: Long, followFixes: Boolean): LineDetailUpdate? {
         val startedAt = monotonicClock.elapsedMillis()
-        return withTimeoutOrNull(interval) {
-            realtime.lineDetailUpdates.firstOrNull {
-                matchesRequest(it, session) && monotonicClock.elapsedMillis() - startedAt >= MIN_SHARED_GAP_MS
-            } ?: awaitCancellation() // 没有可共享的数据（流结束了）：照常等满这一轮
+        fun waited() = monotonicClock.elapsedMillis() - startedAt
+        val sharedWakes: Flow<Wake> = if (session.watchTarget == null) {
+            realtime.lineDetailUpdates
+                .filter { matchesRequest(it, session) && waited() >= MIN_SHARED_GAP_MS }
+                .map { Wake.Shared(it) }
+        } else {
+            emptyFlow()
         }
+        val fixWakes: Flow<Wake> = if (followFixes) {
+            tracking.userFixes.filter { waited() >= interval / 2 }.map { Wake.Fix }
+        } else {
+            emptyFlow()
+        }
+        val timeout = if (followFixes) interval + interval / 2 else interval
+        val wake = withTimeoutOrNull(timeout) {
+            // 两路都没有（流结束了）：照常等满这一轮
+            merge(sharedWakes, fixWakes).firstOrNull() ?: awaitCancellation()
+        }
+        return (wake as? Wake.Shared)?.update
     }
 
     /** 单线路的目标站序对不上站表时，按站名找到的真站序；不用改时为 null */

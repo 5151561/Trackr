@@ -8,13 +8,18 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import androidx.core.app.ServiceCompat
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.data.repository.TrackingPoller
+import com.trackr.core.domain.platform.Announcer
 import com.trackr.core.domain.platform.LocationSource
 import com.trackr.core.domain.platform.MonotonicClock
+import com.trackr.core.domain.tracking.AlertSpeech
 import com.trackr.core.domain.tracking.LocationCadence
 import com.trackr.core.domain.tracking.TrackingEngine
 import com.trackr.core.model.LegPhase
@@ -24,6 +29,8 @@ import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.WatchedLine
 import com.trackr.core.model.UserFix
 import com.trackr.data.repository.ITransitRepository
+import com.trackr.di.AppScopeQualifier
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -54,6 +61,9 @@ class BusTrackingService : LifecycleService() {
     private val settings: SettingsRepository by inject()
     private val liveProgressNotifier: LiveProgressNotifier by inject()
     private val arrivalAlerts: ArrivalAlertNotifier by inject()
+    private val announcer: Announcer by inject()
+    /** 朗读放应用级作用域：到站提醒常和「追踪结束」同一轮，服务马上就停，不能跟着 lifecycleScope 被取消 */
+    private val appScope: CoroutineScope by inject(AppScopeQualifier)
     private val locationSource: LocationSource by inject()
     private val clock: Clock by inject()
     private val monotonicClock: MonotonicClock by inject()
@@ -68,7 +78,7 @@ class BusTrackingService : LifecycleService() {
         var generation: Int = NO_GENERATION
 
         /** 每条通知上次刷过的内容（key -> 内容），相同就不重复刷 */
-        val rendered: MutableMap<String, Pair<TrackingSessionState, LiveProgressNotifier.WatchNotice?>> = mutableMapOf()
+        val rendered: MutableMap<String, Triple<TrackingSessionState, LiveProgressNotifier.WatchNotice?, String?>> = mutableMapOf()
 
         /**
          * 每条通知的 id（key -> id）。一项追踪可能对应好几条通知：
@@ -87,7 +97,9 @@ class BusTrackingService : LifecycleService() {
         val state: TrackingSessionState,
         val watch: LiveProgressNotifier.WatchNotice?,
         val nextLineName: String? = null,
-        val watchLineId: String = ""
+        val watchLineId: String = "",
+        /** 自动判上车暂停时通知上的说明（issue #49）；null = 正常 */
+        val boardingNotice: String? = null
     )
 
     /** 一起等的取数（同一个实时仓库，条数不影响请求数） */
@@ -122,6 +134,28 @@ class BusTrackingService : LifecycleService() {
     /** 当前前台通知挂在哪个 id 上（一起等按线拆开后要跟着换） */
     private var foregroundNotifyId: Int = LiveProgressNotifier.NOTIFICATION_ID_LIVE_PROGRESS
 
+    /** 当前前台服务带着 location 类型（换前台通知时不能把它丢掉，issue #49） */
+    private var foregroundHasLocation: Boolean = false
+
+    /**
+     * 前台通知没能挪走、原来那条的主人又没了时，哪条通知（key）画在 [foregroundNotifyId] 上（issue #49）。
+     * App 在后台时再调 startForeground 带不上 location 类型；挪过去就得降级、判不了上车，所以宁可留在原来那条上。
+     */
+    private var foregroundAliasKey: String? = null
+
+    /** 上次挪前台通知失败（带不上 location、又不能降级）的单调时刻；-1 = 没失败过。失败后一分钟内不再试 */
+    private var lastForegroundMoveFailMillis: Long = -1L
+
+    /** App 回到前台：马上补带 location 类型（这时系统允许），不用等一分钟一次的补试 */
+    private val appForegroundObserver = object : DefaultLifecycleObserver {
+        override fun onStart(owner: LifecycleOwner) = onAppForeground()
+    }
+
+    /** 测试替换：真正调 startForeground 的那一步（Robolectric 不会像真机那样在后台拒绝 location 类型） */
+    @VisibleForTesting
+    internal var foregroundStarter: (notificationId: Int, notification: Notification, type: Int) -> Unit =
+        { id, notification, type -> ServiceCompat.startForeground(this, id, notification, type) }
+
     /** 当前定位档位与收集它的协程（所有会话取最勤的那一档） */
     private var activeTier: LocationCadence.Tier = LocationCadence.Tier.OFF
     private var locationJob: Job? = null
@@ -151,6 +185,24 @@ class BusTrackingService : LifecycleService() {
         lifecycleScope.launch(Dispatchers.Main) {
             settings.autoStopAfterBoarding.collect { upgradeLocationTypeIfNeeded(force = true) }
         }
+        runCatching { ProcessLifecycleOwner.get().lifecycle.addObserver(appForegroundObserver) }
+    }
+
+    /**
+     * App 回到前台（issue #49）：定时提醒、小组件、进程重建这些从后台开始的追踪，前台服务带不上 location 类型，
+     * 判不了上车；用户一打开 App 就补上，并把挪不动的前台通知挪到该在的位置。
+     */
+    @VisibleForTesting
+    internal fun onAppForeground() {
+        // 还没进前台（服务刚创建，加观察者时 App 本来就在前台会马上回调）：进前台那一步自己会带 location
+        if (foregroundSessionId == null) return
+        lastForegroundMoveFailMillis = -1L
+        upgradeLocationTypeIfNeeded(force = true)
+        val live = trackingRepository.sessions.value.filter { !it.interrupted && it.state.isActive }
+        val focus = live.lastOrNull() ?: return
+        if (foregroundSessionId != focus.sessionId || foregroundAliasKey != null) moveForegroundTo(focus, live)
+        // 「自动判上车已暂停」的说明要马上撤掉，不等下一轮轮询
+        live.forEach { render(it, force = true) }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -173,6 +225,8 @@ class BusTrackingService : LifecycleService() {
         val notification = notificationOf(shown)
         val wantLocation = sessions.any { TrackingEngine.wantsLocation(it.target, stopAfterBoarding) } &&
             locationSource.hasPrecisePermission()
+        val previousForegroundId = foregroundNotifyId
+        val wasForeground = foregroundSessionId != null
         locationTrackingAllowed = try {
             enterForeground(notification, wantLocation, notifyIdOf(shown))
         } catch (e: IllegalStateException) {
@@ -182,7 +236,15 @@ class BusTrackingService : LifecycleService() {
             endStartFailure(session, e)
             return START_NOT_STICKY
         }
-        foregroundSessionId = shown?.sessionId
+        // 已经在前台、又从后台来了一个新追踪（定时提醒等），挪不动前台通知：前台留给原来那一项，
+        // 新的一项照常发自己的通知（syncForeground 一分钟后 / App 回前台时再挪）
+        val moved = !wasForeground || foregroundNotifyId != previousForegroundId || foregroundNotifyId == notifyIdOf(shown)
+        if (moved) {
+            foregroundSessionId = shown?.sessionId
+            foregroundAliasKey = null
+        } else {
+            lastForegroundMoveFailMillis = monotonicClock.elapsedMillis()
+        }
         if (session == null) {
             // 启动请求发出后用户又结束了（或换了新会话，新会话自己会再来一次启动请求）
             if (shown == null) {
@@ -284,8 +346,9 @@ class BusTrackingService : LifecycleService() {
         if (wantLocation && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val withLocation = baseType or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
             try {
-                ServiceCompat.startForeground(this, notificationId, notification, withLocation)
+                foregroundStarter(notificationId, notification, withLocation)
                 lastForegroundServiceType = withLocation
+                foregroundHasLocation = true
                 foregroundNotifyId = notificationId
                 postedNotifyIds += notificationId
                 return true
@@ -294,9 +357,12 @@ class BusTrackingService : LifecycleService() {
             } catch (e: IllegalStateException) {
                 Log.w(TAG, "Location FGS type rejected, tracking without location", e)
             }
+            // 已经带着 location 在跑：不降级，前台通知留在原来那条上（调用方看 foregroundNotifyId 没变就知道没挪）
+            if (foregroundHasLocation) return true
         }
-        ServiceCompat.startForeground(this, notificationId, notification, baseType)
+        foregroundStarter(notificationId, notification, baseType)
         lastForegroundServiceType = baseType
+        foregroundHasLocation = false
         foregroundNotifyId = notificationId
         postedNotifyIds += notificationId
         return false
@@ -333,7 +399,9 @@ class BusTrackingService : LifecycleService() {
         syncForeground(live)
         // 前台通知已经换到还活着的那一项身上了，这才撤掉结束那几项的通知
         endedWorkers.forEach { worker ->
-            worker.notifyIds.values.forEach { liveProgressNotifier.cancelNotification(this, it) }
+            // 前台通知撤不掉（系统不让），而且挪不动时它已经画着接替的那一项了
+            worker.notifyIds.values.filter { it != foregroundNotifyId }
+                .forEach { liveProgressNotifier.cancelNotification(this, it) }
         }
         // 旧版本留下的那条（id 10001，按钮不带 sessionId）：只要还有追踪在跑就清掉它，
         // 不然它会一直躺在通知栏，点它的「结束」还可能把别的项一起停掉
@@ -354,11 +422,27 @@ class BusTrackingService : LifecycleService() {
             foregroundSessionId = null
             return
         }
+        // 上次挪不动（App 在后台、带不上 location），原来那条的主人还在：一分钟内不反复试
+        val ownerAlive = live.any { it.sessionId == foregroundSessionId }
+        if (ownerAlive && foregroundMoveRecentlyFailed()) return
+        moveForegroundTo(focus, live)
+        // 换焦点后每条通知都按新身份重画一遍（原来那条从前台通知变成普通常驻通知）
+        live.forEach { render(it, force = true) }
+    }
+
+    /**
+     * 把前台服务挂到 [focus] 的第一条通知上。
+     *
+     * 带着 location 类型时挪不动（App 在后台，系统不让再带 location），就不挪、不降级（issue #49：以前这里退回
+     * specialUse，这次追踪就悄悄判不了上车了）：原来那条通知的主人还在，前台就还算它的；主人没了，
+     * 就把 [focus] 的第一条画在原来那条上（[foregroundAliasKey]）。
+     */
+    private fun moveForegroundTo(focus: TrackingSession, live: List<TrackingSession>) {
+        val targetId = notifyIdOf(focus)
         val wantLocation = live.any { TrackingEngine.wantsLocation(it.target, stopAfterBoarding) } &&
             locationSource.hasPrecisePermission()
-        foregroundSessionId = focusId
         locationTrackingAllowed = try {
-            enterForeground(notificationOf(focus), wantLocation, notifyIdOf(focus))
+            enterForeground(notificationOf(focus), wantLocation, targetId)
         } catch (e: IllegalStateException) {
             Log.w(TAG, "Cannot move foreground tracking to another session", e)
             false
@@ -366,9 +450,34 @@ class BusTrackingService : LifecycleService() {
             Log.w(TAG, "Cannot move foreground tracking to another session", e)
             false
         }
-        // 换焦点后每条通知都按新身份重画一遍（原来那条从前台通知变成普通常驻通知）
-        live.forEach { render(it, force = true) }
+        if (foregroundNotifyId == targetId) {
+            foregroundSessionId = focus.sessionId
+            foregroundAliasKey = null
+            lastForegroundMoveFailMillis = -1L
+            return
+        }
+        lastForegroundMoveFailMillis = monotonicClock.elapsedMillis()
+        val owner = live.firstOrNull { session ->
+            notificationsOf(session).any { naturalNotifyId(it.key) == foregroundNotifyId || it.key == foregroundAliasKey }
+        }
+        if (owner != null) {
+            foregroundSessionId = owner.sessionId
+        } else {
+            foregroundSessionId = focus.sessionId
+            foregroundAliasKey = notificationsOf(focus).first().key
+        }
     }
+
+    private fun foregroundMoveRecentlyFailed(): Boolean =
+        lastForegroundMoveFailMillis >= 0L &&
+            monotonicClock.elapsedMillis() - lastForegroundMoveFailMillis < LOCATION_UPGRADE_RETRY_MILLIS
+
+    /** 一条通知本来的 id（由 key 决定） */
+    private fun naturalNotifyId(key: String): Int = liveProgressNotifier.notificationIdOf(key)
+
+    /** 一条通知实际画在哪个 id 上：前台通知挪不动时，接替的那条画在原来的前台通知上 */
+    private fun notifyIdForKey(key: String): Int =
+        if (key == foregroundAliasKey) foregroundNotifyId else naturalNotifyId(key)
 
     /** 接上一个会话（或同一会话的新一代）：重置轮询状态、刷新通知、重开轮询 */
     private fun attach(session: TrackingSession) {
@@ -402,6 +511,7 @@ class BusTrackingService : LifecycleService() {
     private fun sessionOf(sessionId: String): TrackingSession? = trackingRepository.sessionById(sessionId)
 
     private fun runEffect(effect: TrackingEngine.Effect, sessionId: String) {
+        speakIfEnabled(effect)
         when (effect) {
             is TrackingEngine.Effect.Alert -> when (effect.kind) {
                 TrackingEngine.AlertKind.ARRIVED ->
@@ -421,6 +531,16 @@ class BusTrackingService : LifecycleService() {
                 Log.d(TAG, "定位判断已上车，结束追踪: ${effect.state.lineName}")
                 arrivalAlerts.triggerEndedAfterBoarding(this, effect.state, sessionId)
             }
+        }
+    }
+
+    /** 「语音播报提醒」开着时把提醒念出来（issue #52）；读不了（没有朗读引擎）就算了，通知和振动照常 */
+    private fun speakIfEnabled(effect: TrackingEngine.Effect) {
+        val enabled = runCatching { settings.voiceAlerts.value }.getOrDefault(false)
+        if (!enabled) return
+        val sentence = AlertSpeech.sentenceFor(effect) ?: return
+        appScope.launch {
+            if (!announcer.speak(sentence)) Log.w(TAG, "语音播报失败：没有可用的朗读引擎")
         }
     }
 
@@ -451,27 +571,30 @@ class BusTrackingService : LifecycleService() {
         // 前台通知要跟着换到新的第一条上：一起等刚拿到线、从「总通知」拆成按线通知时，
         // 旧的前台通知在服务还是前台时系统不让撤，必须先挪走
         if (session.sessionId == foregroundSessionId && specs.isNotEmpty()) {
-            val firstId = liveProgressNotifier.notificationIdOf(specs.first().key)
-            if (firstId != foregroundNotifyId) {
-                val wantLocation = TrackingEngine.wantsLocation(session.target, stopAfterBoarding) &&
-                    locationSource.hasPrecisePermission()
-                runCatching { enterForeground(notificationOf(session), wantLocation, firstId) }
-                    .onSuccess { locationTrackingAllowed = it }
-                    .onFailure { Log.w(TAG, "Cannot move foreground notification to the new one", it) }
+            val first = specs.first().key
+            if (notifyIdForKey(first) != foregroundNotifyId && !foregroundMoveRecentlyFailed()) {
+                val live = trackingRepository.sessions.value.filter { !it.interrupted && it.state.isActive }
+                moveForegroundTo(session, live.ifEmpty { listOf(session) })
             }
         }
-        // 这一项不再需要的通知（一起等里去掉了一条线）：撤掉
+        // 这一项不再需要的通知（一起等里去掉了一条线）：撤掉（前台那条撤不掉，留给接替它的那条画）
         worker.rendered.keys.filterNot { it in keep }.toList().forEach { key ->
             worker.rendered.remove(key)
-            worker.notifyIds.remove(key)?.let { liveProgressNotifier.cancelNotification(this, it) }
+            worker.notifyIds.remove(key)?.takeIf { it != foregroundNotifyId }
+                ?.let { liveProgressNotifier.cancelNotification(this, it) }
         }
         // 实时活动（上岛）只给这一项的第一条通知
         val promotionKey = specs.firstOrNull()?.key
         specs.forEach { spec ->
-            val content = spec.state to spec.watch
-            if (!force && worker.rendered[spec.key] == content) return@forEach
+            val content = Triple(spec.state, spec.watch, spec.boardingNotice)
+            val notificationId = notifyIdForKey(spec.key)
+            val previousId = worker.notifyIds[spec.key]
+            if (!force && worker.rendered[spec.key] == content && previousId == notificationId) return@forEach
+            // 换了 id（接替了挪不动的前台通知 / 又挪回来了）：原来那条撤掉，别留两条一样的
+            if (previousId != null && previousId != notificationId && previousId != foregroundNotifyId) {
+                liveProgressNotifier.cancelNotification(this, previousId)
+            }
             worker.rendered[spec.key] = content
-            val notificationId = liveProgressNotifier.notificationIdOf(spec.key)
             worker.notifyIds[spec.key] = notificationId
             postedNotifyIds += notificationId
             liveProgressNotifier.updateNotification(
@@ -482,7 +605,8 @@ class BusTrackingService : LifecycleService() {
                 allowPromotion = session.sessionId == foregroundSessionId && spec.key == promotionKey,
                 nextLineName = spec.nextLineName,
                 notificationId = notificationId,
-                watchLineId = spec.watchLineId
+                watchLineId = spec.watchLineId,
+                boardingNotice = spec.boardingNotice
             )
         }
         updateLocationCadence()
@@ -490,6 +614,7 @@ class BusTrackingService : LifecycleService() {
 
     /** 这一项要显示哪几条通知 */
     private fun notificationsOf(session: TrackingSession): List<NotificationSpec> {
+        val notice = boardingNoticeOf(session)
         val watch = session.watchTarget
         val watched = session.watchedLines
         // 一起等等车：每条线一条通知（用户要的是每条线单独，能各自结束）
@@ -499,7 +624,8 @@ class BusTrackingService : LifecycleService() {
                     key = LiveProgressNotifier.watchLineKey(session.sessionId, line.line.lineId),
                     state = watchLineState(session, line),
                     watch = null,
-                    watchLineId = line.line.lineId
+                    watchLineId = line.line.lineId,
+                    boardingNotice = notice
                 )
             }
         }
@@ -508,9 +634,26 @@ class BusTrackingService : LifecycleService() {
                 key = session.sessionId,
                 state = session.state,
                 watch = LiveProgressNotifier.WatchNotice.of(session),
-                nextLineName = TrackingEngine.nextLegLineName(session)
+                nextLineName = TrackingEngine.nextLegLineName(session),
+                boardingNotice = notice
             )
         )
+    }
+
+    /**
+     * 这一项该用定位判上车、现在却用不了时，通知上说一声（issue #49：以前悄悄失效，用户只看到「怎么又没自动结束」）。
+     * 只在等车阶段说（上车以后路线只用定位辅助下车判定，没有定位照样按车辆站序走）。
+     */
+    private fun boardingNoticeOf(session: TrackingSession): String? {
+        if (!TrackingEngine.wantsLocation(session.target, stopAfterBoarding)) return null
+        val phase = session.state.legPhase
+        if (phase == LegPhase.ON_BOARD) return null
+        if (phase == LegPhase.SINGLE && session.state.pinnedBusId != null) return null
+        return when {
+            !locationSource.hasPrecisePermission() -> BOARDING_NOTICE_NO_PERMISSION
+            !locationTrackingAllowed -> BOARDING_NOTICE_OPEN_APP
+            else -> null
+        }
     }
 
     /**
@@ -588,7 +731,8 @@ class BusTrackingService : LifecycleService() {
                 watch = spec.watch,
                 sessionId = session.sessionId,
                 allowPromotion = true,
-                watchLineId = spec.watchLineId
+                watchLineId = spec.watchLineId,
+                boardingNotice = spec.boardingNotice
             )
         }
 
@@ -672,6 +816,8 @@ class BusTrackingService : LifecycleService() {
         workers.values.forEach { it.job?.cancel() }
         workers.clear()
         foregroundSessionId = null
+        foregroundAliasKey = null
+        foregroundHasLocation = false
         stopLocation()
         // 顺序很重要：前台通知在服务还处于前台时撤不掉（系统不让），要先退出前台再撤，
         // 否则那条通知会一直留在通知栏，点它的按钮也再没会话可改
@@ -681,6 +827,7 @@ class BusTrackingService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        runCatching { ProcessLifecycleOwner.get().lifecycle.removeObserver(appForegroundObserver) }
         workers.values.forEach { it.job?.cancel() }
         workers.clear()
         stopLocation()
@@ -706,6 +853,12 @@ class BusTrackingService : LifecycleService() {
 
         /** 补带 location 类型失败后，至少隔这么久再试 */
         private const val LOCATION_UPGRADE_RETRY_MILLIS = 60_000L
+
+        /** 通知副标题：前台服务没带上 location 类型（从后台开始的追踪），打开一次 App 就能补上 */
+        const val BOARDING_NOTICE_OPEN_APP = "自动判上车已暂停 · 打开 App 恢复"
+
+        /** 通知副标题：没有精确定位权限 */
+        const val BOARDING_NOTICE_NO_PERMISSION = "自动判上车需要精确定位权限"
 
         const val ACTION_START_TRACKING = "com.trackr.action.START_TRACKING"
         const val EXTRA_SESSION_ID = "extra_session_id"

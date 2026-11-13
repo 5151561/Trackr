@@ -218,11 +218,11 @@ class TrackrAppNavigationTest {
         assertFalse("进搜索页（首页栈上的子页）后首页停轮询", homeViewModel.isPollingActive)
 
         val callsBefore = realtime.nearbyStopsCalls.size
-        now += 5_000L
+        now += 1_000L
         pressBack()
 
         assertTrue("返回首页恢复轮询", homeViewModel.isPollingActive)
-        assertEquals("不到 15 秒：不补刷", callsBefore, realtime.nearbyStopsCalls.size)
+        assertEquals("不到 3 秒：不补刷", callsBefore, realtime.nearbyStopsCalls.size)
     }
 
     @Test

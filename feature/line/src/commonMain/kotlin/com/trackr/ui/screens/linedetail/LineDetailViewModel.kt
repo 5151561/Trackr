@@ -32,6 +32,7 @@ import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.displayLineName
+import com.trackr.core.model.sanitizePlateOrFleetNo
 import com.trackr.data.repository.IScheduledReminderRepository
 import com.trackr.ui.components.elder.TTS_UNAVAILABLE_MESSAGE
 import com.trackr.ui.screens.linedetail.components.stationArrivalState
@@ -76,7 +77,7 @@ data class LineStatic(
 )
 
 /**
- * 每 10 秒变的部分：车辆、运营状态、下一班。
+ * 每 3 秒变的部分：车辆、运营状态、下一班。
  * @param fallbackNextDeparture 实时接口没给下一班时，从时刻表补的下一班始发时间（HH:mm）
  */
 data class LineLive(
@@ -153,11 +154,23 @@ data class LineDetailUiState(
             static != null &&
             trackingSession.lineId == static.line.lineId &&
             trackingSession.targetOrder == selectedStop?.order
+
+    /** 这个候车站正在「只追一辆车」时那辆车的 busId（issue #52）；没在追或没指定车为 null */
+    val trackedPinnedBusId: String?
+        get() = if (isTrackingThisStop) trackingSession.pinnedBusId else null
+
+    /** 单车跟随里正在看的这辆车还能不能「追这辆车」：要有候车站，且车还没开过它 */
+    val canTrackFollowedBus: Boolean
+        get() {
+            val stop = selectedStop ?: return false
+            val bus = live?.buses?.firstOrNull { it.busId == followedBusId } ?: return false
+            return bus.order <= stop.order
+        }
 }
 
 /**
  * 线路详情 ViewModel：
- * 站表先读磁盘缓存再等网络；每 10 秒轮询（只在页面 RESUMED 时）；选站后按该站拿精确 ETA；单车跟随；换向找同名站；
+ * 站表先读磁盘缓存再等网络；每 3 秒轮询（只在页面 RESUMED 时）；选站后按该站拿精确 ETA；单车跟随；换向找同名站；
  * ☆ 一点即收藏（提示条可「换分组」）；定时提醒；追踪本站；长辈版「读给我听」。
  */
 @OptIn(ExperimentalAtomicApi::class)
@@ -232,13 +245,13 @@ class LineDetailViewModel(
     private var lastRefreshAtMillis: Long? = null
 
     /**
-     * 每条线路方向的时刻表缓存，避免 10 秒轮询时反复拉取。
+     * 每条线路方向的时刻表缓存，避免 3 秒轮询时反复拉取。
      * 必须在 [init] 之前初始化：`viewModelScope.launch` 跑在 `Dispatchers.Main.immediate` 上，
      * 命中缓存时首次请求会在构造期间同步跑完并读到这里，声明在 init 之后会拿到 null 而崩溃。
      */
     private val timetableCache = mutableMapOf<String, LineTimetable>()
 
-    // C1：不再每秒倒计时，固定 10 秒一轮；手动刷新 / 选站后用 restart() 从现在起重新计时（e683286）
+    // C1：不再每秒倒计时，固定 3 秒一轮；手动刷新 / 选站后用 restart() 从现在起重新计时（e683286）
     internal val pollingCoordinator = PollingCoordinator(
         scope = viewModelScope,
         strategy = FixedDelayPollingStrategy(delayMs = POLL_INTERVAL_SECONDS * 1000L),
@@ -366,7 +379,8 @@ class LineDetailViewModel(
         line: BusLineDirection,
         targetStop: BusStop,
         totalStops: Int,
-        alertThresholdStops: Int
+        alertThresholdStops: Int,
+        pinnedBus: LiveBus? = null
     ): Boolean = trackingController.start(
         TrackingTarget.SingleLine(
             cityId = cityId,
@@ -381,7 +395,9 @@ class LineDetailViewModel(
             alertThresholdStops = alertThresholdStops,
             source = line.source,
             mygolbsCityCode = line.mygolbsCityCode,
-            direction = line.direction
+            direction = line.direction,
+            pinnedBusId = pinnedBus?.busId.orEmpty(),
+            pinnedPlate = pinnedBus?.let { sanitizePlateOrFleetNo(it.plateOrFleetNo) }.orEmpty()
         )
     )
 
@@ -398,6 +414,25 @@ class LineDetailViewModel(
             targetStop = stop,
             totalStops = static.stops.size,
             alertThresholdStops = DEFAULT_ALERT_THRESHOLD_STOPS
+        )
+    }
+
+    /**
+     * 「追这辆车」（issue #52 下车提醒）：只追单车跟随里正在看的这辆，到当前候车站（可以是下车站）时提醒，
+     * 前面先到的车不算；这辆车开过该站后追踪自动结束。车已开过该站、或没选站时返回 false。
+     */
+    fun startTrackingFollowedBus(): Boolean {
+        val state = _uiState.value
+        val static = state.static ?: return false
+        val stop = state.selectedStop ?: return false
+        if (!state.canTrackFollowedBus) return false
+        val bus = state.live?.buses?.firstOrNull { it.busId == state.followedBusId } ?: return false
+        return startTracking(
+            line = static.line,
+            targetStop = stop,
+            totalStops = static.stops.size,
+            alertThresholdStops = DEFAULT_ALERT_THRESHOLD_STOPS,
+            pinnedBus = bus
         )
     }
 
@@ -704,7 +739,7 @@ class LineDetailViewModel(
         pollingCoordinator.pause()
     }
 
-    /** 恢复 / 启动 10 秒自动轮询（幂等） */
+    /** 恢复 / 启动 3 秒自动轮询（幂等） */
     fun resumePolling() {
         pollingCoordinator.resume()
     }
@@ -1045,7 +1080,7 @@ class LineDetailViewModel(
 
     companion object {
         /** 自动轮询周期（秒） */
-        const val POLL_INTERVAL_SECONDS = 10
+        const val POLL_INTERVAL_SECONDS = 3
 
         /** 追踪时提前几站提醒（原预警 chips 的默认值；全局设置见第 25 步） */
         const val DEFAULT_ALERT_THRESHOLD_STOPS = 2

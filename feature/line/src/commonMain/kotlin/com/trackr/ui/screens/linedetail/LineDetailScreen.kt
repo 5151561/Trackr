@@ -124,6 +124,7 @@ import com.trackr.ui.components.routeRailItemIndex
 import com.trackr.ui.components.routeRailItems
 import com.trackr.ui.components.timetable.TimetableBottomSheet
 import com.trackr.ui.screens.linedetail.components.BusFollowContent
+import com.trackr.ui.screens.linedetail.components.FollowTrackAction
 import com.trackr.ui.screens.linedetail.components.BusListContent
 import com.trackr.ui.screens.linedetail.components.FavoriteGroupPickerSheet
 import com.trackr.ui.screens.linedetail.components.StationArrivalContent
@@ -160,6 +161,8 @@ sealed interface LineDetailEvent {
     ) : LineDetailEvent
     /** 底栏主按钮：追踪这班车 / 结束追踪 */
     data object ToggleTracking : LineDetailEvent
+    /** 单车跟随里的「追这辆车」/「结束」（issue #52 下车提醒：只追这一辆到当前候车站） */
+    data object ToggleTrackFollowedBus : LineDetailEvent
     /** 底栏乘车码：一点就开默认渠道，「每次询问」才弹选择 */
     data object OpenTransitCode : LineDetailEvent
     data object DismissTransitCodeSheet : LineDetailEvent
@@ -683,14 +686,28 @@ private fun HeroCard(
 
                 PanelMode.BUS_FOLLOW -> {
                     val detail = rememberLineDetail(static, state.live)
+                    val followedBus = detail.buses.find { it.busId == state.followedBusId }
                     BusFollowContent(
                         lineDetail = detail,
-                        followedBus = detail.buses.find { it.busId == state.followedBusId },
-                        onBack = { onEvent(LineDetailEvent.BackFromPanel) }
+                        followedBus = followedBus,
+                        onBack = { onEvent(LineDetailEvent.BackFromPanel) },
+                        trackAction = followTrackAction(state, followedBus),
+                        onToggleTrackBus = { onEvent(LineDetailEvent.ToggleTrackFollowedBus) }
                     )
                 }
             }
         }
+    }
+}
+
+/** 单车跟随底部「追这辆车」按钮的样子（issue #52）；没选候车站、车已不在线上时不画 */
+internal fun followTrackAction(state: LineDetailUiState, followedBus: LiveBus?): FollowTrackAction? {
+    val stop = state.selectedStop ?: return null
+    val bus = followedBus ?: return null
+    return when {
+        state.trackedPinnedBusId == bus.busId -> FollowTrackAction.Tracking(stop.name)
+        bus.order > stop.order -> FollowTrackAction.Passed(stop.name)
+        else -> FollowTrackAction.Available(stop.name)
     }
 }
 

@@ -405,10 +405,28 @@ data class TrackingSessionState(
     val recentDepartedBusId: String? = null,
     /** 记录 [recentDepartedBusId] 的墙钟毫秒 */
     val recentDepartedAtMillis: Long = 0L,
+    /**
+     * 单线路判上车：最近一次定位落在候车站附近的墙钟毫秒（站旁记忆，issue #49）。
+     * 车到站 / 过站那一轮恰好没定位时，凭它照样开始确认；0 = 没在站旁出现过
+     */
+    val nearWaitStopAtMillis: Long = 0L,
+    /**
+     * 单线路判上车：开始「补判」的墙钟毫秒（issue #49）。人在站旁时有车到站 / 过站就记下，之后一段时间里
+     * 待确认放掉了也照样看定位，一旦人沿线过了站就判上车；0 = 没在补判
+     */
+    val boardWatchSinceMillis: Long = 0L,
     /** 单线路：候车站坐标（WGS-84，线路详情给的），0 = 还不知道；用来区分同名的对向站 */
     val targetStopLat: Double = 0.0,
-    val targetStopLng: Double = 0.0
+    val targetStopLng: Double = 0.0,
+    /** 单线路「追这辆车」（issue #52）：只追这一辆，不换车；null = 不指定 */
+    val pinnedBusId: String? = null,
+    /** [pinnedBusId] 的车牌 */
+    val pinnedPlate: String = ""
 ) {
+    /** 单线路只追指定的一辆车（issue #52） */
+    val isPinnedBus: Boolean
+        get() = legPhase == LegPhase.SINGLE && pinnedBusId != null
+
     /** 车已到上车站，正在用定位确认用户是否上车 */
     val isAwaitingBoardingConfirmation: Boolean
         get() = (legPhase == LegPhase.WAITING_BOARD || legPhase == LegPhase.SINGLE) && boardingCandidateBusId != null

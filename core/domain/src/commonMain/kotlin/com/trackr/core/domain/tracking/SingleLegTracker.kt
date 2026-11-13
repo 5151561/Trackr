@@ -14,15 +14,37 @@ import com.trackr.core.model.TrackingSessionState
  * - 正在追踪的车短暂从数据里消失时，保持原车 [MAX_MISSING_POLLS] 轮，不立刻换车。
  * - 正在追踪的车已开过目标站或消失超过上限时换车；换车时重置提醒触发标志，下一辆车照常提醒。
  * - 开着「上车后自动结束追踪」时，车停到候车站就开始用定位确认人有没有跟着车走（见 [checkBoarding]），
- *   确认上了就发 `boarded` 让调用方结束这次追踪（issue #32）。
+ *   确认上了就发 `boarded` 让调用方结束这次追踪（issue #32）；一次定位看出人跟着车走了就算上了（issue #49），
+ *   确认期间后面那班车不提醒。
+ * - 判上车不留死角（issue #49）：
+ *   - 站旁记忆：等车时定位在站旁就记下（[TrackingSessionState.nearWaitStopAtMillis]），车到站 / 过站那一轮没定位，
+ *     凭记忆照样开始确认；车过站后最多 [RECOVERY_MAX_STOPS_PAST] 站、[DEPARTURE_RECOVERY_WINDOW_MILLIS] 内都能补建；
+ *   - 补判：一开始确认就记下 [TrackingSessionState.boardWatchSinceMillis]，之后 [BOARD_WATCH_MILLIS] 内即使待确认
+ *     超时放掉了，只要定位显示人在这条线路上、已经过了站（[BoardingDetector.isPastStopAlongLine]）就判上车；
+ *     只有「没赶上」（人还在站上、车已开远）才撤掉补判；
+ *   - 「没赶上」要有车的位置作证，车只是这一轮不在数据里不算。
+ * - 指定了车（[TrackingSessionState.pinnedBusId]，issue #52「下车提醒」）时只追这一辆：不换车、不判上车，
+ *   它暂时从数据里消失就一直保持上次位置；开过目标站后发 `finished` 让调用方结束追踪（没发过到站提醒的先补发）。
  */
 internal object SingleLegTracker {
 
     /** 追踪车辆短暂消失时最多保持原车的轮询次数 */
     const val MAX_MISSING_POLLS = 2
 
-    /** 只补回最近一轮漏掉的到站，避免用中断前的旧车辆启动检测。 */
-    private const val DEPARTURE_RECOVERY_WINDOW_MILLIS = 60_000L
+    /**
+     * 车过站后补建待确认的时限：上一轮离现在不超过这么久（避免用中断前的旧车辆启动检测），
+     * 「车刚过站、定位还没来」也最多等这么久。issue #49：以前 60 秒，上车时 GPS 冷启动、后台限频常常赶不上
+     */
+    private const val DEPARTURE_RECOVERY_WINDOW_MILLIS = 3 * 60_000L
+
+    /** 车过站后补建待确认：车最多开过候车站几站（上游数据常常一跳两三站） */
+    private const val RECOVERY_MAX_STOPS_PAST = 3
+
+    /** 站旁记忆的有效期：这么久以内在站旁出现过，车到站 / 过站那一轮没定位也照样开始确认 */
+    private const val NEAR_STOP_MEMORY_MILLIS = 3 * 60_000L
+
+    /** 补判上车的时长：有车到站 / 过站后这么久以内，人沿线过了站都算上了车 */
+    const val BOARD_WATCH_MILLIS = 20 * 60_000L
 
     /** 判出上车后写进状态的文案（会话马上就被清掉了，只有通知里会读到它） */
     const val BOARDED_SUMMARY = "已上车，本次追踪结束"
@@ -36,12 +58,14 @@ internal object SingleLegTracker {
      * @param alert 本轮要发的提醒，null 表示不发
      * @param alertState 发提醒时用的状态
      * @param boarded 定位判出已上车：调用方据此结束这次追踪
+     * @param finished 指定的那辆车已开过目标站（issue #52）：调用方据此结束这次追踪
      */
     data class SingleUpdate(
         val state: TrackingSessionState,
         val alert: AlertKind? = null,
         val alertState: TrackingSessionState? = null,
-        val boarded: Boolean = false
+        val boarded: Boolean = false,
+        val finished: Boolean = false
     )
 
     /**
@@ -54,6 +78,7 @@ internal object SingleLegTracker {
      * @param nowMillis 当前墙钟时刻（毫秒），写进 `updatedAtMillis`
      * @param boarding 判上车的定位上下文（候车站 = 目标站）；null 表示这次不判上车（开关关着 / 没定位），
      *   行为和原来一样
+     * @param lineStops 这条线的站点坐标（WGS-84），补判「人沿线过了站」用；空表示不补判
      */
     fun processPoll(
         session: TrackingSessionState,
@@ -61,21 +86,35 @@ internal object SingleLegTracker {
         operatingState: LineOperatingState = LineOperatingState.RUNNING,
         statusDescription: String = "",
         nowMillis: Long,
-        boarding: BoardingDetector.Input? = null
+        boarding: BoardingDetector.Input? = null,
+        lineStops: List<BoardingDetector.LinePoint> = emptyList()
     ): SingleUpdate {
+        session.pinnedBusId?.let { pinnedId ->
+            return processPinnedBus(session, pinnedId, buses, operatingState, statusDescription, nowMillis)
+        }
         if (boarding == null) {
-            val cleaned = if (session.recentDepartedBusId != null) {
-                session.copy(recentDepartedBusId = null, recentDepartedAtMillis = 0L)
+            // 不判上车了（开关关了 / 定位不能用了）：留着的待确认要清掉，否则一直压着提醒、一直开高频定位
+            val cleaned = if (session.boardingCandidateBusId != null || session.recentDepartedBusId != null ||
+                session.nearWaitStopAtMillis != 0L || session.boardWatchSinceMillis != 0L
+            ) {
+                clearAllBoarding(session)
             } else {
                 session
             }
             return processBus(cleaned, buses, operatingState, statusDescription, nowMillis)
         }
 
-        val recovered = recoverDepartedCandidate(session, buses, boarding, nowMillis)
+        val remembered = rememberNearStop(session, boarding, nowMillis)
+        // 补判：车到站 / 过站之后，人沿线过了站就是上了车——不看车的上报位置，也不管待确认还在不在
+        if (remembered.boardWatchSinceMillis != 0L &&
+            BoardingDetector.isPastStopAlongLine(boarding, lineStops, session.targetOrder)
+        ) {
+            return SingleUpdate(clearAllBoarding(remembered).copy(statusSummary = BOARDED_SUMMARY), boarded = true)
+        }
+        val recovered = recoverDepartedCandidate(remembered, buses, boarding, nowMillis)
         val checked = checkBoarding(recovered, buses, boarding, nowMillis)
         if (checked.boarded) {
-            return SingleUpdate(checked.state.copy(statusSummary = BOARDED_SUMMARY), boarded = true)
+            return SingleUpdate(clearAllBoarding(checked.state).copy(statusSummary = BOARDED_SUMMARY), boarded = true)
         }
         val update = processBus(checked.state, buses, operatingState, statusDescription, nowMillis)
         return update.copy(state = startCandidate(update.state, boarding, nowMillis))
@@ -172,7 +211,9 @@ internal object SingleLegTracker {
             updatedAtMillis = nowMillis
         )
 
-        val suppressAlerts = session.boardingCandidateBusId != null && session.boardingConfirmStreak > 0
+        // 正在确认是否上了前一班车：后面这班车的临近 / 到站先不提醒（issue #49：人已在车上，下一班到站又提醒）。
+        // 判成没赶上会清掉待确认，后面这班车照常提醒（标志没被置上）
+        val suppressAlerts = session.boardingCandidateBusId != null
         var alert: AlertKind? = null
         var alertState: TrackingSessionState? = null
         if (!suppressAlerts) {
@@ -198,6 +239,97 @@ internal object SingleLegTracker {
         )
     }
 
+    // ---------------------------------------------------------------- 只追指定的车（issue #52）
+
+    /**
+     * 只追 [pinnedId] 这一辆：提醒规则和不指定时一样（还剩阈值站数提醒一次、到站提醒一次）。
+     * - 车不在数据里：保持上次位置接着等，不换车（指定的车可能只是一会儿没信号）；
+     * - 车开过目标站：没发过到站提醒的先补发，然后 `finished`。
+     */
+    private fun processPinnedBus(
+        session: TrackingSessionState,
+        pinnedId: String,
+        buses: List<LiveBus>,
+        operatingState: LineOperatingState,
+        statusDescription: String,
+        nowMillis: Long
+    ): SingleUpdate {
+        val targetOrder = session.targetOrder
+        val plate = session.pinnedPlate.ifBlank { "这辆车" }
+        val bus = buses.firstOrNull { it.busId == pinnedId }
+        if (bus == null) {
+            val summary = when {
+                session.currentBusId == null && operatingState != LineOperatingState.RUNNING ->
+                    statusDescription.ifEmpty { operatingState.defaultLabel }
+                session.currentBusId == null -> "正在查找 $plate 的实时位置…"
+                else -> "$plate 信号暂时丢失，保持上次位置（距 ${session.targetStopName}）"
+            }
+            return SingleUpdate(
+                session.copy(
+                    missingBusPolls = session.missingBusPolls + 1,
+                    statusSummary = summary,
+                    updatedAtMillis = nowMillis
+                )
+            )
+        }
+
+        val isFirstSight = session.currentBusId != pinnedId
+        val passed = bus.order > targetOrder
+        val stopsRemaining = (targetOrder - bus.order).coerceAtLeast(0)
+        val isStoppedAtTarget = stopsRemaining == 0 && !passed && ArrivalRules.isBusStopped(bus)
+        val isArrivedCondition = ArrivalRules.isBusArrivedAtOrder(targetOrder, bus)
+        val startOrder = if (isFirstSight) {
+            val base = if (ArrivalRules.isBusStopped(bus)) bus.order else bus.order - 1
+            base.coerceAtMost(targetOrder - 1).coerceAtLeast(1)
+        } else {
+            session.startTrackingOrder
+        }
+        val etaFormatted = RouteProjectionMath.formatEtaText(bus.etaSeconds, isStoppedAtTarget)
+        val statusSummary = when {
+            passed || isStoppedAtTarget -> "$plate 已到达 ${session.targetStopName}！"
+            stopsRemaining == 0 -> "$plate 即将进站 ${session.targetStopName}"
+            bus.etaSeconds > 0 -> "$plate 距 ${session.targetStopName} 还有 $stopsRemaining 站（$etaFormatted）"
+            else -> "$plate 距 ${session.targetStopName} 还有 $stopsRemaining 站"
+        }
+        val baseState = session.copy(
+            startTrackingOrder = startOrder,
+            currentBusId = pinnedId,
+            currentBusOrder = bus.order.coerceAtMost(targetOrder),
+            currentBusProgress = if (passed) 1f else bus.segmentProgress,
+            isBusArrivedAtStop = isStoppedAtTarget || passed,
+            stopsRemaining = stopsRemaining,
+            etaSeconds = if (passed) 0 else bus.etaSeconds,
+            expectedArrivalTime = bus.expectedArrivalTimeText,
+            missingBusPolls = 0,
+            statusSummary = statusSummary,
+            updatedAtMillis = nowMillis
+        )
+
+        var hasApproaching = session.hasTriggeredApproachingAlert
+        var hasArrived = session.hasTriggeredArrivedAlert
+        var alert: AlertKind? = null
+        var alertState: TrackingSessionState? = null
+        if (isArrivedCondition && !hasArrived) {
+            alert = AlertKind.ARRIVED
+            alertState = baseState.copy(stopsRemaining = 0, isBusArrivedAtStop = true)
+            hasArrived = true
+            hasApproaching = true
+        } else if (!isArrivedCondition && stopsRemaining <= session.alertThresholdStops && !hasApproaching) {
+            alert = AlertKind.APPROACHING
+            alertState = baseState
+            hasApproaching = true
+        }
+        return SingleUpdate(
+            baseState.copy(
+                hasTriggeredApproachingAlert = hasApproaching,
+                hasTriggeredArrivedAlert = hasArrived
+            ),
+            alert,
+            alertState,
+            finished = passed
+        )
+    }
+
     // ---------------------------------------------------------------- 判上车（issue #32）
 
     private class BoardingCheck(val state: TrackingSessionState, val boarded: Boolean)
@@ -205,8 +337,12 @@ internal object SingleLegTracker {
     /**
      * 待确认阶段的一轮判定。
      *
-     * 单线路和路线共用 [BoardingDetector] 的规则：人离开了候车站、还贴着这辆车 → 上了；人还在站上、车开走了 → 没赶上。
-     * 区别只在超时：路线超时会按「车已离站」当已上车，单线路不这么兜底（人可能正往站上走），直接放弃待确认。
+     * 上车（issue #49）：一次定位满足 [BoardingDetector.isRidingAwayWithBus]（车走了、人也跟着车的方向离站 ≥100 m）
+     * 就判上车、马上结束——不再等连续两次、不要求贴车。以前要凑齐两次「贴车 80 m」，车载 GPS 一滞后就凑不齐，
+     * 等着等着下一班车到站又提醒，追踪一直不结束。路线、一起等的判定不变。
+     * 没赶上仍按 [BoardingDetector] 的规则（人还在站上、车开远了，连续两次），但车只是这一轮不在数据里不算；
+     * 待确认满 [BoardingDetector.CANDIDATE_TIMEOUT_MILLIS] 还没结论就放掉（人可能正往站上走），不按超时判上车，
+     * 补判（[TrackingSessionState.boardWatchSinceMillis]）留着。
      */
     private fun checkBoarding(
         session: TrackingSessionState,
@@ -215,14 +351,17 @@ internal object SingleLegTracker {
         nowMillis: Long
     ): BoardingCheck {
         val candidateId = session.boardingCandidateBusId ?: return BoardingCheck(session, false)
+        // 车开过候车站之后就不再是「未过站的车」了，所以按 id 在全部在途车里找它
+        val candidate = buses.firstOrNull { it.busId == candidateId }
+        if (BoardingDetector.isRidingAwayWithBus(input, candidate, session.targetOrder)) {
+            return BoardingCheck(BoardingDetector.clearBoardingFields(session), true)
+        }
         if (nowMillis - session.boardingCandidateSinceMillis >= BoardingDetector.CANDIDATE_TIMEOUT_MILLIS) {
             return BoardingCheck(BoardingDetector.clearBoardingFields(session), false)
         }
-        // 车开过候车站之后就不再是「未过站的车」了，所以按 id 在全部在途车里找它
-        val candidate = buses.firstOrNull { it.busId == candidateId }
         // 候车站就是目标站：用 boardStopOrder = targetOrder 借一趟路线的规矩（车过站 = candidate.order > boardStopOrder）
         val probe = session.copy(boardStopOrder = session.targetOrder)
-        val evaluated = BoardingDetector.evaluateCandidate(probe, candidate, input)
+        val evaluated = BoardingDetector.evaluateCandidate(probe, candidate, input, missNeedsBus = true)
         // 如果原候选车还没确认过（confirm == 0）且人没在它上面，而同线路紧跟的另一辆车已到/刚过目标站且人正贴着那辆车走，
         // 改追那辆实际坐上的车（前后车串车或前车停靠未上、上了后车的情形）
         if (evaluated.verdict == BoardingDetector.Verdict.PENDING &&
@@ -246,15 +385,18 @@ internal object SingleLegTracker {
         )
         return when (evaluated.verdict) {
             BoardingDetector.Verdict.BOARDED -> BoardingCheck(BoardingDetector.clearBoardingFields(state), true)
-            BoardingDetector.Verdict.MISSED -> BoardingCheck(BoardingDetector.clearBoardingFields(state), false)
+            // 没赶上：人还在站上、车开远了，这辆车不会再「补判」成上了
+            BoardingDetector.Verdict.MISSED ->
+                BoardingCheck(BoardingDetector.clearBoardingFields(state).copy(boardWatchSinceMillis = 0L), false)
             BoardingDetector.Verdict.PENDING -> BoardingCheck(state, false)
         }
     }
 
     /**
      * 轮询可能直接从进站前跳到离站后，或车到站那轮还没取得定位。
-     * 必须在选下一班车之前补回原车；只认最近追过的同一辆车、刚过一两站且人在站旁或已随车离开。
-     * 此处只创建待确认，是否上车仍由两次不同定位判断，不能因车过站直接结束。
+     * 必须在选下一班车之前补回原车；只认最近追过的同一辆车、刚过 1–[RECOVERY_MAX_STOPS_PAST] 站，
+     * 且人在站旁、已随车离开，或者这一轮没定位但刚才在站旁（站旁记忆）。
+     * 此处只创建待确认，是否上车仍由定位判断，不能因车过站直接结束。
      */
     private fun recoverDepartedCandidate(
         session: TrackingSessionState,
@@ -276,13 +418,18 @@ internal object SingleLegTracker {
         val activeRecentId = cleanedSession.recentDepartedBusId
         if (activeRecentId != null) {
             val recentBus = buses.firstOrNull { it.busId == activeRecentId }
-            if (recentBus == null || recentBus.order !in (session.targetOrder + 1)..(session.targetOrder + 2)) {
+            if (recentBus == null || recentBus.order !in (session.targetOrder + 1)..(session.targetOrder + RECOVERY_MAX_STOPS_PAST)) {
                 return cleanedSession.copy(recentDepartedBusId = null, recentDepartedAtMillis = 0L)
             }
             if (input.user == null && input.coarseUser == null) {
-                return cleanedSession
+                // 还是没定位：刚才在站旁的话直接开始确认，否则接着等定位
+                return if (nearStopRecently(cleanedSession, nowMillis)) {
+                    withCandidate(cleanedSession, activeRecentId, nowMillis)
+                } else {
+                    cleanedSession
+                }
             }
-            return if (BoardingDetector.shouldRecoverDepartedCandidate(input, recentBus)) {
+            return if (BoardingDetector.shouldRecoverDepartedCandidate(input, recentBus, session.targetOrder)) {
                 withCandidate(cleanedSession, activeRecentId, nowMillis)
             } else {
                 cleanedSession.copy(recentDepartedBusId = null, recentDepartedAtMillis = 0L)
@@ -295,15 +442,19 @@ internal object SingleLegTracker {
         val previousId = cleanedSession.currentBusId ?: return cleanedSession
         val departed = buses.firstOrNull { it.busId == previousId } ?: return cleanedSession
         // 上游数据常常一跳两站（车不停站、或这一轮轮询晚了），只认刚过一站会整段漏掉判定（issue #41）
-        if (departed.order !in (cleanedSession.targetOrder + 1)..(cleanedSession.targetOrder + 2)) return cleanedSession
+        if (departed.order !in (cleanedSession.targetOrder + 1)..(cleanedSession.targetOrder + RECOVERY_MAX_STOPS_PAST)) {
+            return cleanedSession
+        }
         if (input.user == null && input.coarseUser == null) {
-            // 车刚过站但定位还没拿到：暂存 busId 保持高频定位与轮询，等下一轮拿到定位再补回
+            // 车刚过站但定位还没拿到：刚才在站旁的话直接开始确认；
+            // 否则暂存 busId 保持高频定位与轮询，等下一轮拿到定位再补回
+            if (nearStopRecently(cleanedSession, nowMillis)) return withCandidate(cleanedSession, previousId, nowMillis)
             return cleanedSession.copy(
                 recentDepartedBusId = previousId,
                 recentDepartedAtMillis = nowMillis
             )
         }
-        if (!BoardingDetector.shouldRecoverDepartedCandidate(input, departed)) return cleanedSession
+        if (!BoardingDetector.shouldRecoverDepartedCandidate(input, departed, cleanedSession.targetOrder)) return cleanedSession
         return withCandidate(cleanedSession, previousId, nowMillis)
     }
 
@@ -320,9 +471,33 @@ internal object SingleLegTracker {
     ): TrackingSessionState {
         if (state.boardingCandidateBusId != null || state.stopsRemaining != 0) return state
         val busId = state.currentBusId ?: return state
-        if (!BoardingDetector.shouldStartCandidate(input)) return state
+        val hasFix = input.user != null || input.coarseUser != null
+        // 有定位按定位；这一轮没定位就看站旁记忆（车到站那一刻恰好没定位，issue #49）
+        val start = if (hasFix) BoardingDetector.shouldStartCandidate(input) else nearStopRecently(state, nowMillis)
+        if (!start) return state
         return withCandidate(state, busId, nowMillis)
     }
+
+    /** 记下站旁记忆；补判过期了就撤掉 */
+    private fun rememberNearStop(
+        state: TrackingSessionState,
+        input: BoardingDetector.Input,
+        nowMillis: Long
+    ): TrackingSessionState {
+        var next = state
+        if (BoardingDetector.isNearBoardStop(input)) next = next.copy(nearWaitStopAtMillis = nowMillis)
+        if (next.boardWatchSinceMillis != 0L && nowMillis - next.boardWatchSinceMillis !in 0..BOARD_WATCH_MILLIS) {
+            next = next.copy(boardWatchSinceMillis = 0L)
+        }
+        return next
+    }
+
+    private fun nearStopRecently(state: TrackingSessionState, nowMillis: Long): Boolean =
+        state.nearWaitStopAtMillis != 0L && nowMillis - state.nearWaitStopAtMillis in 0..NEAR_STOP_MEMORY_MILLIS
+
+    /** 判上车相关的字段全部清掉（判出上车、不再判上车时用） */
+    private fun clearAllBoarding(state: TrackingSessionState): TrackingSessionState =
+        BoardingDetector.clearBoardingFields(state).copy(nearWaitStopAtMillis = 0L, boardWatchSinceMillis = 0L)
 
     private fun withCandidate(
         state: TrackingSessionState,
@@ -335,6 +510,8 @@ internal object SingleLegTracker {
         boardingMissStreak = 0,
         boardingLastFixElapsedMillis = -1L,
         recentDepartedBusId = null,
-        recentDepartedAtMillis = 0L
+        recentDepartedAtMillis = 0L,
+        // 开始确认就开始补判：之后待确认放掉了，人沿线过了站也照样算上车
+        boardWatchSinceMillis = nowMillis
     )
 }

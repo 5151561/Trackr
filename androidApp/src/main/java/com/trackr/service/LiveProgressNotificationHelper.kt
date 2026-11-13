@@ -187,7 +187,9 @@ class LiveProgressNotifier(
         sessionId: String = "",
         allowPromotion: Boolean = true,
         /** 一起等里这条通知属于哪条线（按钮广播带出去，点「结束」只去掉这条线） */
-        watchLineId: String = ""
+        watchLineId: String = "",
+        /** 自动判上车暂停的说明（issue #49），有就顶替副标题；null = 正常 */
+        boardingNotice: String? = null
     ): Notification {
         ensureNotificationChannel(context)
 
@@ -233,7 +235,7 @@ class LiveProgressNotifier(
             .setColor(COLOR_ACCENT)
             .setContentTitle(texts.title)
             .setContentText(texts.content)
-            .setSubText(texts.subText)
+            .setSubText(boardingNotice ?: texts.subText)
             .setStyle(progressStyle)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -459,6 +461,8 @@ class LiveProgressNotifier(
         val contentText = when {
             isArrived && isMultiLeg && currentLegNum < state.totalLegs ->
                 "到达换乘站 ${state.targetStopName}，自动切换下一程"
+            isArrived && state.isPinnedBus ->
+                "${state.targetStopName}：到站了，请下车"
             isArrived ->
                 "${state.targetStopName}：到站了，快去上车"
             state.stopsRemaining == 0 && isMultiLeg ->
@@ -473,6 +477,8 @@ class LiveProgressNotifier(
 
         val subText = if (isMultiLeg) {
             "换乘追踪 · 第$currentLegNum/${state.totalLegs}程"
+        } else if (state.isPinnedBus) {
+            "只追 ${state.pinnedPlate.ifBlank { "这辆车" }} · 第${state.targetOrder}站"
         } else {
             "候车追踪 · 第${state.targetOrder}站"
         }
@@ -697,7 +703,8 @@ class LiveProgressNotifier(
         allowPromotion: Boolean = true,
         nextLineName: String? = null,
         notificationId: Int = NOTIFICATION_ID_LIVE_PROGRESS,
-        watchLineId: String = ""
+        watchLineId: String = "",
+        boardingNotice: String? = null
     ) {
         if (!state.isActive) {
             cancelNotification(context, notificationId)
@@ -710,7 +717,8 @@ class LiveProgressNotifier(
             watch = watch,
             sessionId = sessionId,
             allowPromotion = allowPromotion,
-            watchLineId = watchLineId
+            watchLineId = watchLineId,
+            boardingNotice = boardingNotice
         )
         try {
             NotificationManagerCompat.from(context).notify(notificationId, notification)

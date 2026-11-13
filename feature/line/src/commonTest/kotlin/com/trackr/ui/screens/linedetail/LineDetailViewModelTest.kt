@@ -491,6 +491,50 @@ class LineDetailViewModelTest {
     }
 
     @Test
+    fun trackFollowedBus_pinsThatBusToSelectedStop() = runTest(main.dispatcher) {
+        // 下车提醒（issue #52）：选下车站（第 3 站），在单车跟随里点「追这辆车」
+        val viewModel = createViewModel(targetOrder = 3)
+        testScheduler.runCurrent()
+        viewModel.selectBusToFollow(buses.first())
+        assertTrue(viewModel.uiState.value.canTrackFollowedBus)
+        assertNull(viewModel.uiState.value.trackedPinnedBusId)
+
+        assertTrue(viewModel.startTrackingFollowedBus())
+        testScheduler.runCurrent()
+
+        val target = trackingController.started.single() as TrackingTarget.SingleLine
+        assertEquals(3, target.targetOrder)
+        assertEquals("上海体育馆", target.targetStopName)
+        assertEquals("b1", target.pinnedBusId)
+        assertEquals("沪A1234", target.pinnedPlate)
+        assertTrue(viewModel.uiState.value.isTrackingThisStop)
+        assertEquals("b1", viewModel.uiState.value.trackedPinnedBusId)
+    }
+
+    @Test
+    fun trackFollowedBus_refusesBusThatAlreadyPassedSelectedStop() = runTest(main.dispatcher) {
+        // b1 在第 2 站，已开过第 1 站
+        val viewModel = createViewModel(targetOrder = 1)
+        testScheduler.runCurrent()
+        viewModel.selectBusToFollow(buses.first())
+        assertFalse(viewModel.uiState.value.canTrackFollowedBus)
+
+        assertFalse(viewModel.startTrackingFollowedBus())
+        assertTrue(trackingController.started.isEmpty())
+    }
+
+    @Test
+    fun startTrackingSelectedStop_doesNotPinABus() = runTest(main.dispatcher) {
+        val viewModel = createViewModel(targetOrder = 2)
+        testScheduler.runCurrent()
+        assertTrue(viewModel.startTrackingSelectedStop())
+        val target = trackingController.started.single() as TrackingTarget.SingleLine
+        assertEquals("", target.pinnedBusId)
+        testScheduler.runCurrent()
+        assertNull(viewModel.uiState.value.trackedPinnedBusId)
+    }
+
+    @Test
     fun testStartTrackingSelectedStop_usesSelectedStopAndDefaultThreshold() = runTest(main.dispatcher) {
         val viewModel = createViewModel(targetOrder = 2)
         testScheduler.runCurrent()
@@ -760,8 +804,8 @@ class LineDetailViewModelTest {
         testScheduler.runCurrent()
         assertTrue(viewModel.isLoadInFlight)
 
-        // 10 秒到期时上一轮仍未返回 → 跳过
-        testScheduler.advanceTimeBy(10_000L)
+        // 3 秒到期时上一轮仍未返回 → 跳过
+        testScheduler.advanceTimeBy(3_000L)
         testScheduler.runCurrent()
         assertEquals(1, repo.lineDetailTargetOrders.size)
 
@@ -770,7 +814,7 @@ class LineDetailViewModelTest {
         assertFalse(viewModel.isLoadInFlight)
 
         // 下一周期正常请求
-        testScheduler.advanceTimeBy(10_000L)
+        testScheduler.advanceTimeBy(3_000L)
         testScheduler.runCurrent()
         assertEquals(2, repo.lineDetailTargetOrders.size)
 
@@ -779,7 +823,7 @@ class LineDetailViewModelTest {
 
     @Test
     fun testSelectStop_resetsCountdown() = runTest(main.dispatcher) {
-        // C1 后没有每秒倒计时：断言选站后下一轮轮询从选站时刻起再等 10 秒（e683286）
+        // C1 后没有每秒倒计时：断言选站后下一轮轮询从选站时刻起再等一个周期（3 秒，e683286）
         val repo = CountingLineRepository(fakeRepository.realtime)
         val viewModel = LineDetailViewModel(
             cityId = "034",
@@ -795,20 +839,20 @@ class LineDetailViewModelTest {
         )
         testScheduler.runCurrent()
         assertEquals(1, repo.lineDetailTargetOrders.size)
-        testScheduler.advanceTimeBy(5_000L)
+        testScheduler.advanceTimeBy(1_500L)
         testScheduler.runCurrent()
 
         viewModel.selectStop(stops[2])
         testScheduler.runCurrent()
         assertEquals(listOf<Int?>(2, 3), repo.lineDetailTargetOrders)
 
-        // 原来的第 10 秒：不再轮询
-        testScheduler.advanceTimeBy(5_000L)
+        // 原来的第 3 秒：不再轮询
+        testScheduler.advanceTimeBy(1_500L)
         testScheduler.runCurrent()
         assertEquals(2, repo.lineDetailTargetOrders.size)
 
-        // 选站后第 10 秒（第 15 秒）：按新站轮询
-        testScheduler.advanceTimeBy(5_000L)
+        // 选站后第 3 秒（第 4.5 秒）：按新站轮询
+        testScheduler.advanceTimeBy(1_500L)
         testScheduler.runCurrent()
         assertEquals(listOf<Int?>(2, 3, 3), repo.lineDetailTargetOrders)
 
@@ -831,18 +875,19 @@ class LineDetailViewModelTest {
             enableAutoPolling = true
         )
         testScheduler.runCurrent()
-        testScheduler.advanceTimeBy(8_000L)
+        testScheduler.advanceTimeBy(2_400L)
         testScheduler.runCurrent()
 
         viewModel.refreshNow(fromPull = true)
         testScheduler.runCurrent()
         assertEquals(2, repo.lineDetailTargetOrders.size)
 
-        testScheduler.advanceTimeBy(2_000L)
+        // 原来的第 3 秒：计时已经从刷新那一刻重来，不轮询
+        testScheduler.advanceTimeBy(600L)
         testScheduler.runCurrent()
         assertEquals(2, repo.lineDetailTargetOrders.size)
 
-        testScheduler.advanceTimeBy(8_000L)
+        testScheduler.advanceTimeBy(2_400L)
         testScheduler.runCurrent()
         assertEquals(3, repo.lineDetailTargetOrders.size)
 

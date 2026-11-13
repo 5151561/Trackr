@@ -82,6 +82,8 @@ import com.trackr.feature.me.resources.me_arrival_alert
 import com.trackr.feature.me.resources.me_arrival_alert_desc
 import com.trackr.feature.me.resources.me_auto_stop_after_boarding
 import com.trackr.feature.me.resources.me_auto_stop_after_boarding_desc
+import com.trackr.feature.me.resources.me_voice_alerts
+import com.trackr.feature.me.resources.me_voice_alerts_desc
 import com.trackr.feature.me.resources.me_data_source
 import com.trackr.feature.me.resources.me_elder_mode
 import com.trackr.feature.me.resources.me_elder_mode_desc
@@ -231,6 +233,13 @@ fun MeScreen(
                         subtitle = stringResource(MeRes.string.me_auto_stop_after_boarding_desc),
                         checked = state.autoStopAfterBoarding,
                         onCheckedChange = { onEvent(MeEvent.SetAutoStopAfterBoarding(it)) }
+                    )
+                    GroupDivider()
+                    SwitchRow(
+                        title = stringResource(MeRes.string.me_voice_alerts),
+                        subtitle = stringResource(MeRes.string.me_voice_alerts_desc),
+                        checked = state.voiceAlerts,
+                        onCheckedChange = { onEvent(MeEvent.SetVoiceAlerts(it)) }
                     )
                     GroupDivider()
                     SettingRow(
