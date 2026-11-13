@@ -799,9 +799,10 @@ class TrackingEngineTest {
             listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0)).session
         val cases = listOf(
             approaching to boardingBus("other", order = 11, metersNorth = 150),
-            // 一跳两站还认（issue #41），三站就不是「刚开走」了
-            approaching to boardingBus("b1", order = 13, metersNorth = 150),
-            approaching.copy(state = approaching.state.copy(updatedAtMillis = NOW_MILLIS - 61_000)) to
+            // 一跳三站还认（issue #41、#49），四站就不是「刚开走」了
+            approaching to boardingBus("b1", order = 14, metersNorth = 150),
+            // 上一轮是 3 分钟以前（中断前的旧数据）
+            approaching.copy(state = approaching.state.copy(updatedAtMillis = NOW_MILLIS - 3 * 60_000 - 1)) to
                 boardingBus("b1", order = 11, metersNorth = 150)
         )
         cases.forEach { (session, bus) ->
@@ -813,9 +814,11 @@ class TrackingEngineTest {
 
     @Test
     fun engine_single_skippedArrival_requiresUsableLocationNearStop() {
+        // 车临近时人离站 800 m（没有站旁记忆，issue #49）：车过站这一轮没有可用定位就不能开始确认
         val approaching = singlePoll(beginSingle(),
-            listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0)).session
-        val fixes = listOf(null, serviceFixNorth(500), serviceFixNorth(150, ageMillis = 31_000),
+            listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(-800)).session
+        // 站南 500 m：不在站旁，也不是跟着车（车往北开）走的方向（站北 500 m 是跟着车走了，见 issue #49 的用例）
+        val fixes = listOf(null, serviceFixNorth(-500), serviceFixNorth(150, ageMillis = 31_000),
             serviceFixNorth(150).copy(accuracyMeters = 120f))
         fixes.forEach { fix ->
             val result = singlePoll(approaching,
@@ -997,6 +1000,156 @@ class TrackingEngineTest {
         )
         // 人贴着 b2 离站：改追 b2 并在同一轮判上车结束
         assertIs<TrackingEngine.Effect.Finished.Boarded>(ridingB2.effects.single())
+    }
+
+    // ================================================================ 判上车不留死角（issue #49）
+    // 一整段轨迹喂给引擎：线路正北走向，站序 o 在候车站（order 10）以北 (o - 10) × 400 m
+
+    private fun lineStopsNorth() = (5..16).map { order ->
+        BusStop(stopId = "S$order", name = "站$order", order = order, wgsLat = northOfStop((order - 10) * 400), wgsLng = STOP_LNG)
+    }
+
+    /** 按轨迹走一轮：定位权限一直在（[fix] 为 null = 这一轮没拿到够新够准的定位） */
+    private fun trackPoll(session: TrackingSession, buses: List<LiveBus>, fix: UserFix?, nowMillis: Long) =
+        TrackingEngine.reducePoll(
+            session = session,
+            detail = detail(buses, lineStopsNorth()),
+            locationEnabled = true,
+            serviceFix = fix,
+            dropFix = null,
+            nowMillis = nowMillis,
+            nowElapsedMillis = ELAPSED_NOW,
+            stopAfterBoarding = true
+        )
+
+    private fun TrackingEngine.Result.boarded() = effects.any { it is TrackingEngine.Effect.Finished.Boarded }
+
+    private fun TrackingEngine.Result.tier() =
+        TrackingEngine.locationTier(session.state, locationEnabled = true, stopAfterBoarding = true)
+
+    @Test
+    fun trajectory_recoveryAfterSkippedArrival_busGpsLags_endsTracking() {
+        // 漏洞 4：车到站那轮被跳过，车载 GPS 落后 300 m（人在 450 m、车报 150 m）——以前补判要「贴车 80 m」，整段漏掉
+        val t0 = NOW_MILLIS + 1
+        val waiting = trackPoll(beginSingle(), listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0), t0)
+        val riding = trackPoll(waiting.session, listOf(boardingBus("b1", order = 11, metersNorth = 150)),
+            serviceFixNorth(450, ageMillis = 2_000), t0 + 20_000)
+        assertTrue(riding.boarded())
+    }
+
+    @Test
+    fun trajectory_noFixWhenBusLeaves_stopMemoryStartsConfirming() {
+        // 漏洞 5：车一跳三站、过站那轮没定位，2 分钟后才拿到定位——凭站旁记忆开始确认，定位来了就判出来
+        val t0 = NOW_MILLIS + 1
+        val waiting = trackPoll(beginSingle(), listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0), t0)
+        val departed = trackPoll(waiting.session, listOf(boardingBus("b1", order = 13, metersNorth = 1100)), null, t0 + 20_000)
+        assertEquals("b1", departed.session.state.boardingCandidateBusId)
+        assertEquals(LocationCadence.Tier.BOARDING_CHECK, departed.tier())
+        val located = trackPoll(departed.session, listOf(boardingBus("b1", order = 13, metersNorth = 1300)),
+            serviceFixNorth(1500, ageMillis = 2_000), t0 + 120_000)
+        assertTrue(located.boarded())
+    }
+
+    @Test
+    fun trajectory_firstFixArrivesTwoMinutesAfterDeparture_stillRecovers() {
+        // 漏洞 5：从没拿到过定位，车过站 2.5 分钟后才来第一个定位（以前 60 秒就放弃了）
+        val t0 = NOW_MILLIS + 1
+        val atStop = trackPoll(beginSingle(), listOf(boardingBus("b1", order = 10, metersNorth = 0)), null, t0)
+        val departed = trackPoll(atStop.session, listOf(boardingBus("b1", order = 11, metersNorth = 300)), null, t0 + 20_000)
+        assertEquals("b1", departed.session.state.recentDepartedBusId)
+        val located = trackPoll(departed.session, listOf(boardingBus("b1", order = 12, metersNorth = 900)),
+            serviceFixNorth(1000, ageMillis = 2_000), t0 + 20_000 + 150_000)
+        assertTrue(located.boarded())
+    }
+
+    @Test
+    fun trajectory_busMissingFromData_isNotMissed() {
+        // 漏洞 6：人在车上刚离站 80–110 m，车这两轮不在数据里——以前连续两轮就判「没赶上」
+        val t0 = NOW_MILLIS + 1
+        val arrived = trackPoll(beginSingle(), listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)),
+            serviceFixNorth(10), t0)
+        assertEquals("b1", arrived.session.state.boardingCandidateBusId)
+        val gone1 = trackPoll(arrived.session, emptyList(), serviceFixNorth(80, ageMillis = 3_000), t0 + 10_000)
+        val gone2 = trackPoll(gone1.session, emptyList(), serviceFixNorth(110, ageMillis = 1_000), t0 + 20_000)
+        assertEquals("b1", gone2.session.state.boardingCandidateBusId)
+        val far = trackPoll(gone2.session, emptyList(), serviceFixNorth(700, ageMillis = 2_000), t0 + 60_000)
+        assertTrue(far.boarded())
+    }
+
+    @Test
+    fun trajectory_candidateTimesOut_lateFixOnLinePastStop_endsTracking() {
+        // 漏洞 7：确认期间一直没有可用定位，待确认超时放掉——以前整次追踪就再也不判了；
+        // 现在补判还在：8 分钟后定位显示人沿线已过站 1.2 km，判上车（车的数据早没了也不影响）
+        val t0 = NOW_MILLIS + 1
+        val arrived = trackPoll(beginSingle(), listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)),
+            serviceFixNorth(10), t0)
+        val timedOut = trackPoll(arrived.session,
+            listOf(boardingBus("b1", order = 13, metersNorth = 1200), boardingBus("b2", order = 6, metersNorth = -1600)),
+            null, t0 + BoardingDetector.CANDIDATE_TIMEOUT_MILLIS + 1)
+        assertNull(timedOut.session.state.boardingCandidateBusId)
+        assertFalse(timedOut.boarded())
+        assertEquals(LocationCadence.Tier.RIDING, timedOut.tier())
+        val late = trackPoll(timedOut.session, listOf(boardingBus("b2", order = 7, metersNorth = -1200)),
+            serviceFixNorth(1200, ageMillis = 2_000, accuracy = 40f), t0 + 8 * 60_000)
+        assertTrue(late.boarded())
+        assertEquals(0L, late.session.state.boardWatchSinceMillis)
+    }
+
+    @Test
+    fun trajectory_lateRule_doesNotFireForWalkersOrOffLine() {
+        val t0 = NOW_MILLIS + 1
+        val arrived = trackPoll(beginSingle(), listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)),
+            serviceFixNorth(10), t0)
+        val timedOut = trackPoll(arrived.session,
+            listOf(boardingBus("b1", order = 13, metersNorth = 1200), boardingBus("b2", order = 6, metersNorth = -1600)),
+            null, t0 + BoardingDetector.CANDIDATE_TIMEOUT_MILLIS + 1).session
+        val noBoard = listOf(
+            // 走到下一站（400 m）去等：没过下一站
+            UserFix(northOfStop(400), STOP_LNG, 10f, ELAPSED_NOW - 2_000),
+            // 过了下一站但沿线还不到 500 m
+            UserFix(northOfStop(450), STOP_LNG, 10f, ELAPSED_NOW - 2_000),
+            // 离线路 600 m 的岔路上
+            UserFix(northOfStop(1200), STOP_LNG + 600 / 95_000.0, 10f, ELAPSED_NOW - 2_000),
+            // 往上游方向走（对向）
+            UserFix(northOfStop(-1200), STOP_LNG, 10f, ELAPSED_NOW - 2_000)
+        )
+        noBoard.forEach { fix ->
+            val result = trackPoll(timedOut, listOf(boardingBus("b2", order = 7, metersNorth = -1200)), fix, t0 + 7 * 60_000)
+            assertFalse(result.boarded(), "fix=$fix")
+        }
+    }
+
+    @Test
+    fun trajectory_missedBus_disarmsLateRule() {
+        // 真没赶上：人在站上、车开出 400 m，连续两轮——撤掉补判，之后人往线路下游走远了也不算上了那辆
+        val t0 = NOW_MILLIS + 1
+        val arrived = trackPoll(beginSingle(), listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)),
+            serviceFixNorth(10), t0)
+        val miss1 = trackPoll(arrived.session, listOf(boardingBus("b1", order = 11, metersNorth = 400)),
+            serviceFixNorth(20, ageMillis = 3_000), t0 + 10_000)
+        val miss2 = trackPoll(miss1.session, listOf(boardingBus("b1", order = 11, metersNorth = 500)),
+            serviceFixNorth(15, ageMillis = 1_000), t0 + 20_000)
+        assertNull(miss2.session.state.boardingCandidateBusId)
+        assertEquals(0L, miss2.session.state.boardWatchSinceMillis)
+        val walked = trackPoll(miss2.session, listOf(boardingBus("b2", order = 6, metersNorth = -1600)),
+            serviceFixNorth(1200, ageMillis = 2_000), t0 + 15 * 60_000)
+        assertFalse(walked.boarded())
+    }
+
+    @Test
+    fun trajectory_lateRule_expiresAfterWatchWindow() {
+        val t0 = NOW_MILLIS + 1
+        val arrived = trackPoll(beginSingle(), listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)),
+            serviceFixNorth(10), t0)
+        val timedOut = trackPoll(arrived.session,
+            listOf(boardingBus("b1", order = 13, metersNorth = 1200), boardingBus("b2", order = 6, metersNorth = -1600)),
+            null, t0 + BoardingDetector.CANDIDATE_TIMEOUT_MILLIS + 1)
+        val expired = trackPoll(timedOut.session, listOf(boardingBus("b2", order = 5, metersNorth = -2000)),
+            serviceFixNorth(1200, ageMillis = 2_000), t0 + SingleLegTracker.BOARD_WATCH_MILLIS + 1)
+        // 待确认早就超时了，补判也过期：不判上车，定位关掉
+        assertFalse(expired.boarded())
+        assertEquals(0L, expired.session.state.boardWatchSinceMillis)
+        assertEquals(LocationCadence.Tier.OFF, expired.tier())
     }
 
     // ================================================================ 原 BoardingDetectionTest

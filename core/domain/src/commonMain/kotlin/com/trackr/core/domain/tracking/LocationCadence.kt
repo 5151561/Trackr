@@ -35,6 +35,8 @@ object LocationCadence {
                 session.stopsRemaining == 0 -> Tier.BOARDING_CHECK
                 session.stopsRemaining in 1..NEAR_STOPS -> Tier.WAITING_NEAR
                 session.etaSeconds in 1..NEAR_ETA_SECONDS -> Tier.WAITING_NEAR
+                // 补判上车（issue #49）：车开走了、待确认也放掉了，低频看着人有没有沿线过站
+                session.boardWatchSinceMillis != 0L -> Tier.RIDING
                 else -> Tier.OFF
             }
             LegPhase.WAITING_BOARD -> when {

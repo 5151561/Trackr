@@ -337,7 +337,10 @@ object TrackingEngine {
                 operatingState = detail.operatingState,
                 statusDescription = detail.statusDescription,
                 nowMillis = nowMillis,
-                boarding = boarding
+                boarding = boarding,
+                lineStops = if (boarding == null) emptyList() else detail.stops.map {
+                    BoardingDetector.LinePoint(it.order, it.wgsLat, it.wgsLng)
+                }
             )
             val effects = buildList {
                 val alertState = update.alertState

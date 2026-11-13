@@ -4,6 +4,9 @@ import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.model.LegPhase
 import com.trackr.core.model.LiveBus
 import com.trackr.core.model.TrackingSessionState
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.hypot
 import kotlin.math.max
 
 /**
@@ -35,6 +38,14 @@ internal object BoardingDetector {
     private const val STILL_AT_BOARD_STOP_METERS = 120
     private const val BUS_GONE_FROM_BOARD_STOP_METERS = 300
     private const val WRONG_LOCK_METERS = 500
+
+    /** 补判上车：定位离线路折线不超过这么远才算「在线路上」 */
+    private const val ON_LINE_METERS = 150
+
+    /** 补判上车：沿线离候车站至少这么远才算「已经过了站」 */
+    const val PAST_STOP_ALONG_METERS = 500
+
+    private const val METERS_PER_DEGREE = 111_320.0
 
     /** 一个已经通过新鲜度与精度过滤的用户位置 */
     data class UserPosition(
@@ -89,13 +100,89 @@ internal object BoardingDetector {
     }
 
     /**
-     * 车刚从候车站开走（跳过了到站那轮）时，判断是否要补建“待确认”。
-     * 除了人在站附近（[shouldStartCandidate]），若人已经跟着这辆车走出站（人已离开站 ≥ [LEFT_BOARD_STOP_METERS]
-     * 且就在这辆车旁边），也补建待确认（仍需后续新定位满足连续两次确认才算上车）。
+     * 单线路：车刚从候车站开走（跳过了到站那轮、或到站那轮没定位）时，判断是否要补建“待确认”。
+     * 人在站附近（[shouldStartCandidate]），或人已经跟着这辆车走了（[isRidingAwayWithBus]，和确认上车同一条规则；
+     * issue #49：以前这里要求「贴车 80 m」，车载 GPS 一滞后就不补，整段判定直接漏掉）。
      */
-    fun shouldRecoverDepartedCandidate(input: Input, departed: LiveBus): Boolean {
+    fun shouldRecoverDepartedCandidate(input: Input, departed: LiveBus, boardOrder: Int): Boolean {
         if (shouldStartCandidate(input)) return true
-        return isUserRidingBus(input, departed)
+        return isRidingAwayWithBus(input, departed, boardOrder)
+    }
+
+    /** 这一轮的定位（精 / 粗都行）是不是在候车站附近（≤ [CANDIDATE_RADIUS_METERS]），用来记「站旁记忆」 */
+    fun isNearBoardStop(input: Input): Boolean {
+        val fix = input.user ?: input.coarseUser ?: return false
+        if (!input.hasBoardStop) return false
+        val toStop = distance(fix.lat, fix.lng, input.boardStopLat, input.boardStopLng) ?: return false
+        return toStop <= CANDIDATE_RADIUS_METERS
+    }
+
+    /** 线路上的一个站点（WGS-84），供 [isPastStopAlongLine] 把定位投到线路上 */
+    data class LinePoint(val order: Int, val lat: Double, val lng: Double)
+
+    /**
+     * 补判上车（issue #49）：这一刻的定位是不是「在这条线路上、已经过了候车站」——不看车的上报位置，
+     * 车从数据里消失、车载 GPS 滞后、站很密时都管用。
+     *
+     * 把站点按站序连成折线，定位投到最近的一段上：
+     * - 离线路 ≤ max([ON_LINE_METERS], 1.5×精度)，而且离候车站下游那段比离上游那段近（排除 U 形线路、对向的路）；
+     * - 投影点已越过候车站的下一站，并且沿线离候车站 ≥ [PAST_STOP_ALONG_METERS]（粗定位再多一个精度半径）——
+     *   走到下一站去等车的人不会被当成上了车。
+     */
+    fun isPastStopAlongLine(input: Input, line: List<LinePoint>, boardOrder: Int): Boolean {
+        val fix = input.user ?: input.coarseUser ?: return false
+        val points = line.filter { it.lat > 0.0 && it.lng > 0.0 }.sortedBy { it.order }
+        val boardIndex = points.indexOfFirst { it.order == boardOrder }
+        // 要有候车站和它的下一站，才知道「过了站」在哪
+        if (boardIndex < 0 || boardIndex + 1 > points.lastIndex) return false
+        val origin = points[boardIndex]
+        fun xy(lat: Double, lng: Double): Pair<Double, Double> {
+            val x = (lng - origin.lng) * METERS_PER_DEGREE * cos(origin.lat * PI / 180.0)
+            val y = (lat - origin.lat) * METERS_PER_DEGREE
+            return x to y
+        }
+        val user = xy(fix.lat, fix.lng)
+        val xs = points.map { xy(it.lat, it.lng) }
+
+        // 下游：从候车站往后，记每段起点的沿线里程
+        var along = 0.0
+        var bestDown = Double.MAX_VALUE
+        var bestAlong = 0.0
+        for (i in boardIndex until xs.lastIndex) {
+            val (d, t) = projectToSegment(user, xs[i], xs[i + 1])
+            val segLen = hypot(xs[i + 1].first - xs[i].first, xs[i + 1].second - xs[i].second)
+            if (d < bestDown) {
+                bestDown = d
+                bestAlong = along + t * segLen
+            }
+            along += segLen
+        }
+        // 上游：候车站之前的线路
+        var bestUp = Double.MAX_VALUE
+        for (i in 0 until boardIndex) {
+            bestUp = minOf(bestUp, projectToSegment(user, xs[i], xs[i + 1]).first)
+        }
+        val accuracy = fix.accuracyMeters.toDouble()
+        val onLineLimit = max(ON_LINE_METERS.toDouble(), accuracy * 1.5)
+        if (bestDown > onLineLimit || bestDown >= bestUp) return false
+        val nextStopAlong = hypot(xs[boardIndex + 1].first, xs[boardIndex + 1].second)
+        val margin = if (input.user != null) 0.0 else accuracy
+        return bestAlong > nextStopAlong && bestAlong >= PAST_STOP_ALONG_METERS + margin
+    }
+
+    /** 点到线段的距离与投影位置（0..1） */
+    private fun projectToSegment(
+        p: Pair<Double, Double>,
+        a: Pair<Double, Double>,
+        b: Pair<Double, Double>
+    ): Pair<Double, Double> {
+        val dx = b.first - a.first
+        val dy = b.second - a.second
+        val lenSq = dx * dx + dy * dy
+        val t = if (lenSq <= 0.0) 0.0 else (((p.first - a.first) * dx + (p.second - a.second) * dy) / lenSq).coerceIn(0.0, 1.0)
+        val px = a.first + t * dx
+        val py = a.second + t * dy
+        return hypot(p.first - px, p.second - py) to t
     }
 
     /** 用户是否已离开候车站且贴着 [bus]（用于在多辆车之间识别用户实际坐上的那辆） */
@@ -148,11 +235,13 @@ internal object BoardingDetector {
      * 待确认阶段的一次评估。
      * @param session 当前会话（[TrackingSessionState.boardingCandidateBusId] 非空）
      * @param candidate 本轮数据中的待确认车辆；从数据里消失时为 null
+     * @param missNeedsBus true = 「没赶上」要有车的位置作证，车从数据里消失不算（单线路用）
      */
     fun evaluateCandidate(
         session: TrackingSessionState,
         candidate: LiveBus?,
-        input: Input
+        input: Input,
+        missNeedsBus: Boolean = false
     ): CandidateResult {
         val boardOrder = session.boardStopOrder
         val user = input.user
@@ -190,9 +279,10 @@ internal object BoardingDetector {
                     (userToStop >= farLimit && busLeftStop)
                 )
             val missedSignal = precise && userToStop != null && userToStop <= STILL_AT_BOARD_STOP_METERS && (
-                candidate == null ||
+                // 单线路（[missNeedsBus]）：车只是这一轮不在数据里不算证据——人可能就在那辆车上、刚离站不远（issue #49）
+                (candidate == null && !missNeedsBus) ||
                     (busToStop != null && busToStop >= BUS_GONE_FROM_BOARD_STOP_METERS) ||
-                    (busToStop == null && candidate.order >= boardOrder + 2)
+                    (busToStop == null && candidate != null && candidate.order >= boardOrder + 2)
                 )
 
             confirm = when {
