@@ -898,7 +898,9 @@ class TrackingEngineTest {
             LocationCadence.Tier.BOARDING_CHECK,
             TrackingEngine.locationTier(candidate, locationEnabled = true, stopAfterBoarding = true)
         )
-        assertEquals(10_000L, TrackingEngine.pollingIntervalMillis(candidate, operatingState = LineOperatingState.ENDED))
+        // 在确认上车：线路显示停运也照常跟着定位档位（5 秒）轮询
+        assertEquals(5_000L, TrackingEngine.pollingIntervalMillis(candidate, operatingState = LineOperatingState.ENDED,
+            locationTier = LocationCadence.Tier.BOARDING_CHECK))
         assertEquals(
             LocationCadence.Tier.OFF,
             TrackingEngine.locationTier(single, locationEnabled = false, stopAfterBoarding = true)
@@ -935,7 +937,8 @@ class TrackingEngineTest {
             LocationCadence.Tier.BOARDING_CHECK,
             TrackingEngine.locationTier(departedNoFix.session.state, locationEnabled = true, stopAfterBoarding = true)
         )
-        assertEquals(10_000L, TrackingEngine.pollingIntervalMillis(departedNoFix.session.state))
+        assertEquals(5_000L, TrackingEngine.pollingIntervalMillis(departedNoFix.session.state,
+            locationTier = LocationCadence.Tier.BOARDING_CHECK))
 
         // 第 3 轮：定位终于到了，人已跟着车离站：补回 b1 并直接结束追踪
         val done = TrackingEngine.reducePoll(
@@ -1477,21 +1480,29 @@ class TrackingEngineTest {
     }
 
     @Test
-    fun transfer_adaptivePollingIntervalBackoff() {
-        val approachingSession1 = TrackingSessionState(stopsRemaining = 1, etaSeconds = 120)
-        assertEquals(10_000L, TrackingEngine.pollingIntervalMillis(approachingSession1))
+    fun transfer_pollingInterval_followsLocationTier() {
+        // 轮询跟着定位档位走，车的数据和手机定位一样新；不取定位时 10 秒
+        val state = TrackingSessionState(stopsRemaining = 7, etaSeconds = 1200)
+        assertEquals(5_000L, TrackingEngine.pollingIntervalMillis(state, locationTier = LocationCadence.Tier.BOARDING_CHECK))
+        assertEquals(8_000L, TrackingEngine.pollingIntervalMillis(state, locationTier = LocationCadence.Tier.NEAR_DROP))
+        assertEquals(10_000L, TrackingEngine.pollingIntervalMillis(state, locationTier = LocationCadence.Tier.WAITING_NEAR))
+        assertEquals(20_000L, TrackingEngine.pollingIntervalMillis(state, locationTier = LocationCadence.Tier.RIDING))
+        assertEquals(10_000L, TrackingEngine.pollingIntervalMillis(state, locationTier = LocationCadence.Tier.OFF))
+        // 信号丢失不再另外拉长
+        assertEquals(10_000L, TrackingEngine.pollingIntervalMillis(state.copy(isSignalLost = true)))
+    }
 
-        val approachingSession0 = TrackingSessionState(stopsRemaining = 0, etaSeconds = 30)
-        assertEquals(10_000L, TrackingEngine.pollingIntervalMillis(approachingSession0))
-
-        val mediumSession = TrackingSessionState(stopsRemaining = 3, etaSeconds = 450)
-        assertEquals(20_000L, TrackingEngine.pollingIntervalMillis(mediumSession))
-
-        val farSession = TrackingSessionState(stopsRemaining = 7, etaSeconds = 1200)
-        assertEquals(45_000L, TrackingEngine.pollingIntervalMillis(farSession))
-
-        val unknownSession = TrackingSessionState(stopsRemaining = -1, etaSeconds = -1)
-        assertEquals(45_000L, TrackingEngine.pollingIntervalMillis(unknownSession))
+    @Test
+    fun transfer_pollingInterval_matchesTierFromLocationTier() {
+        // 端到端：同一个会话状态，定位档位和轮询间隔一致
+        val waiting = TrackingSessionState(isActive = true, legPhase = LegPhase.WAITING_BOARD, stopsRemaining = 1, etaSeconds = 120)
+        val tier = TrackingEngine.locationTier(waiting, locationEnabled = true)
+        assertEquals(LocationCadence.Tier.WAITING_NEAR, tier)
+        assertEquals(tier.intervalMillis, TrackingEngine.pollingIntervalMillis(waiting, locationTier = tier))
+        val riding = TrackingSessionState(isActive = true, legPhase = LegPhase.ON_BOARD, stopsRemaining = 5)
+        val ridingTier = TrackingEngine.locationTier(riding, locationEnabled = true)
+        assertEquals(LocationCadence.Tier.RIDING, ridingTier)
+        assertEquals(20_000L, TrackingEngine.pollingIntervalMillis(riding, locationTier = ridingTier))
     }
 
     @Test
@@ -1606,17 +1617,17 @@ class TrackingEngineTest {
     }
 
     @Test
-    fun transfer_pollingInterval_backsOffOnFailures_capsAt120s_andResetsOnSuccess() {
-        val far = TrackingSessionState(stopsRemaining = 7, etaSeconds = 1200)
-        assertEquals(90_000L, TrackingEngine.pollingIntervalMillis(far, consecutiveFailures = 1))
-        assertEquals(120_000L, TrackingEngine.pollingIntervalMillis(far, consecutiveFailures = 2))
-        assertEquals(120_000L, TrackingEngine.pollingIntervalMillis(far, consecutiveFailures = 30))
-
+    fun transfer_pollingInterval_backsOffOnFailures_andResetsOnSuccess() {
         val near = TrackingSessionState(stopsRemaining = 1, etaSeconds = 120)
-        assertEquals(20_000L, TrackingEngine.pollingIntervalMillis(near, consecutiveFailures = 1))
-        assertEquals(40_000L, TrackingEngine.pollingIntervalMillis(near, consecutiveFailures = 2))
-        // 成功后（失败次数清零）恢复正常间隔
-        assertEquals(10_000L, TrackingEngine.pollingIntervalMillis(near, consecutiveFailures = 0))
+        val tier = LocationCadence.Tier.BOARDING_CHECK
+        assertEquals(10_000L, TrackingEngine.pollingIntervalMillis(near, consecutiveFailures = 1, locationTier = tier))
+        assertEquals(20_000L, TrackingEngine.pollingIntervalMillis(near, consecutiveFailures = 2, locationTier = tier))
+        assertEquals(80_000L, TrackingEngine.pollingIntervalMillis(near, consecutiveFailures = 30, locationTier = tier))
+        // 乘车途中 20 秒 ×2^4 封顶 120 秒
+        assertEquals(120_000L, TrackingEngine.pollingIntervalMillis(near, consecutiveFailures = 30,
+            locationTier = LocationCadence.Tier.RIDING))
+        // 成功后（失败次数清零）恢复跟着档位
+        assertEquals(5_000L, TrackingEngine.pollingIntervalMillis(near, consecutiveFailures = 0, locationTier = tier))
     }
 
     @Test
@@ -1630,14 +1641,6 @@ class TrackingEngineTest {
             300_000L,
             TrackingEngine.pollingIntervalMillis(session, operatingState = LineOperatingState.WAITING)
         )
-    }
-
-    @Test
-    fun transfer_pollingInterval_signalLost_atLeast30s() {
-        val lost = TrackingSessionState(stopsRemaining = 1, etaSeconds = 60, isSignalLost = true)
-        assertEquals(30_000L, TrackingEngine.pollingIntervalMillis(lost))
-        val lostFar = TrackingSessionState(stopsRemaining = 7, isSignalLost = true)
-        assertEquals(45_000L, TrackingEngine.pollingIntervalMillis(lostFar))
     }
 
     @Test

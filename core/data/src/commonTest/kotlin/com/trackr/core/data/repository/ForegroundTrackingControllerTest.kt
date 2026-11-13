@@ -99,7 +99,8 @@ class ForegroundTrackingControllerTest {
         f.realtime.lineDetailResult = Result.failure(IllegalStateException("offline"))
         f.controller.setActive(true); runCurrent()
         f.controller.start(target); runCurrent()
-        advanceTimeBy(89_999); runCurrent()
+        // 失败一次：不取定位时 10 秒 ×2 退避到 20 秒
+        advanceTimeBy(19_999); runCurrent()
         assertEquals(1, f.realtime.lineDetailCalls.size)
         f.realtime.lineDetailResult = null
         advanceTimeBy(1); runCurrent()
@@ -108,7 +109,8 @@ class ForegroundTrackingControllerTest {
         val fresh = f.repo.sessions.value.single().lastRealtimeAtMillis
         f.realtime.lineDetailResult = Result.failure(IllegalStateException("offline again"))
         f.clock.advanceBy(1.hours)
-        advanceTimeBy(45_000); runCurrent()
+        // 成功后恢复 10 秒一轮
+        advanceTimeBy(10_000); runCurrent()
         assertEquals(3, f.realtime.lineDetailCalls.size)
         assertTrue(f.repo.sessions.value.single().refreshFailed)
         assertEquals(fresh, f.repo.sessions.value.single().lastRealtimeAtMillis)
@@ -133,6 +135,52 @@ class ForegroundTrackingControllerTest {
         assertFalse(f.repo.update(session.sessionId, session.generation) { error("must not apply") })
         f.repo.resumeAll()
         assertFalse(f.repo.update(session.sessionId, session.generation) { error("must not apply") })
+    }
+
+    @Test fun pollFollowsLocationFixes_withFallbackTimer() = runTest {
+        // issue #49：取定位时定位一来就拉一次车的数据，人和车的位置是同一时刻的
+        val f = Fixture(this)
+        val stopLat = 31.2300
+        val stopLng = 121.4700
+        f.realtime.lineDetailsMap["L1"] = BusLineDetail(
+            line = BusLineDirection(lineId = "L1", name = "1路", startStop = "始", endStop = "终"),
+            stops = listOf(BusStop(stopId = "s5", name = "站5", order = 5, wgsLat = stopLat, wgsLng = stopLng)),
+            // 车还有 1 站：等车临近档位，10 秒
+            buses = listOf(LiveBus(busId = "b1", plateOrFleetNo = "b1", order = 4, wgsLat = stopLat - 0.005, wgsLng = stopLng))
+        )
+        f.controller.setActive(true); runCurrent()
+        assertTrue(f.controller.start(target)); runCurrent()
+        assertEquals(1, f.realtime.lineDetailCalls.size)
+
+        // 2 秒后来定位：离上一轮不到半个间隔，不跟
+        f.clock.advanceBy(2.seconds); advanceTimeBy(2_000)
+        f.controller.updateUserFix(UserFix(stopLat, stopLng, 10f, f.clock.elapsed)); runCurrent()
+        assertEquals(1, f.realtime.lineDetailCalls.size)
+
+        // 第 6 秒又来定位：马上拉一次，不等满 10 秒
+        f.clock.advanceBy(4.seconds); advanceTimeBy(4_000)
+        f.controller.updateUserFix(UserFix(stopLat, stopLng, 10f, f.clock.elapsed)); runCurrent()
+        assertEquals(2, f.realtime.lineDetailCalls.size)
+
+        // 之后定位断了：1.5 个间隔（15 秒）兜底照样轮询
+        advanceTimeBy(14_999); runCurrent()
+        assertEquals(2, f.realtime.lineDetailCalls.size)
+        advanceTimeBy(1); runCurrent()
+        assertEquals(3, f.realtime.lineDetailCalls.size)
+    }
+
+    @Test fun locationOff_fixesDoNotTriggerPolls() = runTest {
+        // 单线路关了「上车后自动结束追踪」：不取定位，定位来了也不多打请求
+        val f = Fixture(this)
+        f.settings.setAutoStopAfterBoarding(false)
+        f.controller.setActive(true); runCurrent()
+        assertTrue(f.controller.start(target)); runCurrent()
+        assertEquals(1, f.realtime.lineDetailCalls.size)
+        f.clock.advanceBy(6.seconds); advanceTimeBy(6_000)
+        f.controller.updateUserFix(UserFix(31.23, 121.47, 10f, f.clock.elapsed)); runCurrent()
+        assertEquals(1, f.realtime.lineDetailCalls.size)
+        advanceTimeBy(4_000); runCurrent()
+        assertEquals(2, f.realtime.lineDetailCalls.size)
     }
 
     @Test fun autoStopAfterBoarding_stopsSameStopWaitingLineAndKeepsDifferentStop() = runTest {

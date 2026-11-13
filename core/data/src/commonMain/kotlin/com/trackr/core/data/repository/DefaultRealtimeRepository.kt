@@ -435,8 +435,11 @@ class DefaultRealtimeRepository(
     }
 
     companion object {
-        /** 线路详情短缓存时长：小于详情页 10 秒轮询周期，保证每轮轮询仍拿到新数据 */
-        const val LINE_DETAIL_CACHE_TTL_MS = 6_000L
+        /**
+         * 线路详情短缓存时长：小于 3 秒的轮询周期，保证每轮轮询都拿到新数据；
+         * 只用来合并同一时刻的重复请求（追踪服务、线路页、首页同时请求同一条线）
+         */
+        const val LINE_DETAIL_CACHE_TTL_MS = 2_000L
         const val LINE_DETAIL_CACHE_MAX_ENTRIES = 64
 
         /** 收藏卡时刻表回落缓存时长 */

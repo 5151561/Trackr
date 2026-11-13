@@ -14,7 +14,12 @@ import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
@@ -50,6 +55,13 @@ interface TrackingRepository {
 
     /** 下车站辅助判定用的最近一次手机定位（服务定位和 App 前台定位里最后来的那个，所有会话共用） */
     val latestUserFix: UserFix?
+
+    /**
+     * 每来一个手机定位发一次（[updateUserFix]）。追踪轮询跟着它走：定位一来就拉一次车的数据，
+     * 人和车的位置是同一时刻的，判上车 / 下车才不会错开
+     */
+    val userFixes: Flow<UserFix>
+        get() = emptyFlow()
 
     /** 一份会话的当前快照；没有这一份时返回 null */
     fun sessionById(sessionId: String): TrackingSession?
@@ -212,6 +224,9 @@ class DefaultTrackingRepository @OptIn(ExperimentalUuidApi::class) constructor(
     private var userFix: UserFix? = null
     override val latestUserFix: UserFix?
         get() = synchronized(lock) { userFix }
+
+    private val _userFixes = MutableSharedFlow<UserFix>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    override val userFixes: Flow<UserFix> = _userFixes.asSharedFlow()
 
     private val loaded = CompletableDeferred<Unit>()
 
@@ -397,6 +412,7 @@ class DefaultTrackingRepository @OptIn(ExperimentalUuidApi::class) constructor(
 
     override fun updateUserFix(fix: UserFix) {
         synchronized(lock) { userFix = fix }
+        _userFixes.tryEmit(fix)
     }
 
     override fun update(sessionId: String, generation: Int, transform: (TrackingSession) -> TrackingSession?): Boolean =

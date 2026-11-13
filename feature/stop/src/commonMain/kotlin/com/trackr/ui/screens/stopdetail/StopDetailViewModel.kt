@@ -42,7 +42,7 @@ import kotlin.concurrent.atomics.incrementAndFetch
 
 /**
  * 站点详情 ViewModel（第 21 步，v3）：
- * 拉取站点详情（各物理站台全部途经线路与实时到站）、10 秒自动轮询、收藏切换、站台切换；
+ * 拉取站点详情（各物理站台全部途经线路与实时到站）、3 秒自动轮询、收藏切换、站台切换；
  * 选几条线一起等 / 存成 1 程路线；本站一起等的进行中视图与「上了哪辆？」；乘车码一键打开。
  */
 @OptIn(ExperimentalAtomicApi::class)
@@ -707,7 +707,7 @@ class StopDetailViewModel(
     }
 
     /**
-     * 恢复/启动 10 秒自动轮询（幂等控制）
+     * 恢复/启动 3 秒自动轮询（幂等控制）
      */
     fun resumePolling() {
         pollingCoordinator.resume()
@@ -720,6 +720,6 @@ class StopDetailViewModel(
 
     companion object {
         /** 自动轮询周期（秒） */
-        const val POLL_INTERVAL_SECONDS = 10
+        const val POLL_INTERVAL_SECONDS = 3
     }
 }

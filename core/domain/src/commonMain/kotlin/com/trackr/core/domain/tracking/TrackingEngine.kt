@@ -60,8 +60,11 @@ object TrackingEngine {
     /** 单次追踪最长运行时长，避免网络异常时无限轮询。 */
     const val MAX_TRACKING_DURATION_MILLIS = 3 * 60 * 60 * 1000L
 
-    /** 锁定车辆信号丢失期间的最短轮询间隔 */
-    const val SIGNAL_LOST_MIN_INTERVAL_MS = 30_000L
+    /**
+     * 这一项不取定位时（车还远、单线路没开「上车后自动结束追踪」、只追指定的车）的轮询间隔。
+     * 取定位时轮询跟着定位档位走（[LocationCadence.Tier.intervalMillis]），车的位置和人的位置一样新，判定才对得上
+     */
+    const val NO_LOCATION_POLL_INTERVAL_MS = 10_000L
 
     /** 提醒类型：即将到站 / 到站 / 没赶上（车已经开走了） */
     enum class AlertKind { APPROACHING, ARRIVED, MISSED }
@@ -606,29 +609,21 @@ object TrackingEngine {
     // ---------------------------------------------------------------- 节奏与判定
 
     /**
-     * 自适应防刷轮询间隔：
-     * - 连续失败 n 次：在正常间隔基础上 ×2^n 指数退避，最多 120 秒；成功后（n=0）恢复
-     * - 线路非运营：5 分钟一次
-     * - 即将到站（<= 1 站 或 ETA <= 180 秒）：10 秒
-     * - 中距离（2-4 站 或 ETA <= 600 秒）：20 秒
-     * - 远距离（> 4 站 或 暂无实时数据）：45 秒
-     * - 锁定车辆信号丢失期间：至少 30 秒
+     * 轮询间隔：跟着这一项的定位档位走（[locationTier]，见 [locationTier] 函数），车的数据和手机定位同一个节奏，
+     * 判上车 / 下车时两边的位置才不会错开：
+     * - 确认上车 5 秒、临近下车站 8 秒、等车临近 10 秒、乘车途中 20 秒（[LocationCadence.Tier]）
+     * - 不取定位（档位 OFF）：[NO_LOCATION_POLL_INTERVAL_MS]（10 秒）
+     * - 连续失败 n 次：在上面的间隔上 ×2^n 指数退避，最多 120 秒；成功后（n=0）恢复
+     * - 线路非运营（等待发车 / 停运 / 末班已过）且没有在判上车：5 分钟一次
      */
     fun pollingIntervalMillis(
         state: TrackingSessionState,
         consecutiveFailures: Int = 0,
-        operatingState: LineOperatingState = LineOperatingState.RUNNING
+        operatingState: LineOperatingState = LineOperatingState.RUNNING,
+        locationTier: LocationCadence.Tier = LocationCadence.Tier.OFF
     ): Long {
-        val stopsRemaining = state.stopsRemaining
-        val etaSeconds = state.etaSeconds
         val awaitingBoarding = state.boardingCandidateBusId != null || state.recentDepartedBusId != null
-
-        val base = when {
-            awaitingBoarding -> 10_000L
-            stopsRemaining in 0..1 || (etaSeconds in 1..180) -> 10_000L
-            stopsRemaining in 2..4 || (etaSeconds in 181..600) -> 20_000L
-            else -> 45_000L
-        }
+        val base = if (locationTier == LocationCadence.Tier.OFF) NO_LOCATION_POLL_INTERVAL_MS else locationTier.intervalMillis
 
         if (consecutiveFailures > 0) {
             val shift = consecutiveFailures.coerceAtMost(4)
@@ -637,7 +632,6 @@ object TrackingEngine {
             else backedOff.coerceAtLeast(NOT_RUNNING_POLL_INTERVAL_MS)
         }
         if (operatingState != LineOperatingState.RUNNING && !awaitingBoarding) return NOT_RUNNING_POLL_INTERVAL_MS
-        if (state.isSignalLost) return base.coerceAtLeast(SIGNAL_LOST_MIN_INTERVAL_MS)
         return base
     }
 
