@@ -582,14 +582,15 @@ class TrackingEngineTest {
         session: TrackingSession,
         buses: List<LiveBus>,
         fix: UserFix?,
-        stopAfterBoarding: Boolean = true
+        stopAfterBoarding: Boolean = true,
+        nowMillis: Long = NOW_MILLIS + 1
     ) = TrackingEngine.reducePoll(
         session = session,
         detail = singleDetail(buses),
         locationEnabled = fix != null,
         serviceFix = fix,
         dropFix = null,
-        nowMillis = NOW_MILLIS + 1,
+        nowMillis = nowMillis,
         nowElapsedMillis = ELAPSED_NOW,
         stopAfterBoarding = stopAfterBoarding
     )
@@ -602,19 +603,11 @@ class TrackingEngineTest {
         assertEquals("b1", arrived.session.state.boardingCandidateBusId)
         assertTrue(arrived.effects.none { it is TrackingEngine.Effect.Finished })
 
-        // 人跟着车走了两次（车开过候车站后仍在数据里，按 busId 找得到）
-        val riding = singlePoll(
+        // 人跟着车离站（车开过候车站后仍在数据里，按 busId 找得到）：一次定位就结束（issue #49）
+        val done = singlePoll(
             arrived.session,
             listOf(boardingBus("b1", order = 11, metersNorth = 150)),
             serviceFixNorth(150, ageMillis = 6_000)
-        )
-        assertEquals(1, riding.session.state.boardingConfirmStreak)
-        assertTrue(riding.effects.none { it is TrackingEngine.Effect.Finished })
-
-        val done = singlePoll(
-            riding.session,
-            listOf(boardingBus("b1", order = 11, metersNorth = 320)),
-            serviceFixNorth(310, ageMillis = 7_000)
         )
         val finished = assertIs<TrackingEngine.Effect.Finished.Boarded>(done.effects.single())
         assertEquals("49路", finished.state.lineName)
@@ -623,21 +616,100 @@ class TrackingEngineTest {
         assertNull(done.session.state.boardingCandidateBusId)
     }
 
+    // issue #49：单线路一次定位看出人跟着车走了就结束，不等连续两次、不要求贴车
+    private fun singleCandidate(): TrackingSession {
+        val arrived = singlePoll(beginSingle(), listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)), serviceFixNorth(20))
+        assertEquals("b1", arrived.session.state.boardingCandidateBusId)
+        return arrived.session
+    }
+
+    @Test
+    fun engine_single_oneFixRidingAway_endsImmediately_evenWhenBusGpsLags() {
+        // 车载 GPS 落后：上报位置离站 120 m，人已经在 400 m 外（离车 280 m，不算「贴车」）——一次定位就结束
+        val done = singlePoll(singleCandidate(),
+            listOf(boardingBus("b1", order = 11, metersNorth = 120)),
+            serviceFixNorth(400))
+        assertIs<TrackingEngine.Effect.Finished.Boarded>(done.effects.single())
+        assertNull(done.session.state.boardingCandidateBusId)
+    }
+
+    @Test
+    fun engine_single_oneCoarseFixRidingAway_endsImmediately() {
+        val done = singlePoll(singleCandidate(),
+            listOf(boardingBus("b1", order = 11, metersNorth = 250)),
+            serviceFixNorth(300, accuracy = 90f))
+        assertIs<TrackingEngine.Effect.Finished.Boarded>(done.effects.single())
+    }
+
+    @Test
+    fun engine_single_userOnOtherSideOfStop_isNotBoarded() {
+        // 人从反方向往站上赶（站南 200 m），车往北开走了：离车比离站远，不算上车
+        val result = singlePoll(singleCandidate(),
+            listOf(boardingBus("b1", order = 11, metersNorth = 300)),
+            serviceFixNorth(-200))
+        assertTrue(result.effects.none { it is TrackingEngine.Effect.Finished })
+        assertEquals("b1", result.session.state.boardingCandidateBusId)
+    }
+
+    @Test
+    fun engine_single_userStillNearStop_orBusNotLeft_isNotBoarded() {
+        // 人还在站附近（精定位 60 m、粗定位 150 m 没多出精度半径）
+        listOf(serviceFixNorth(60), serviceFixNorth(150, accuracy = 90f)).forEach { fix ->
+            val result = singlePoll(singleCandidate(),
+                listOf(boardingBus("b1", order = 11, metersNorth = 300)), fix)
+            assertTrue(result.effects.none { it is TrackingEngine.Effect.Finished }, "fix=$fix")
+        }
+        // 车还在站上
+        val stillAtStop = singlePoll(singleCandidate(),
+            listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)), serviceFixNorth(250))
+        assertTrue(stillAtStop.effects.none { it is TrackingEngine.Effect.Finished })
+    }
+
+    @Test
+    fun engine_single_candidateTimeout_dropsCandidateWithoutBoarding() {
+        val result = singlePoll(singleCandidate(),
+            listOf(boardingBus("b1", order = 12, metersNorth = 900)),
+            serviceFixNorth(60), nowMillis = NOW_MILLIS + 1 + BoardingDetector.CANDIDATE_TIMEOUT_MILLIS)
+        assertTrue(result.effects.none { it is TrackingEngine.Effect.Finished })
+        assertNull(result.session.state.boardingCandidateBusId)
+    }
+
+    @Test
+    fun engine_single_whileConfirming_nextBusDoesNotAlert() {
+        // 人在站附近还没判出来，后一班车已到临近 / 到站：先不提醒
+        val result = singlePoll(singleCandidate(),
+            listOf(
+                boardingBus("b1", order = 11, metersNorth = 300),
+                boardingBus("b2", order = 10, metersNorth = 0, arrived = true)
+            ),
+            serviceFixNorth(60))
+        assertEquals("b1", result.session.state.boardingCandidateBusId)
+        assertTrue(result.effects.none { it is TrackingEngine.Effect.Alert })
+    }
+
+    @Test
+    fun engine_single_locationGoesAway_clearsCandidate() {
+        val result = singlePoll(singleCandidate(),
+            listOf(boardingBus("b1", order = 11, metersNorth = 300)), fix = null)
+        assertNull(result.session.state.boardingCandidateBusId)
+        assertEquals(LocationCadence.Tier.OFF,
+            TrackingEngine.locationTier(result.session.state, locationEnabled = true, stopAfterBoarding = true))
+    }
+
     @Test
     fun engine_single_autoStop_recoversWhenPollSkipsArrival() {
         val approaching = singlePoll(beginSingle(),
             listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0))
         assertNull(approaching.session.state.boardingCandidateBusId)
+        // 人还在站旁（车刚开出 150 m）：补回待确认，高频定位
         val departed = singlePoll(approaching.session,
-            listOf(boardingBus("b1", order = 11, metersNorth = 150)), serviceFixNorth(150, ageMillis = 6_000))
+            listOf(boardingBus("b1", order = 11, metersNorth = 150)), serviceFixNorth(30, ageMillis = 6_000))
         assertEquals("b1", departed.session.state.boardingCandidateBusId)
         assertEquals(LocationCadence.Tier.BOARDING_CHECK,
             TrackingEngine.locationTier(departed.session.state, locationEnabled = true, stopAfterBoarding = true))
-        val repeated = singlePoll(departed.session,
-            listOf(boardingBus("b1", order = 11, metersNorth = 150)), serviceFixNorth(150, ageMillis = 6_000))
-        assertEquals(1, repeated.session.state.boardingConfirmStreak)
-        assertTrue(repeated.effects.none { it is TrackingEngine.Effect.Finished })
-        val done = singlePoll(repeated.session,
+        assertTrue(departed.effects.none { it is TrackingEngine.Effect.Finished })
+        // 下一次定位人已跟着车离站：结束
+        val done = singlePoll(departed.session,
             listOf(boardingBus("b1", order = 11, metersNorth = 250)), serviceFixNorth(250, ageMillis = 5_000))
         assertIs<TrackingEngine.Effect.Finished.Boarded>(done.effects.single())
     }
@@ -646,11 +718,9 @@ class TrackingEngineTest {
     fun engine_single_autoStop_recoversWhenLocationArrivesAfterDeparture() {
         val arrived = singlePoll(beginSingle(),
             listOf(boardingBus("b1", order = 10, metersNorth = 0)), fix = null)
-        val departed = singlePoll(arrived.session,
+        // 车开走后第一次拿到定位，人已经跟着车离站：补回待确认并在同一轮判上车
+        val done = singlePoll(arrived.session,
             listOf(boardingBus("b1", order = 11, metersNorth = 150)), serviceFixNorth(150, ageMillis = 6_000))
-        assertEquals("b1", departed.session.state.boardingCandidateBusId)
-        val done = singlePoll(departed.session,
-            listOf(boardingBus("b1", order = 11, metersNorth = 250)), serviceFixNorth(250, ageMillis = 5_000))
         assertIs<TrackingEngine.Effect.Finished.Boarded>(done.effects.single())
     }
 
@@ -668,19 +738,16 @@ class TrackingEngineTest {
     fun engine_single_coarseFixesFarFromStop_confirmBoarding() {
         val arrived = singlePoll(beginSingle(),
             listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)), serviceFixNorth(20))
-        // 粗定位：不算「贴着车」，但离站超过 400 m + 精度、车也开走了，连续两次就是上车了
+        // 粗定位离站 150 m（没多出 100 m + 精度半径）：还判不了
         val near = singlePoll(arrived.session,
             listOf(boardingBus("b1", order = 11, metersNorth = 150)),
             serviceFixNorth(150, ageMillis = 6_000, accuracy = 90f))
-        assertEquals(0, near.session.state.boardingConfirmStreak)
-        val far1 = singlePoll(near.session,
+        assertTrue(near.effects.none { it is TrackingEngine.Effect.Finished })
+        // 粗定位离站 600 m、在车那一侧：一次就结束
+        val far = singlePoll(near.session,
             listOf(boardingBus("b1", order = 12, metersNorth = 600)),
             serviceFixNorth(600, ageMillis = 5_000, accuracy = 90f))
-        assertEquals(1, far1.session.state.boardingConfirmStreak)
-        val far2 = singlePoll(far1.session,
-            listOf(boardingBus("b1", order = 12, metersNorth = 700)),
-            serviceFixNorth(700, ageMillis = 4_000, accuracy = 90f))
-        assertIs<TrackingEngine.Effect.Finished.Boarded>(far2.effects.single())
+        assertIs<TrackingEngine.Effect.Finished.Boarded>(far.effects.single())
     }
 
     @Test
@@ -704,8 +771,12 @@ class TrackingEngineTest {
         val approaching = singlePoll(beginSingle(),
             listOf(boardingBus("b1", order = 9, metersNorth = -100)), serviceFixNorth(0))
         val departed = singlePoll(approaching.session,
-            listOf(boardingBus("b1", order = 12, metersNorth = 150)), serviceFixNorth(150, ageMillis = 6_000))
+            listOf(boardingBus("b1", order = 12, metersNorth = 150)), serviceFixNorth(30, ageMillis = 6_000))
         assertEquals("b1", departed.session.state.boardingCandidateBusId)
+        // 一跳两站、人已跟着车离站：同一轮补回并判上车
+        val skippedAndRiding = singlePoll(approaching.session,
+            listOf(boardingBus("b1", order = 12, metersNorth = 150)), serviceFixNorth(150, ageMillis = 6_000))
+        assertIs<TrackingEngine.Effect.Finished.Boarded>(skippedAndRiding.effects.single())
     }
 
     @Test
@@ -863,8 +934,8 @@ class TrackingEngineTest {
         )
         assertEquals(10_000L, TrackingEngine.pollingIntervalMillis(departedNoFix.session.state))
 
-        // 第 3 轮：定位终于到了，补回 b1 并记第 1 次确认
-        val firstConfirm = TrackingEngine.reducePoll(
+        // 第 3 轮：定位终于到了，人已跟着车离站：补回 b1 并直接结束追踪
+        val done = TrackingEngine.reducePoll(
             session = departedNoFix.session,
             detail = singleDetail(listOf(boardingBus("b1", order = 11, metersNorth = 150))),
             locationEnabled = true,
@@ -874,26 +945,11 @@ class TrackingEngineTest {
             nowElapsedMillis = ELAPSED_NOW,
             stopAfterBoarding = true
         )
-        assertEquals("b1", firstConfirm.session.state.boardingCandidateBusId)
-        assertNull(firstConfirm.session.state.recentDepartedBusId)
-        assertEquals(1, firstConfirm.session.state.boardingConfirmStreak)
-
-        // 第 4 轮：第 2 次确认 -> 自动结束追踪
-        val done = TrackingEngine.reducePoll(
-            session = firstConfirm.session,
-            detail = singleDetail(listOf(boardingBus("b1", order = 11, metersNorth = 280))),
-            locationEnabled = true,
-            serviceFix = serviceFixNorth(280, ageMillis = 4_000),
-            dropFix = null,
-            nowMillis = NOW_MILLIS + 30_000,
-            nowElapsedMillis = ELAPSED_NOW,
-            stopAfterBoarding = true
-        )
         assertIs<TrackingEngine.Effect.Finished.Boarded>(done.effects.single())
     }
 
     @Test
-    fun engine_single_autoStop_usesDropFix_toleratesMovingBusLag_andSuppressesNextBusAlertWhileConfirming() {
+    fun engine_single_autoStop_usesDropFix_endsWithoutAlertingNextBus() {
         // 车从还有 2 站（order=8）一轮跳到过站（order=11，已开出 340m），且只有仓库里的 dropFix（首页刚取到的定位）
         val twoStopsAway = TrackingEngine.reducePoll(
             session = beginSingle(),
@@ -905,7 +961,7 @@ class TrackingEngineTest {
             nowElapsedMillis = ELAPSED_NOW,
             stopAfterBoarding = true
         )
-        val firstConfirm = TrackingEngine.reducePoll(
+        val departed = TrackingEngine.reducePoll(
             session = twoStopsAway.session,
             detail = singleDetail(
                 listOf(
@@ -920,28 +976,8 @@ class TrackingEngineTest {
             nowElapsedMillis = ELAPSED_NOW,
             stopAfterBoarding = true
         )
-        assertEquals("b1", firstConfirm.session.state.boardingCandidateBusId)
-        assertEquals(1, firstConfirm.session.state.boardingConfirmStreak)
-        // 正在确认用户已在 b1 上时，不抢发后车 b2 的临近提醒
-        assertTrue(firstConfirm.effects.isEmpty())
-
-        // 下一轮车载 GPS 滞后手机实时定位 120m（在移动车辆 160m 容差内），完成第 2 次确认并结束
-        val done = TrackingEngine.reducePoll(
-            session = firstConfirm.session,
-            detail = singleDetail(
-                listOf(
-                    boardingBus("b1", order = 11, metersNorth = 380),
-                    boardingBus("b2", order = 9, metersNorth = -80)
-                )
-            ),
-            locationEnabled = true,
-            serviceFix = null,
-            dropFix = serviceFixNorth(500, ageMillis = 4_000),
-            nowMillis = NOW_MILLIS + 30_000,
-            nowElapsedMillis = ELAPSED_NOW,
-            stopAfterBoarding = true
-        )
-        assertIs<TrackingEngine.Effect.Finished.Boarded>(done.effects.single())
+        // 只有 dropFix 也能用；人已跟着 b1 离站：直接结束，不抢发后车 b2 的临近提醒
+        assertIs<TrackingEngine.Effect.Finished.Boarded>(departed.effects.single())
     }
 
     @Test
@@ -959,15 +995,8 @@ class TrackingEngineTest {
             listOf(boardingBus("b1", order = 11, metersNorth = 450), boardingBus("b2", order = 11, metersNorth = 140)),
             serviceFixNorth(140, ageMillis = 6_000)
         )
-        assertEquals("b2", ridingB2.session.state.boardingCandidateBusId)
-        assertEquals(1, ridingB2.session.state.boardingConfirmStreak)
-
-        val done = singlePoll(
-            ridingB2.session,
-            listOf(boardingBus("b1", order = 12, metersNorth = 800), boardingBus("b2", order = 11, metersNorth = 280)),
-            serviceFixNorth(280, ageMillis = 4_000)
-        )
-        assertIs<TrackingEngine.Effect.Finished.Boarded>(done.effects.single())
+        // 人贴着 b2 离站：改追 b2 并在同一轮判上车结束
+        assertIs<TrackingEngine.Effect.Finished.Boarded>(ridingB2.effects.single())
     }
 
     // ================================================================ 原 BoardingDetectionTest

@@ -108,6 +108,35 @@ internal object BoardingDetector {
         return toStop >= LEFT_BOARD_STOP_METERS && toBus <= nearBusLimit
     }
 
+    /**
+     * 单线路一次定位就判上车（issue #49）：车已离站，人也离开了候车站，而且是跟着车的方向走的。
+     *
+     * 单线路判出上车就结束追踪，拖着不判的代价是下一班车到站又提醒、追踪一直不结束；所以不像路线那样要连续两次、
+     * 也不要求「贴着车 80 m」（车载 GPS 常常比手机慢 10–30 秒，人在车上也离车的上报位置好几百米）。
+     *
+     * 条件（这一刻的定位，精 / 粗都行；粗定位离站要再多一个精度半径）：
+     * - 待确认的车已离站：站序过了，或离站 ≥ [LEFT_BOARD_STOP_METERS]；
+     * - 人离站 ≥ [LEFT_BOARD_STOP_METERS]；
+     * - 人在车那一侧：人离车比人离站近。车载 GPS 落后时车的上报位置在站和人之间，满足；
+     *   人从反方向、侧街往站上赶的，离车比离站远，不满足（这种人多半是没赶上，交给「没赶上」判定）；
+     * - 车从数据里消失了（判不了方向）：退回人离站 ≥ [FAR_FROM_BOARD_STOP_METERS]。
+     */
+    fun isRidingAwayWithBus(input: Input, candidate: LiveBus?, boardOrder: Int): Boolean {
+        val fix = input.user ?: input.coarseUser ?: return false
+        if (!input.hasBoardStop) return false
+        val userToStop = distance(fix.lat, fix.lng, input.boardStopLat, input.boardStopLng) ?: return false
+        val margin = if (input.user != null) 0 else fix.accuracyMeters.toInt()
+        if (userToStop < LEFT_BOARD_STOP_METERS + margin) return false
+        if (candidate == null) return userToStop >= FAR_FROM_BOARD_STOP_METERS + margin
+        val busToStop = distance(candidate.wgsLat, candidate.wgsLng, input.boardStopLat, input.boardStopLng)
+        val busLeft = candidate.order > boardOrder || (busToStop != null && busToStop >= LEFT_BOARD_STOP_METERS)
+        if (!busLeft) return false
+        val userToBus = distance(fix.lat, fix.lng, candidate.wgsLat, candidate.wgsLng)
+            // 车没有坐标：判不了方向，同样退回「人已经走远」
+            ?: return userToStop >= FAR_FROM_BOARD_STOP_METERS + margin
+        return userToBus < userToStop
+    }
+
     /** 用户离上车站 A 的距离（米），算不出时为 null */
     fun userDistanceToBoardStop(input: Input): Int? {
         val user = input.user ?: return null
