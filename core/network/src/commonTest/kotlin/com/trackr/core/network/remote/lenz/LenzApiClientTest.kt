@@ -1,6 +1,7 @@
 package com.trackr.core.network.remote.lenz
 
 import com.trackr.core.model.TransitCity
+import com.trackr.core.network.json.JSONArray
 import com.trackr.core.network.testing.unusedHttpClient
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -151,5 +152,45 @@ class LenzApiClientTest {
         // 选中的是朗斯城市本身：只打它自己
         val fanxian = client.cachedCities!!.first { it.cityName == "范县" }
         assertEquals(listOf("范县"), client.citiesForSearch(fanxian).map { it.cityName })
+    }
+
+    /**
+     * 复现「紧挨着的两条记录实为一台车」：服务器对同一台车的多次 GPS 上报发不同 carID。
+     * 取自范县 2 路实测数据——两条记录仅相距 7 米，应去重为一台；远处另一台不受影响。
+     */
+    @Test
+    fun testAdjacentDuplicateReportsAreMergedIntoOneBus() {
+        val carPoses = JSONArray(
+            """
+            [
+              {"carID":100,"inOut":1,"staNO":10,"distance":340,"lat":35.744801,"lng":115.446685},
+              {"carID":101,"inOut":1,"staNO":10,"distance":210,"lat":35.744818,"lng":115.446761},
+              {"carID":200,"inOut":1,"staNO":1,"distance":8490,"lat":35.839855,"lng":115.509471}
+            ]
+            """.trimIndent()
+        )
+        val buses = LenzApiClient.parseLiveBuses(carPoses, stopCount = 21)
+        // 7 米内的两条合并为一台，远处那台保留 → 共 2 台
+        assertEquals(2, buses.size)
+        // 合并时保留最靠前的上报（距下一站更近的 carID=101）
+        assertTrue(buses.any { it.busId == "101" })
+        assertTrue(buses.none { it.busId == "100" })
+        assertTrue(buses.any { it.busId == "200" })
+        // 途中车（inOut=1）目标站为 staNO+1；distance 字段不可靠，一律不展示
+        val merged = buses.first { it.busId == "101" }
+        assertEquals(11, merged.order)
+        assertEquals(false, merged.isArrived)
+        assertTrue(buses.all { it.distanceToTargetMeters == null })
+    }
+
+    @Test
+    fun testAtStopBusKeepsStationOrderAndArrivedFlag() {
+        val carPoses = JSONArray(
+            """[{"carID":300,"inOut":0,"staNO":5,"distance":0,"lat":35.8,"lng":115.5}]"""
+        )
+        val buses = LenzApiClient.parseLiveBuses(carPoses, stopCount = 21)
+        assertEquals(1, buses.size)
+        assertEquals(5, buses[0].order)
+        assertEquals(true, buses[0].isArrived)
     }
 }

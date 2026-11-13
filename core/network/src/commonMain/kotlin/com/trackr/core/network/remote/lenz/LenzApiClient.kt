@@ -1,5 +1,6 @@
 package com.trackr.core.network.remote.lenz
 
+import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.BusLineSummary
@@ -281,6 +282,70 @@ class LenzApiClient(
             }
             return null
         }
+
+        /**
+         * 把 CMD 84 的 carPoses 解析成实时车辆列表。
+         *
+         * 服务器对同一台车的每次 GPS 上报都发一个新 carID（内部句柄，不是稳定车号），
+         * 因此紧挨着的两条记录很可能是同一台车：按位置邻近（200 米内）去重，保留最靠前的一条。
+         * 服务器的 distance 字段不可靠（可超过全程长度），原版 App 也不使用，故不展示。
+         */
+        internal fun parseLiveBuses(carPoses: JSONArray?, stopCount: Int): List<LiveBus> {
+            if (carPoses == null) return emptyList()
+
+            data class CarEntry(
+                val carId: String,
+                val inOut: Int,
+                val staNO: Int,
+                val distance: Int,
+                val lat: Double,
+                val lng: Double
+            )
+
+            val entries = mutableListOf<CarEntry>()
+            for (i in 0 until carPoses.length()) {
+                val cObj = carPoses.optJSONObject(i) ?: continue
+                entries.add(
+                    CarEntry(
+                        carId = cObj.optInt("carID", i + 1).toString(),
+                        inOut = cObj.optInt("inOut", 1), // 0: 停在 staNO 站，1: 已过 staNO 站、正驶向下一站
+                        staNO = cObj.optInt("staNO", 1),
+                        distance = cObj.optInt("distance", 0),
+                        lat = cObj.optDouble("lat", 0.0),
+                        lng = cObj.optDouble("lng", 0.0)
+                    )
+                )
+            }
+
+            // 保留最靠前的上报（站序大、距下一站近），其余 200 米内的视为同一台车的重复上报丢弃
+            val kept = mutableListOf<CarEntry>()
+            for (e in entries.sortedWith(compareByDescending<CarEntry> { it.staNO }.thenBy { it.distance })) {
+                val isDuplicate = kept.any { k ->
+                    val d = RouteProjectionMath.calculateDistanceMeters(e.lat, e.lng, k.lat, k.lng)
+                    d != null && d <= 200
+                }
+                if (!isDuplicate) kept.add(e)
+            }
+
+            return kept.map { e ->
+                // LiveBus.order 表示「正在接近/已停靠的目标站」：在站内就是 staNO，途中是 staNO + 1
+                val targetOrder = if (e.inOut == 0) {
+                    e.staNO
+                } else {
+                    (e.staNO + 1).coerceAtMost(stopCount.coerceAtLeast(1)).coerceAtLeast(1)
+                }
+                LiveBus(
+                    busId = e.carId,
+                    // 协议只给系统内部车号，对乘客没有意义，统一显示「车辆」
+                    plateOrFleetNo = "车辆",
+                    order = targetOrder,
+                    isArrived = (e.inOut == 0),
+                    distanceToTargetMeters = null,
+                    wgsLat = e.lat,
+                    wgsLng = e.lng
+                )
+            }
+        }
     }
 
     /** 城市表缓存；测试可预置，避免连真实服务器 */
@@ -536,38 +601,7 @@ class LenzApiClient(
             rememberNextDeparture(lineRef.lineId(), nextDeparture)
         }
 
-        val liveBuses = mutableListOf<LiveBus>()
-        if (carPoses != null) {
-            for (i in 0 until carPoses.length()) {
-                val cObj = carPoses.optJSONObject(i) ?: continue
-                val carId = cObj.optInt("carID", i + 1).toString()
-                val inOut = cObj.optInt("inOut", 1) // 0: 停在 staNO 站，1: 已过 staNO 站、正驶向下一站
-                val staNO = cObj.optInt("staNO", 1)
-                val distance = cObj.optInt("distance", 0)
-                val lat = cObj.optDouble("lat", 0.0)
-                val lng = cObj.optDouble("lng", 0.0)
-
-                // LiveBus.order 表示「正在接近/已停靠的目标站」：在站内就是 staNO，途中是 staNO + 1
-                val targetOrder = if (inOut == 0) {
-                    staNO
-                } else {
-                    (staNO + 1).coerceAtMost(stops.size.coerceAtLeast(1)).coerceAtLeast(1)
-                }
-
-                liveBuses.add(
-                    LiveBus(
-                        busId = carId,
-                        // 协议只给系统内部车号，对乘客没有意义，统一显示「车辆」
-                        plateOrFleetNo = "车辆",
-                        order = targetOrder,
-                        isArrived = (inOut == 0),
-                        distanceToTargetMeters = distance,
-                        wgsLat = lat,
-                        wgsLng = lng
-                    )
-                )
-            }
-        }
+        val liveBuses = parseLiveBuses(carPoses, stops.size)
 
         val firstStop = stops.firstOrNull()?.name.orEmpty()
         val lastStop = stops.lastOrNull()?.name.orEmpty()

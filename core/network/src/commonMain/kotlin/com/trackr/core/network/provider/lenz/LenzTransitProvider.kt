@@ -15,7 +15,6 @@ import com.trackr.core.network.provider.model.LineDetailRequest
 import com.trackr.core.network.provider.model.StopDetailRequest
 import com.trackr.core.network.remote.lenz.LenzApiClient
 import com.trackr.core.network.remote.lenz.LenzIds
-import com.trackr.core.network.remote.lenz.findLenzScheduledTimetable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -122,11 +121,11 @@ class LenzTransitProvider(
     }
 
     /**
-     * 朗斯系统没有远程「完整班次表」接口，但收录了范县城乡客运官方冬季发车时刻表（1~12 路全线双向）。
+     * 朗斯系统没有远程「完整班次表」接口，只下发两类真实数据：
+     * - 随线路返回的首班 `fdtime` / 末班 `ldtime`；
+     * - 查车辆位置时返回的下一班计划发车时间 `ndTime`。
      *
-     * - 若该线路收录在时刻表中：完整呈现今日计划发车班次 [LineTimetable.todayDepartures] 与分段发车间隔 [LineTimetable.segments]；
-     * - 计划下一班：优先车辆实时下发的时间；若无实时数据，结合当前时间自动推算下一班；
-     * - 未收录线路：退回到随线路下发的首末班和下一班实时预报。
+     * 这里如实呈现这两类数据，不推算、不编造中间班次。
      */
     override suspend fun getTimetable(
         city: TransitCity,
@@ -134,27 +133,12 @@ class LenzTransitProvider(
         atTimeHHMM: String?
     ): LineTimetable {
         val meta = lenzClient.lineMetaOf(line.lineId)
-        val lineRef = LenzIds.parseLineId(line.lineId)
-        val routeName = lineRef?.lineName ?: line.name
-        val direction = lineRef?.upDown ?: line.direction
 
-        val scheduled = findLenzScheduledTimetable(city.cityName, routeName, direction)
-
-        val first = scheduled?.departures?.firstOrNull() ?: line.firstTime.ifBlank { meta.firstTime }
-        val last = scheduled?.departures?.lastOrNull() ?: line.lastTime.ifBlank { meta.lastTime }
+        val first = line.firstTime.ifBlank { meta.firstTime }
+        val last = line.lastTime.ifBlank { meta.lastTime }
         val next = meta.nextDeparture
 
-        val segments = if (scheduled != null) {
-            listOf(
-                TimetableSegment(
-                    fromTime = first.ifBlank { "首班" },
-                    toTime = last.ifBlank { "末班" },
-                    intervalMinutes = scheduled.intervalMinutes,
-                    intervalTips = scheduled.intervalTips,
-                    departures = scheduled.departures
-                )
-            )
-        } else if (first.isNotBlank() || last.isNotBlank()) {
+        val segments = if (first.isNotBlank() || last.isNotBlank()) {
             listOf(
                 TimetableSegment(
                     fromTime = first.ifBlank { "首班" },
@@ -169,28 +153,16 @@ class LenzTransitProvider(
             emptyList()
         }
 
-        val nextFromSchedule = if (next.isBlank() && scheduled != null && !atTimeHHMM.isNullOrBlank()) {
-            scheduled.departures.firstOrNull { it >= atTimeHHMM }
-        } else null
+        val nextSource = if (next.isNotBlank()) "运营方实时下发" else null
 
-        val finalNext = next.ifBlank { nextFromSchedule.orEmpty() }
-        val nextSource = when {
-            next.isNotBlank() -> "运营方实时下发"
-            nextFromSchedule != null -> "计划发车"
-            else -> null
-        }
-
-        val desc = scheduled?.description ?: (
-            "本数据由朗斯公交调度系统实时下发，只含首末班与下一班发车时间；" +
-                "完整班次表未开放接口"
-        )
+        val desc = "本数据由朗斯公交调度系统实时下发，只含首末班与下一班发车时间；完整班次表未开放接口"
 
         return LineTimetable(
             lineId = line.lineId,
             lineName = line.name,
-            nextDeparture = finalNext.takeIf { it.isNotBlank() },
+            nextDeparture = next.takeIf { it.isNotBlank() },
             nextDepartureSource = nextSource,
-            todayDepartures = scheduled?.departures.orEmpty(),
+            todayDepartures = emptyList(),
             segments = segments,
             depDesc = desc
         )
