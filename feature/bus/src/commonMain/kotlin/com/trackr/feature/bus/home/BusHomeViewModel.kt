@@ -87,6 +87,9 @@ class BusHomeViewModel(
 
     private var nextMessageId = 1L
 
+    /** 「本城全部线路」加载的代际号：切城市 / 切数据源会并发触发多次加载，只让最新一次的结果落地 */
+    private var cityLinesGeneration = 0
+
     internal val pollingCoordinator = PollingCoordinator(
         scope = viewModelScope,
         strategy = FixedDelayPollingStrategy(POLLING_INTERVAL_MS),
@@ -530,6 +533,7 @@ class BusHomeViewModel(
      * 车来了 / 掌上公交列不了「全部」，会返回空表，首页这两块不显示。
      */
     private fun loadCityLines(city: TransitCity = _uiState.value.currentCity) {
+        val generation = ++cityLinesGeneration
         viewModelScope.launch {
             edit { it.copy(isLoadingCityLines = true) }
             // 一条线路一行；正反方向都有的提示「⇄」，进详情可以换向。
@@ -554,6 +558,8 @@ class BusHomeViewModel(
                     )
                 )
             }
+            // 已有更新的一次加载（又切了城市 / 数据源）：这份结果过期，丢弃，避免旧城市的线路盖掉新城市
+            if (generation != cityLinesGeneration) return@launch
             edit { it.copy(cityLines = ui, isLoadingCityLines = false) }
         }
     }
@@ -613,6 +619,9 @@ class BusHomeViewModel(
                 )
             }
             settings.selectCity(city)
+            // 显式按新城市重拉「本城全部线路」：selectedCity 收集器会因 currentCity 已先行更新而跳过，
+            // 数据源没变时引擎收集器也不触发，不主动拉就会一直显示上一个城市的线路
+            loadCityLines(city)
             loadNearbyStops(coords.first, coords.second, cityOverride = city)
             refreshFavoritesRealtime()
         }
