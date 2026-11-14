@@ -9,6 +9,7 @@ import com.trackr.core.data.repository.SearchHistoryRepository
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.domain.tracking.LocationCadence
 import com.trackr.core.model.BusLineDetail
+import com.trackr.core.model.BusLineSummary
 import com.trackr.core.model.BusLineDirection
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
@@ -392,7 +393,19 @@ class FakeRealtimeRepository(
     /** 可按查询坐标返回不同结果；为 null 时统一返回 [nearbyStopsResult] */
     var nearbyStopsResultProvider: ((TransitCity, Double, Double) -> Result<List<NearbyStop>>)? = null
 
+    /** 「本城全部线路」结果；[listAllLinesResultProvider] 可按城市返回不同结果 */
+    var listAllLinesResult: Result<List<BusLineSummary>> = Result.success(emptyList())
+    var listAllLinesResultProvider: ((TransitCity) -> Result<List<BusLineSummary>>)? = null
+
+    /** 每次 [listAllLines] 请求的城市（按调用顺序） */
+    val listAllLinesCalls: MutableList<TransitCity> = mutableListOf()
+
     override suspend fun getSupportedCities(forceRefresh: Boolean): Result<List<TransitCity>> = supportedCitiesResult
+
+    override suspend fun listAllLines(city: TransitCity): Result<List<BusLineSummary>> {
+        listAllLinesCalls += city
+        return listAllLinesResultProvider?.invoke(city) ?: listAllLinesResult
+    }
 
     override suspend fun resolveCityByLocation(wgsLat: Double, wgsLng: Double): Result<TransitCity?> =
         resolveCityResult ?: Result.success(currentCity())

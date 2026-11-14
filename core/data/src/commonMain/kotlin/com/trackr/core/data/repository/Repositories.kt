@@ -6,6 +6,7 @@ import com.trackr.core.model.AmapTipItem
 import com.trackr.core.model.AmapTransitSchemeResult
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
+import com.trackr.core.model.BusLineSummary
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteGroup
@@ -242,6 +243,18 @@ interface RealtimeRepository {
      * （找不到站台时是一个没有线路的站）。
      */
     suspend fun refreshFavoritesRealtime(): Result<Map<String, NearbyStop>>
+
+    /**
+     * 这批城市里哪些当前连不上数据源（只有掌上出行的「一城一服务器」会真的离线）。
+     * 默认空集，Fake 不用改。
+     */
+    suspend fun unreachableCities(cities: List<TransitCity>): Set<String> = emptySet()
+
+    /**
+     * 当前城市能列出来的全部线路（掌上出行的县级城市线路少，首页直接铺开）。
+     * 数据源不支持时返回空表。默认空表，Fake 不用改。
+     */
+    suspend fun listAllLines(city: TransitCity): Result<List<BusLineSummary>> = Result.success(emptyList())
 
     /**
      * 每一份真正从上游拿到的线路详情（命中缓存的不算）。追踪服务等下一轮时订阅它：

@@ -15,6 +15,7 @@ import com.trackr.core.domain.platform.ProcessMonotonicClock
 import com.trackr.core.model.AlertThreshold
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
+import com.trackr.core.model.BusLineSummary
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.LineTimetable
@@ -315,6 +316,12 @@ class TransitRepository(
 
     override suspend fun refreshFavoritesRealtime(): Result<Map<String, NearbyStop>> =
         realtime.refreshFavoritesRealtime()
+
+    override suspend fun unreachableCities(cities: List<TransitCity>): Set<String> =
+        realtime.unreachableCities(cities)
+
+    override suspend fun listAllLines(city: TransitCity): Result<List<BusLineSummary>> =
+        realtime.listAllLines(city)
 
     private suspend fun persistSearchHistory(list: List<String>) {
         writer.enqueue { store.saveSearchHistory(list) }.join()
