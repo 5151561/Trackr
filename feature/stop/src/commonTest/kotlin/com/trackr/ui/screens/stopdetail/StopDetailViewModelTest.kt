@@ -404,19 +404,19 @@ class StopDetailViewModelTest {
         testScheduler.runCurrent()
         assertEquals(1, repo.stopDetailPhysicalIds.size)
 
-        // t=4s 换站台：马上按新站台请求一次
-        testScheduler.advanceTimeBy(4_000L)
+        // t=1s 换站台：马上按新站台请求一次
+        testScheduler.advanceTimeBy(1_000L)
         testScheduler.runCurrent()
         viewModel.selectStopIndex(1)
         testScheduler.runCurrent()
         assertEquals(listOf<String?>(null, "phy_02"), repo.stopDetailPhysicalIds)
         assertEquals(1, viewModel.uiState.value.selectedStopIndex)
 
-        // 重新计时：原来 t=10s 的一轮推到 t=14s
-        testScheduler.advanceTimeBy(6_000L)
+        // 重新计时：原来 t=3s 的一轮推到 t=4s
+        testScheduler.advanceTimeBy(2_000L)
         testScheduler.runCurrent()
         assertEquals(2, repo.stopDetailPhysicalIds.size)
-        testScheduler.advanceTimeBy(4_000L)
+        testScheduler.advanceTimeBy(1_000L)
         testScheduler.runCurrent()
         assertEquals(listOf<String?>(null, "phy_02", "phy_02"), repo.stopDetailPhysicalIds)
 
@@ -437,13 +437,13 @@ class StopDetailViewModelTest {
         testScheduler.runCurrent()
         assertTrue(viewModel.isLoadInFlight)
 
-        testScheduler.advanceTimeBy(10_000L)
+        testScheduler.advanceTimeBy(3_000L)
         testScheduler.runCurrent()
         assertEquals(1, repo.stopDetailPhysicalIds.size)
 
         gate.complete(Unit)
         testScheduler.runCurrent()
-        testScheduler.advanceTimeBy(10_000L)
+        testScheduler.advanceTimeBy(3_000L)
         testScheduler.runCurrent()
         assertEquals(2, repo.stopDetailPhysicalIds.size)
 
@@ -839,7 +839,7 @@ class StopDetailViewModelTest {
         viewModel.onEvent(StopDetailEvent.StopWatching)
         testScheduler.runCurrent()
         assertEquals(3, repo.stopDetailPhysicalIds.size)
-        testScheduler.advanceTimeBy(10_000L)
+        testScheduler.advanceTimeBy(3_000L)
         testScheduler.runCurrent()
         assertEquals(4, repo.stopDetailPhysicalIds.size)
 

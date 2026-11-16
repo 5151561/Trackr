@@ -72,6 +72,11 @@
     <string name="line_follow_approaching">正在接近</string>
     <string name="line_follow_next">下一站</string>
     <string name="line_follow_passed">已过</string>
+    <string name="line_follow_track_bus">追这辆车 · 到「%1$s」提醒</string>
+    <string name="line_follow_track_bus_hint">只提醒这一辆，前面的车到站不算；开过「%1$s」后自动结束。可当下车提醒用：先在走向条选下车站。</string>
+    <string name="line_follow_tracking_bus">正在追这辆车 · 结束</string>
+    <string name="line_follow_tracking_bus_hint">这辆车快到「%1$s」、到站时提醒你</string>
+    <string name="line_follow_track_passed">这辆车已开过「%1$s」，换一站或换一辆再追</string>
     <string name="line_list_back">返回站点卡</string>
     <string name="line_list_title">到「%1$s」的全部车辆</string>
     <string name="line_list_current_stop">当前站</string>

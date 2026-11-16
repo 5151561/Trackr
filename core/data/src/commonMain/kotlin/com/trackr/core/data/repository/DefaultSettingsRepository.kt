@@ -36,6 +36,9 @@ class DefaultSettingsRepository private constructor(
     private val _autoStopAfterBoarding = MutableStateFlow(initial.autoStopAfterBoarding ?: true)
     override val autoStopAfterBoarding: StateFlow<Boolean> = _autoStopAfterBoarding.asStateFlow()
 
+    private val _voiceAlerts = MutableStateFlow(initial.voiceAlerts ?: false)
+    override val voiceAlerts: StateFlow<Boolean> = _voiceAlerts.asStateFlow()
+
     private val _nearbyStopsCount = MutableStateFlow((initial.nearbyStopsCount ?: 4).coerceIn(1, 16))
     override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
 
@@ -103,6 +106,11 @@ class DefaultSettingsRepository private constructor(
     override fun setAutoStopAfterBoarding(enabled: Boolean) {
         _autoStopAfterBoarding.value = enabled
         writer.enqueue { store.saveAutoStopAfterBoarding(enabled) }
+    }
+
+    override fun setVoiceAlerts(enabled: Boolean) {
+        _voiceAlerts.value = enabled
+        writer.enqueue { store.saveVoiceAlerts(enabled) }
     }
 
     override fun setAlertThresholdStops(stops: Int) {

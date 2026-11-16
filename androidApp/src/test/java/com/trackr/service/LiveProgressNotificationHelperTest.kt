@@ -270,6 +270,28 @@ class LiveProgressNotificationHelperTest {
     }
 
     @Test
+    fun buildTexts_pinnedSingleBus_saysWhichBusAndGetOff() {
+        // issue #52：只追一辆车到下车站
+        val pinned = TrackingSessionState(
+            isActive = true,
+            lineName = "614路",
+            endStopName = "猴屿乡政府站",
+            targetStopName = "长乐职专站",
+            targetOrder = 23,
+            stopsRemaining = 3,
+            etaSeconds = 600,
+            legPhase = LegPhase.SINGLE,
+            pinnedBusId = "bus-2",
+            pinnedPlate = "闽A06303D"
+        )
+        assertEquals("只追 闽A06303D · 第23站", liveNotifier.buildTexts(pinned).subText)
+        val arrived = liveNotifier.buildTexts(pinned.copy(stopsRemaining = 0, isBusArrivedAtStop = true, etaSeconds = 0))
+        assertEquals("长乐职专站：到站了，请下车", arrived.content)
+        // 不指定车时照旧
+        assertEquals("候车追踪 · 第23站", liveNotifier.buildTexts(pinned.copy(pinnedBusId = null)).subText)
+    }
+
+    @Test
     fun buildTexts_onBoard_withTransferAndRange() {
         val texts = liveNotifier.buildTexts(onBoardState(), nextLineName = "M492")
         assertEquals("还有 2 站在 深大北门 下车", texts.title)

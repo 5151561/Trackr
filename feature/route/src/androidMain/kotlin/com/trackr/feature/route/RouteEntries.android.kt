@@ -25,7 +25,7 @@ import org.koin.dsl.module
 
 actual fun EntryProviderScope<NavKey>.routeEntries(navigator: TrackrNavigator) {
     entry<ScreenKey.RoutePlan> {
-        // 原来 MainActivity 在 NavDisplay 外取一个 FavoritesGroupViewModel 给规划页和收藏页共用；拆开后仍取 Activity 级
+        // 规划页和路线详情页共用这两个 ViewModel，取 Activity 级（TrackrRoot 里已经先取过一次）
         val appOwner = LocalAppViewModelStoreOwner.current
         val routePlanViewModel: RoutePlanViewModel = koinViewModel(viewModelStoreOwner = appOwner)
         val routeDetailViewModel: RouteDetailViewModel = koinViewModel(viewModelStoreOwner = appOwner)

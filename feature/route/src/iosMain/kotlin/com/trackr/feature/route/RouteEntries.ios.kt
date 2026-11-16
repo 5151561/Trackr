@@ -16,12 +16,12 @@ import org.koin.compose.viewmodel.koinViewModel
 
 actual fun EntryProviderScope<NavKey>.routeEntries(navigator: TrackrNavigator) {
     entry<ScreenKey.RoutePlan> {
-        // 原来 MainActivity 在 NavDisplay 外取一个 FavoritesGroupViewModel 给规划页和收藏页共用；拆开后仍取 Activity 级
+        // 规划页和路线详情页共用这两个 ViewModel，取根组合级（TrackrRoot 里已经先取过一次）
         val appOwner = LocalAppViewModelStoreOwner.current
         val routePlanViewModel: RoutePlanViewModel = koinViewModel(viewModelStoreOwner = appOwner)
         val routeDetailViewModel: RouteDetailViewModel = koinViewModel(viewModelStoreOwner = appOwner)
         val lifecycleOwner = LocalLifecycleOwner.current
-        // 第 24 步：页面在 commonMain（RoutePlanRoute），地图会话从 LocalAmapMapSession 取（RouteMap 的 Android 实现里）
+        // 页面在 commonMain（RoutePlanRoute）；地图由 RouteMap 的 iOS 实现决定画不画（真机高德 SDK，arm64 模拟器不画）
         RoutePlanRoute(
             viewModel = routePlanViewModel,
             routeDetailViewModel = routeDetailViewModel,

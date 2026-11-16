@@ -518,7 +518,7 @@ class BusHomeViewModelTest {
         testScheduler.runCurrent()
         val callsBefore = fakeRepository.nearbyStopsCalls.size
 
-        // 离开首页超过一个轮询周期后回来：立即补刷一次，而不是再等 15 秒
+        // 离开首页超过一个轮询周期后回来：立即补刷一次，而不是再等一个周期
         clock.advanceBy((BusHomeViewModel.POLLING_INTERVAL_MS + 1).milliseconds)
         viewModel.setPollingActive(true)
         testScheduler.runCurrent()
@@ -535,7 +535,7 @@ class BusHomeViewModelTest {
         testScheduler.runCurrent()
         val callsBefore = fakeRepository.nearbyStopsCalls.size
 
-        // 边界：距上次刷新正好一个轮询周期（15000 ms）也算到期，补刷一次
+        // 边界：距上次刷新正好一个轮询周期也算到期，补刷一次
         clock.advanceBy(BusHomeViewModel.POLLING_INTERVAL_MS.milliseconds)
         viewModel.setPollingActive(true)
         testScheduler.runCurrent()

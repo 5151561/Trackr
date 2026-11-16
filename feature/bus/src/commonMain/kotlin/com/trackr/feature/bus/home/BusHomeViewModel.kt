@@ -38,7 +38,7 @@ import kotlin.concurrent.Volatile
 /**
  * v3 公交首页（重构计划第 19 步，原 `HomeViewModel`）。
  *
- * - 附近站固定 6 个；附近站 + 收藏实时每 15 秒轮询一次，由 [BusHomeRoute] 随 STARTED 开关（§4.4），
+ * - 附近站固定 6 个；附近站 + 收藏实时每 3 秒轮询一次，由 [BusHomeRoute] 随 STARTED 开关（§4.4），
  *   恢复时距上次刷新超过一个周期就立即补刷。
  * - 定位走 [LocationRepository.bestFix]（4.5 秒窗口内取最准）。
  * - 追踪卡读所有会话（同时可以追多项，一项一张卡）；「结束」只停那一项。
@@ -631,7 +631,7 @@ class BusHomeViewModel(
     companion object {
         /** 附近站固定 6 个（v3：删掉「附近站数」设置） */
         const val NEARBY_STOPS_LIMIT = 6
-        const val POLLING_INTERVAL_MS = 15_000L
+        const val POLLING_INTERVAL_MS = 3_000L
 
         const val NEARBY_FAILED = "附近站没刷出来，下拉再试一次"
 

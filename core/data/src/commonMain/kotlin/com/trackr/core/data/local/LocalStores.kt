@@ -37,6 +37,8 @@ data class TransitLocalSnapshot(
     val showTransitCodeButton: Boolean? = null,
     /** 上车后自动结束追踪（issue #32）；没存过为 null，按开 */
     val autoStopAfterBoarding: Boolean? = null,
+    /** 语音播报提醒（issue #52）；没存过为 null，按关 */
+    val voiceAlerts: Boolean? = null,
     val nearbyStopsCount: Int? = null,
     val liveNotificationEnabled: Boolean? = null,
     val showOnLockScreen: Boolean? = null,
@@ -61,6 +63,7 @@ interface TransitLocalStore {
     suspend fun saveTransitCodeProvider(id: String)
     suspend fun saveShowTransitCodeButton(enabled: Boolean)
     suspend fun saveAutoStopAfterBoarding(enabled: Boolean)
+    suspend fun saveVoiceAlerts(enabled: Boolean)
     suspend fun saveNearbyStopsCount(count: Int)
     suspend fun saveLiveNotificationEnabled(enabled: Boolean)
     suspend fun saveShowOnLockScreen(enabled: Boolean)
