@@ -11,7 +11,7 @@ sealed interface BusHomeEvent {
     data class OpenLine(val target: LineTarget) : BusHomeEvent
     data class OpenStop(val target: StopTarget) : BusHomeEvent
 
-    /** 点了收藏的路线（路线详情第 22 步做，先去旧收藏页） */
+    /** 点了收藏的路线（进路线详情） */
     data class OpenRoute(val routeId: String) : BusHomeEvent
 
     /** 收藏右上角「编辑」 */

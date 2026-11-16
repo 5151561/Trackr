@@ -25,7 +25,7 @@ import com.trackr.service.vendor.XiaomiFocusAdapter
 /**
  * 负责管理高优先级到站/进站预警通知渠道及震动声音提醒
  *
- * 第 4 步从 object 改成类，由 Koin 提供单例；旧的 [ArrivalAlertManager] 暂时转发到这里（第 12 步删）。
+ * 由 Koin 提供单例（原来的 object `ArrivalAlertManager` 已删，只有文件名还沿用旧名）。
  *
  * @param liveProgressNotifier 读「实时通知」开关，与常驻通知共用同一个兜底值
  * @param showOnLockScreenSetting 读「锁屏显示」开关（D3），和常驻通知同一份设置；读不到按开

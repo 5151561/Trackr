@@ -115,7 +115,7 @@ fun TrackrRoot(
                         }
                     )
                 }
-                // 申请定位与通知权限（Android：首次打开时弹说明再申请；iOS 阶段 G 再做）。
+                // 申请定位与通知权限（Android：首次打开时弹说明再申请；iOS：直接申请使用期间定位）。
                 // 说明对话框和系统权限弹窗都关掉后，系统字体 ≥ 1.3 倍时再提示一次「试试长辈版」，两个对话框不叠在一起
                 PermissionOnboarding {
                     FontScalePrompt(
@@ -139,8 +139,8 @@ private fun TrackrNavApp(
     val navigationState = rememberNavigationState()
     val navigator = remember(navigationState) { Navigator(navigationState) }
 
-    // 原来在这里（NavDisplay 外）取、跨页共享的 ViewModel：首页（首页 / 权限回调）、FavoritesGroupViewModel（规划页 / 收藏页）。
-    // 拆开后仍在这里先取一次 Activity 级的实例，创建时机和原来一样（收藏的自动 ETA 刷新、一次性数据修复都从这时开始）
+    // 跨页共享的 ViewModel：首页（首页 / 权限回调）、规划页和路线详情（规划页 / 路线详情页共用）。
+    // 在这里（NavDisplay 外）先取一次 Activity 级的实例，收藏的自动 ETA 刷新、一次性数据修复都从这时开始
     val appViewModelStoreOwner = LocalAppViewModelStoreOwner.current
     val homeViewModel = koinViewModel<BusHomeViewModel>(viewModelStoreOwner = appViewModelStoreOwner)
     // 首页 ViewModel 建好就开着轮询；恢复到别的页签、或首页栈顶是子页时首页 Route 不组合，没人关它。

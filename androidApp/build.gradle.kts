@@ -134,7 +134,7 @@ dependencies {
     implementation(project(":core:navigation"))
     implementation(project(":core:network"))
     implementation(project(":core:data"))
-    // 第 17 步：页面搬进 :composeApp / :feature:*；:core:ui 给出页面要的 Android 能力接口（LiveUpdateSettings）
+    // 页面在 :composeApp / :feature:*；:core:ui 给出要在这里实现的平台接口（LiveUpdateAccess、LiveUpdateSettings 等）
     implementation(project(":composeApp"))
     implementation(project(":core:ui"))
     implementation(platform(libs.androidx.compose.bom))

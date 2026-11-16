@@ -136,7 +136,7 @@ object AndroidLiveUpdateSettings : LiveUpdateSettings {
 }
 
 /**
- * 「我的」页「状态栏胶囊」：判断和跳转和第 17 步「更多」页里的写法一样（经 [LiveUpdateSettings]，用 applicationContext；
+ * 「我的」页「实时活动通知」那一行（原来叫「状态栏胶囊」）：判断和跳转经 [LiveUpdateSettings]，用 applicationContext（
  * 厂商适配对象打开设置页时都带 NEW_TASK）。
  *
  * 只判断「这台机器有没有 / 用户开没开」，不判断各家叫什么名字——界面上统一叫「实时活动通知」。

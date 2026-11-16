@@ -301,8 +301,8 @@ interface LocationRepository {
 /**
  * 高德输入提示 / 公交算路通道。
  *
- * Android 实现（现在在 `FavoritesGroupViewModel` 里）：SDK 优先，**只有 SDK 调用失败**才回落 Web 服务；
- * SDK 成功但结果为空时不再重复请求 Web。iOS 只走 Web。单元测试可注入替身，避免发起真实请求。
+ * Android 实现（`:feature:route` 的 `AndroidAmapRouteGateway`）：SDK 优先，**只有 SDK 调用失败**才回落 Web 服务；
+ * SDK 成功但结果为空时不再重复请求 Web。iOS 只走 Web（`WebAmapRouteGateway`）。单元测试可注入替身，避免发起真实请求。
  */
 interface AmapRouteGateway {
     /** 是否至少配置了一条可用通道（Android Key 或 Web 服务 Key） */

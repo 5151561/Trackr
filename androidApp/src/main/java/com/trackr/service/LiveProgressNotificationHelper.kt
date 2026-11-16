@@ -32,7 +32,7 @@ import com.trackr.service.vendor.XiaomiFocusAdapter
 /**
  * 负责构建常驻实时公交进度通知，深度适配 Android 16 / Core-KTX 1.19.0 的 NotificationCompat.ProgressStyle 实时活动
  *
- * 第 4 步从 object 改成类，由 Koin 提供单例；旧的 [LiveProgressNotificationHelper] 暂时转发到这里（第 12 步删）。
+ * 由 Koin 提供单例（原来的 object `LiveProgressNotificationHelper` 已删，只有文件名还沿用旧名）。
  *
  * @param liveNotificationSetting 读「实时通知」设置开关（Koin 里接仓库）
  * @param nextLegLineNameOf 第 N 程之后那一程的线路名（Koin 里接 `TrackingRepository` 的会话）

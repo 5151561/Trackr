@@ -1,6 +1,6 @@
 // 根 Composable（重构计划 §2.2、§3.3）：KMP + Compose Multiplatform（Android + iosArm64 + iosSimulatorArm64）。
 // TrackrRoot()：主题、底栏（3 个页签）、NavDisplay，把各 feature 的 entry 和 Koin 模块组装起来。不依赖 :androidApp。
-// 第 17 步旧收藏页（第 22 步删）放 androidMain：它同时用 :feature:favorites 和 :feature:route 的 ViewModel。
+// androidMain / iosMain 只放平台壳：底栏（Material / UIKit）、权限申请、平台 Koin 模块；iosMain 另有 iOS 宿主入口和平台能力实现。
 plugins {
     alias(libs.plugins.trackr.kmp.library)
     alias(libs.plugins.trackr.kmp.compose)
