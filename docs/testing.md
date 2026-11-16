@@ -90,6 +90,7 @@ Koin 由 `TrackrApp.onCreate` 启动，Robolectric 用例里每个用例都会�
 |  | `AndroidTrackingControllerTest` | 开始追踪时把「我的」里的到站前提醒写进目标、每次重读设置、后台不让启动前台服务时不留会话 | Robolectric (JVM) |
 |  | `LiveProgressNotificationHelperTest` | 实时进度通知进度计算与文案；一起等通知：标题写最先到的、正文只带第 2 条线、「我上车了 / 乘车码 / 结束」（乘车码发 `trackr://transit-code` 打开 App）、「上了哪辆？」和乘车中文字；有「上了哪辆？」待选时点通知发 `trackr://tracking/board?session=`、显式指向 `MainActivity`，没有待选照旧只拉起 App | Robolectric (JVM) |
 |  | `BusTrackingServiceTest` | 追踪服务：路线且有精确定位时前台服务带 `location` 类型、等车近站开定位；没有精确定位退回 `specialUse` 且不开定位；单线路不要 `location`；结束追踪时关定位、停服务并撤掉这一项的到站提醒（#28）；过时的启动请求先进前台再停；服务销毁时结束会话；一起等：3 条线每轮只 1 次站点请求、最先到的写进会话、带 `location` 类型，上车后只请求那一条线并以终点为目标 | Robolectric (JVM) |
+|  | `AndroidBoardingTraceLogTest` | 判上车判定记录的 Android 实现：一行一条写进 `cacheDir/diagnostics/`、写满换一份只留上一份、没有记录时导出返回 false、导出把旧的和当前的拼起来经 FileProvider 交给分享面板 | Robolectric (JVM) |
 | `service/vendor` | `LiveUpdatePromotionTest` | Android 16 Live Update 推广通知构建与厂商识别 | Robolectric (JVM) |
 |  | `XiaomiFocusAdapterTest` | 小米焦点通知 JSON 负载构建 | Robolectric (JVM) |
 | `ui` | `ScreenshotGeneratorTest` | 主要页面明暗主题截图生成 | Robolectric Compose UI |
@@ -170,6 +171,7 @@ Koin 由 `TrackrApp.onCreate` 启动，Robolectric 用例里每个用例都会�
 | `:core:data` `provider` | `TransitProviderCoordinatorTest` | 数据源二选一（D1）：搜索、附近站、站点详情只查当前数据源，搜索去掉地铁并按线路名自然排序；线路详情按来源 / id 前缀路由，认不出来走当前数据源；逆地理先车来了、空了再掌上公交；城市列表两家合并 | commonTest（JVM + iOS 模拟器） |
 | `:core:data` `repository` | `AmapKeyRepositoryTest` | 高德 Key 两槽（§2.5）：各槽「用户填的 > 构建时的」、互不回落（含原 `customAmapApiKey_doesNotFallBackToLegacyWebSlot`）；`hasMapKey` / `canShowMap` 四种组合；setter 后立刻更新、只写自己的槽；没有 Android 地图 SDK 的平台不看 Android 槽 | commonTest（JVM + iOS 模拟器） |
 |  | `TrackingRepositoryTest` | 追踪会话：新实例读回（标成中断、服务接上后恢复且代际号 +1）、太旧的不读回、旧代际的结果被丢弃、停止后代际号不回退、update 在当前值上算、我上车了用最近一次轮询的车、切程和开始 / 停止清掉定位、换乘组视图；一起等「我上车了」两条线都在站写待选、选了上车代际号 +1、一条线在站直接上、会话带着几条线读回 | commonTest（JVM + iOS 模拟器） |
+|  | `BoardingTraceTest` | 判上车判定记录（issue #49）：只在开着「上车后自动结束追踪」的单线路、车临近到开走后的那一小段记（定位用不了也记，只追指定的车不记）；一行里有定位年龄、候车站前后几站内的车、判定前后状态，站点坐标只带一次 | commonTest（JVM + iOS 模拟器） |
 |  | `WatchTogetherPollerTest` | 一起等取数（第 15 步）：10 条线都在站点结果里只发 1 次站点请求、缺线（不在结果里 / 没车也没状态）才单独请求线路接口、单独请求最多同时 4 个、掌上公交站点接口不带来车就逐条请求、待确认只请求计划里的线、站序不同时平移车辆站序、站点请求失败不兜底 | commonTest（JVM + iOS 模拟器） |
 |  | `RealtimeRepositoryLineDetailCacheTest` | 线路详情同 key 并发只请求一次上游、TTL 内复用与过期重拉、目标站顺序不同算不同 key、失败不缓存、取消的调用方不影响其他等待者 | commonTest（JVM + iOS 模拟器） |
 |  | `LocationRepositoryTest` | 首页取定位：够新够准直接用、强制刷新 10 秒 / 平时 60 秒、4.5 秒窗口取最准且 ≤100 m 提前结束、超过 10 分钟的旧定位不用、无权限不定位；规划页 lastKnown 取 10 分钟内最准的 | commonTest（JVM + iOS 模拟器） |

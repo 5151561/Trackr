@@ -2,7 +2,9 @@ package com.trackr.core.data.repository
 
 import com.trackr.core.domain.arrival.StopOrderResolver
 import com.trackr.core.domain.math.RouteProjectionMath
+import com.trackr.core.domain.platform.BoardingTraceLog
 import com.trackr.core.domain.platform.MonotonicClock
+import com.trackr.core.domain.platform.NoBoardingTraceLog
 import com.trackr.core.domain.tracking.LocationCadence
 import com.trackr.core.domain.tracking.TrackingEngine
 import com.trackr.core.model.*
@@ -26,7 +28,9 @@ class TrackingPoller(
     private val serviceFix: () -> UserFix?,
     private val onEffect: (TrackingEngine.Effect, String) -> Unit,
     private val onExpired: (TrackingSession) -> Unit = {},
-    private val requestDispatcher: CoroutineDispatcher = Dispatchers.Default
+    private val requestDispatcher: CoroutineDispatcher = Dispatchers.Default,
+    /** 判上车的判定记录（issue #49）；默认不记 */
+    private val boardingTrace: BoardingTraceLog = NoBoardingTraceLog
 ) {
     private val watchPoller = WatchTogetherPoller(realtime)
 
@@ -36,6 +40,10 @@ class TrackingPoller(
         var operating = LineOperatingState.RUNNING
         /** 等下一轮时别处（线路页、收藏卡）刚拿到的同一份线路数据，这一轮直接用，不再请求 */
         var shared: LineDetailUpdate? = null
+        /** 这一轮的判定记录（判上车那一小段才有），会话更新成功后才写 */
+        var trace: String? = null
+        /** 站点坐标只在这次追踪的第一行记录里带一次 */
+        var tracedStops = false
         fun current() = tracking.sessionById(sessionId)?.takeIf {
             it.generation == generation && !it.interrupted && it.state.isActive
         }
@@ -84,8 +92,19 @@ class TrackingPoller(
                         if (current() != null) tracking.recordBuses(sessionId, generation, detail.buses)
                         operating = detail.operatingState
                         val reduce: (TrackingSession) -> TrackingEngine.Result = { latest ->
-                            val reduced = TrackingEngine.reducePoll(latest, detail, locationEnabled(), serviceFix(), tracking.latestUserFix,
-                                clock.now().toEpochMilliseconds(), monotonicClock.elapsedMillis(), settings.autoStopAfterBoarding.value)
+                            val canLocate = locationEnabled()
+                            val fix = serviceFix()
+                            val appFix = tracking.latestUserFix
+                            val nowMillis = clock.now().toEpochMilliseconds()
+                            val nowElapsed = monotonicClock.elapsedMillis()
+                            val autoStop = settings.autoStopAfterBoarding.value
+                            val reduced = TrackingEngine.reducePoll(latest, detail, canLocate, fix, appFix, nowMillis, nowElapsed, autoStop)
+                            trace = if (BoardingTrace.shouldRecord(latest.state, reduced.session.state, reduced.effects, autoStop)) {
+                                BoardingTrace.line(latest, reduced.session.state, detail, reduced.effects, canLocate, fix, appFix,
+                                    nowMillis, nowElapsed, includeStops = !tracedStops)
+                            } else {
+                                null
+                            }
                             reduced.copy(session = reduced.session.withTargetStopCoords(detail))
                         }
                         reduce
@@ -100,6 +119,7 @@ class TrackingPoller(
             result.exceptionOrNull()?.let { if (it is CancellationException) throw it }
             if (current() == null) return
             var effects: List<TrackingEngine.Effect> = emptyList()
+            trace = null
             val applied = tracking.update(sessionId, generation) { latest ->
                 result.fold(onSuccess = { reduce ->
                     failures = 0
@@ -112,6 +132,10 @@ class TrackingPoller(
                 })
             }
             if (!applied) return
+            trace?.let {
+                boardingTrace.record(it)
+                tracedStops = true
+            }
             if (effects.any { it is TrackingEngine.Effect.Finished.Boarded } && settings.autoStopAfterBoarding.value) {
                 tracking.sessions.value
                     .filter { sameStopWaiting(session, it) }

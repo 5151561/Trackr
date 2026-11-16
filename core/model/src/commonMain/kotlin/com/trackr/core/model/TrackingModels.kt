@@ -119,6 +119,8 @@ data class WatchedLine(
     val missStreak: Int = 0,
     /** 最近一次用于判上车的定位单调时钟时间；同一定位只计一次 */
     val lastFixElapsedMillis: Long = -1L,
+    /** 第一个「像是上了车」的定位的单调时刻（同 `TrackingSessionState.boardingPositiveFixElapsedMillis`）；-1 = 还没有 */
+    val positiveFixElapsedMillis: Long = -1L,
     val approachAlertedBusId: String? = null,
     val arrivedAlertedBusId: String? = null
 )

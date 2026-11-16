@@ -18,7 +18,9 @@ import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.data.repository.TrackingPoller
 import com.trackr.core.domain.platform.Announcer
 import com.trackr.core.domain.platform.LocationSource
+import com.trackr.core.domain.platform.BoardingTraceLog
 import com.trackr.core.domain.platform.MonotonicClock
+import com.trackr.core.domain.platform.NoBoardingTraceLog
 import com.trackr.core.domain.tracking.AlertSpeech
 import com.trackr.core.domain.tracking.LocationCadence
 import com.trackr.core.domain.tracking.TrackingEngine
@@ -34,6 +36,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import org.koin.android.ext.android.getKoin
 import org.koin.android.ext.android.inject
 import kotlin.time.Clock
 
@@ -67,6 +70,9 @@ class BusTrackingService : LifecycleService() {
     private val locationSource: LocationSource by inject()
     private val clock: Clock by inject()
     private val monotonicClock: MonotonicClock by inject()
+
+    /** 判上车的判定记录（issue #49）；没绑定（测试）就不记 */
+    private val boardingTrace: BoardingTraceLog by lazy { getKoin().getOrNull<BoardingTraceLog>() ?: NoBoardingTraceLog }
 
     /**
      * 一路轮询：一份会话一个，互不影响（一项切程 / 失败退避 / 结束，不牵动别的项）。
@@ -107,7 +113,8 @@ class BusTrackingService : LifecycleService() {
         TrackingPoller(trackingRepository, repository, settings, clock, monotonicClock,
             locationEnabled = { locationTrackingAllowed && locationSource.hasPrecisePermission() },
             serviceFix = { serviceFix }, onEffect = ::runEffect,
-            onExpired = { arrivalAlerts.triggerTrackingExpired(this, it.state) }, requestDispatcher = Dispatchers.IO)
+            onExpired = { arrivalAlerts.triggerTrackingExpired(this, it.state) }, requestDispatcher = Dispatchers.IO,
+            boardingTrace = boardingTrace)
     }
 
     /**

@@ -10,30 +10,36 @@ import kotlin.math.hypot
 import kotlin.math.max
 
 /**
- * 定位上车检测（纯函数，不依赖 Android）。
+ * 定位上车检测（纯函数，不依赖 Android）。单线路、路线、一起等共用这一套规则（[evaluateCandidate]），
+ * 区别只在判出结论之后各自怎么办（单线路结束追踪，路线 / 一起等锁车进 ON_BOARD）。
+ * 坐标一律用 WGS-84：手机系统定位、车辆 wgsLat/wgsLng、站点 wgsLat/wgsLng。
  *
- * 只用于分组换乘，并且只在有“新鲜且精确”的手机定位时启用；没有定位时由 [GroupLegTracker] 保持原有行为
- * （车到上车站 A 即视为上车）。坐标一律用 WGS-84：手机系统定位、车辆 wgsLat/wgsLng、站点 wgsLat/wgsLng。
- *
- * 状态流转（都在 WAITING_BOARD 内部用 [TrackingSessionState.boardingCandidateBusId] 表示“待确认”）：
- * 1. 车到 A：用户离 A ≤ [CANDIDATE_RADIUS_METERS] → 进入待确认；离得更远 → 不算上车，继续等下一班。
- * 2. 待确认 → 上车：连续 [CONFIRM_STREAK] 次满足“人车距离 ≤ max(80m, 2×精度) 且人已离开 A ≥ 100m”，
- *    或“人离 A ≥ 400m 且车也已离开 A”。
- * 3. 待确认 → 没赶上：连续 [MISS_STREAK] 次满足“人仍在 A 120m 内，车已离 A ≥ 300m（无车辆坐标时按站序已过 2 站）”。
- * 4. 待确认超时（[CANDIDATE_TIMEOUT_MILLIS]）仍无结论：车已离开 A 就按已上车处理（与无定位时一致），否则继续等。
+ * 1. 进入待确认：车到候车站 A，人离 A ≤ [CANDIDATE_RADIUS_METERS]（[shouldStartCandidate]）。
+ * 2. 上车：定位显示「人跟着车走了」（[isRidingAwayWithBus]：车已离站、人离站 ≥100 m、人离车比离站近；
+ *    车没坐标或不在数据里时退回人离站 ≥400 m），而且要相隔至少 [CONFIRM_MIN_GAP_MILLIS] 的两个定位都这样
+ *    （[confirmPositive]）。不因为中间一个定位不符合就清零，只有精定位显示人回到站上才作废。
+ * 3. 没赶上：连续 [MISS_STREAK] 个精定位都显示人仍在 A 120 m 内，而车已过站并离 A ≥300 m
+ *    （车没有坐标时按站序已过 2 站）。车只是这一轮不在数据里、或还在往站上开，都不算。
+ * 4. 超时（[CANDIDATE_TIMEOUT_MILLIS]）仍无结论：没定位或人还在站上 → 没赶上；否则车已离开 A 就按已上车
+ *    （结果带 `byTimeout`；单线路不认超时判的上车，只放掉待确认）。
  * 5. ON_BOARD 错锁自愈：锁定车离用户 > 500m（或已从数据消失），同时另一辆车离用户 ≤ 80m，连续 [RELOCK_STREAK] 次 → 改锁。
  */
 internal object BoardingDetector {
 
     const val CANDIDATE_RADIUS_METERS = 300
-    const val CONFIRM_STREAK = 2
-    const val MISS_STREAK = 2
+    /** 判上车：第二个定位至少要比第一个晚这么久（太近的话车可能还没真开走） */
+    const val CONFIRM_MIN_GAP_MILLIS = 10_000L
+
+    /** 判上车：两个定位相隔超过这么久就不算同一回事 */
+    const val CONFIRM_MAX_GAP_MILLIS = 2 * 60_000L
+
+    /** 判没赶上：连续这么多个定位都显示人还在站上、车已过站开远（5 秒一个定位，大约 20 秒） */
+    const val MISS_STREAK = 4
     const val RELOCK_STREAK = 3
     const val CANDIDATE_TIMEOUT_MILLIS = 5 * 60_000L
 
     private const val NEAR_BUS_MIN_METERS = 80
-    private const val NEAR_BUS_MOVING_METERS = 160
-    private const val LEFT_BOARD_STOP_METERS = 100
+    const val LEFT_BOARD_STOP_METERS = 100
     private const val FAR_FROM_BOARD_STOP_METERS = 400
     private const val STILL_AT_BOARD_STOP_METERS = 120
     private const val BUS_GONE_FROM_BOARD_STOP_METERS = 300
@@ -84,7 +90,8 @@ internal object BoardingDetector {
         MISSED
     }
 
-    data class CandidateResult(val state: TrackingSessionState, val verdict: Verdict)
+    /** @param byTimeout 结论是待确认超时兜底给的，不是定位判出来的 */
+    data class CandidateResult(val state: TrackingSessionState, val verdict: Verdict, val byTimeout: Boolean = false)
 
     /**
      * 车刚到 A 时，判断是否要进入“待确认”。
@@ -232,87 +239,95 @@ internal object BoardingDetector {
     }
 
     /**
-     * 待确认阶段的一次评估。
-     * @param session 当前会话（[TrackingSessionState.boardingCandidateBusId] 非空）
+     * 「像是上了车」不能一个定位说了算（定位会飘；车刚起步、还没真开走时也可能凑巧满足）：
+     * 记下第一个这么说的定位，要等至少 [CONFIRM_MIN_GAP_MILLIS] 之后的**另一个**定位也这么说才算上了车。
+     * 两个定位相隔超过 [CONFIRM_MAX_GAP_MILLIS] 就不算同一回事，从头再来。
+     *
+     * @param firstPositiveElapsed 第一个「像是上了车」的定位的单调时刻，-1 = 还没有
+     * @param fix 这一个也「像是上了车」的定位
+     * @return 更新后的第一个定位时刻，以及是不是可以判上车了
+     */
+    fun confirmPositive(firstPositiveElapsed: Long, fix: UserPosition): Pair<Long, Boolean> {
+        val gap = fix.elapsedMillis - firstPositiveElapsed
+        return when {
+            firstPositiveElapsed < 0L || gap < 0L || gap > CONFIRM_MAX_GAP_MILLIS -> fix.elapsedMillis to false
+            gap >= CONFIRM_MIN_GAP_MILLIS -> firstPositiveElapsed to true
+            else -> firstPositiveElapsed to false
+        }
+    }
+
+    /** 精定位显示人还在（又回到）候车站上（< [LEFT_BOARD_STOP_METERS]）：之前那次「像是上了车」作废 */
+    fun isBackAtBoardStop(input: Input): Boolean {
+        val toStop = userDistanceToBoardStop(input) ?: return false
+        return toStop < LEFT_BOARD_STOP_METERS
+    }
+
+    /**
+     * 待确认阶段的一次评估——单线路、路线、一起等共用这一套，没有各自的版本。
+     *
+     * @param session 当前会话（[TrackingSessionState.boardingCandidateBusId] 非空，候车站是 `boardStopOrder`）
      * @param candidate 本轮数据中的待确认车辆；从数据里消失时为 null
-     * @param missNeedsBus true = 「没赶上」要有车的位置作证，车从数据里消失不算（单线路用）
      */
     fun evaluateCandidate(
         session: TrackingSessionState,
         candidate: LiveBus?,
-        input: Input,
-        missNeedsBus: Boolean = false
+        input: Input
     ): CandidateResult {
         val boardOrder = session.boardStopOrder
         val user = input.user
-        // 没有精定位时退而用粗定位，但只认「人离站已经很远」这一条
+        // 没有精定位时退而用粗定位：粗定位能判「跟着车走了」（多留一个精度半径），判不了「人还在站上」
         val probe = user ?: input.coarseUser
-        val precise = user != null
-        var confirm = session.boardingConfirmStreak
         var miss = session.boardingMissStreak
+        var positive = session.boardingPositiveFixElapsedMillis
+        var boarded = false
+        val userToStop = user?.takeIf { input.hasBoardStop }
+            ?.let { distance(it.lat, it.lng, input.boardStopLat, input.boardStopLng) }
+        val stillAtStop = userToStop != null && userToStop <= STILL_AT_BOARD_STOP_METERS
 
-        // 定位服务可能在同一轮回调同一个快照多次。连续计数只消费新定位，
-        // 否则一条定位会把“连续两次”误算成两次。
-        // 测试/旧调用方可能没有单调时刻（-1）；这种定位无法去重，按新快照处理。
+        // 定位服务可能在同一轮回调同一个快照多次；一个定位只算一次
         val isNewFix = probe != null &&
             (probe.elapsedMillis < 0L || probe.elapsedMillis != session.boardingLastFixElapsedMillis)
         if (isNewFix && input.hasBoardStop) {
             val fix = probe!!
-            val userToStop = distance(fix.lat, fix.lng, input.boardStopLat, input.boardStopLng)
-            val userToBus = candidate?.let { distance(fix.lat, fix.lng, it.wgsLat, it.wgsLng) }
+            // 上车：不因为中间夹着一个不符合的定位就清零，只有精定位显示人回到站上才作废
+            if (isBackAtBoardStop(input)) positive = -1L
+            if (isRidingAwayWithBus(input, candidate, boardOrder)) {
+                val (first, confirmed) = confirmPositive(positive, fix)
+                positive = first
+                boarded = confirmed
+            }
+            // 没赶上：人还在站上，而且有车的位置作证——车已经过站并开远了。
+            // 车只是这一轮不在数据里、或者还在往站上开（离站也有几百米），都不算
             val busToStop = candidate?.let { distance(it.wgsLat, it.wgsLng, input.boardStopLat, input.boardStopLng) }
-            val busLeftStop = candidate == null ||
-                candidate.order > boardOrder ||
-                (busToStop != null && busToStop >= LEFT_BOARD_STOP_METERS)
-
-            val baseNearLimit = max(NEAR_BUS_MIN_METERS, (fix.accuracyMeters * 2).toInt())
-            // 车已离站、人也已离站时，车载 GPS 上报往往比手机实时定位慢 10–15 秒，放宽人车距离上限
-            val nearBusLimit = if (busLeftStop && (busToStop == null || busToStop >= LEFT_BOARD_STOP_METERS)) {
-                max(NEAR_BUS_MOVING_METERS, baseNearLimit)
-            } else {
-                baseNearLimit
-            }
-            // 粗定位离站要再多出一个精度半径，才算真的走远了
-            val farLimit = if (precise) FAR_FROM_BOARD_STOP_METERS else FAR_FROM_BOARD_STOP_METERS + fix.accuracyMeters.toInt()
-            val boardedSignal = userToStop != null && (
-                (precise && userToBus != null && userToBus <= nearBusLimit && userToStop >= LEFT_BOARD_STOP_METERS) ||
-                    (userToStop >= farLimit && busLeftStop)
+            val busGone = candidate != null && (
+                (busToStop != null && busToStop >= BUS_GONE_FROM_BOARD_STOP_METERS && candidate.order > boardOrder) ||
+                    (busToStop == null && candidate.order >= boardOrder + 2)
                 )
-            val missedSignal = precise && userToStop != null && userToStop <= STILL_AT_BOARD_STOP_METERS && (
-                // 单线路（[missNeedsBus]）：车只是这一轮不在数据里不算证据——人可能就在那辆车上、刚离站不远（issue #49）
-                (candidate == null && !missNeedsBus) ||
-                    (busToStop != null && busToStop >= BUS_GONE_FROM_BOARD_STOP_METERS) ||
-                    (busToStop == null && candidate != null && candidate.order >= boardOrder + 2)
-                )
-
-            confirm = when {
-                boardedSignal -> confirm + 1
-                confirm > 0 && !missedSignal && userToStop != null && userToStop >= LEFT_BOARD_STOP_METERS -> confirm
-                else -> 0
-            }
             miss = when {
-                missedSignal -> miss + 1
+                stillAtStop && busGone -> miss + 1
                 // 粗定位判不了「人还在站上」，不打断没赶上的连续计数
-                precise -> 0
+                user != null -> 0
                 else -> miss
             }
         }
 
         val updated = session.copy(
-            boardingConfirmStreak = confirm,
+            // 旧字段：现在只表示「已经有一个定位像是上了车」
+            boardingConfirmStreak = if (positive >= 0L) 1 else 0,
             boardingMissStreak = miss,
+            boardingPositiveFixElapsedMillis = positive,
             boardingLastFixElapsedMillis = if (isNewFix) probe!!.elapsedMillis else session.boardingLastFixElapsedMillis
         )
-        val verdict = when {
-            confirm >= CONFIRM_STREAK -> Verdict.BOARDED
-            miss >= MISS_STREAK -> Verdict.MISSED
-            input.nowMillis - session.boardingCandidateSinceMillis >= CANDIDATE_TIMEOUT_MILLIS &&
-                user != null && (candidate == null || candidate.order > boardOrder) -> Verdict.BOARDED
-            input.nowMillis - session.boardingCandidateSinceMillis >= CANDIDATE_TIMEOUT_MILLIS &&
-                user == null -> Verdict.MISSED
-            else -> Verdict.PENDING
+        val timedOut = input.nowMillis - session.boardingCandidateSinceMillis >= CANDIDATE_TIMEOUT_MILLIS
+        return when {
+            boarded -> CandidateResult(updated, Verdict.BOARDED)
+            miss >= MISS_STREAK -> CandidateResult(updated, Verdict.MISSED)
+            !timedOut -> CandidateResult(updated, Verdict.PENDING)
+            // 超时兜底：没定位、或人明明还在站上 → 没赶上；否则车已离开 A 就按已上车处理（与无定位时一致）
+            user == null || stillAtStop -> CandidateResult(updated, Verdict.MISSED, byTimeout = true)
+            candidate == null || candidate.order > boardOrder -> CandidateResult(updated, Verdict.BOARDED, byTimeout = true)
+            else -> CandidateResult(updated, Verdict.PENDING)
         }
-        return CandidateResult(updated, verdict)
     }
 
     /**
@@ -362,6 +377,7 @@ internal object BoardingDetector {
         boardingConfirmStreak = 0,
         boardingMissStreak = 0,
         boardingLastFixElapsedMillis = -1L,
+        boardingPositiveFixElapsedMillis = -1L,
         boardingLockAttempts = 0,
         relockCandidateBusId = null,
         relockStreak = 0,

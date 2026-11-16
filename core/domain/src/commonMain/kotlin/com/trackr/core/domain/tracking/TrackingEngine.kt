@@ -555,9 +555,14 @@ object TrackingEngine {
         nowElapsedMillis: Long
     ): BoardingDetector.Input? {
         if (!stopAfterBoarding || !locationEnabled || state.pinnedBusId != null) return null
-        val waitStop = detail.stops.firstOrNull { it.order == state.targetOrder } ?: return null
-        if (waitStop.wgsLat <= 0.0 || waitStop.wgsLng <= 0.0) return null
-        return boardingInputAt(waitStop.wgsLat, waitStop.wgsLng, serviceFix, coarseFix, nowMillis, nowElapsedMillis)
+        val waitStop = detail.stops.firstOrNull { it.order == state.targetOrder }
+            ?.takeIf { it.wgsLat > 0.0 && it.wgsLng > 0.0 }
+        // 这一轮的线路数据里没有候车站坐标：用会话里记着的。返回 null 会把已有的判定整个清掉，
+        // 不能因为一轮数据不全就当成没上车
+        val lat = waitStop?.wgsLat ?: state.targetStopLat
+        val lng = waitStop?.wgsLng ?: state.targetStopLng
+        if (lat <= 0.0 || lng <= 0.0) return null
+        return boardingInputAt(lat, lng, serviceFix, coarseFix, nowMillis, nowElapsedMillis)
     }
 
     // ---------------------------------------------------------------- 用户操作

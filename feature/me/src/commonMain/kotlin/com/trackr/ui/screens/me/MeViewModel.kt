@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.trackr.core.data.repository.AmapKeyRepository
 import com.trackr.core.data.repository.SettingsRepository
+import com.trackr.core.domain.platform.BoardingTraceLog
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitCodeProvider
@@ -33,6 +34,7 @@ import kotlinx.coroutines.launch
  * @param versionName 「关于」那一行显示的版本号；读不到为 null
  * @param showTransitCodeButton 「乘车码」按钮显不显示：首页悬浮按钮和线路页、站点页底栏的圆钮都听它（`SettingsRepository.showTransitCodeButton`）
  * @param autoStopAfterBoarding 上车后自动结束追踪（issue #32）：单线路和一起等判出已上车就结束，路线不受影响
+ * @param canExportBoardingTrace 有没有「导出上车判定记录」那一行（issue #49）：平台没有判定记录（iOS）时不显示
  * @param voiceAlerts 语音播报提醒（issue #52）：追踪提醒同时朗读出来
  * @param elderMode 长辈版开关（`SettingsRepository.uiMode` 是不是 Elder）
  */
@@ -41,6 +43,7 @@ data class MeUiState(
     val preferredTransitCode: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
     val showTransitCodeButton: Boolean = true,
     val autoStopAfterBoarding: Boolean = true,
+    val canExportBoardingTrace: Boolean = false,
     val voiceAlerts: Boolean = false,
     val alertThresholdStops: Int = 2,
     val reminders: List<ScheduledReminder> = emptyList(),
@@ -64,6 +67,8 @@ sealed interface MeEvent {
     data class SetTransitCode(val provider: TransitCodeProvider) : MeEvent
     data class SetShowTransitCodeButton(val visible: Boolean) : MeEvent
     data class SetAutoStopAfterBoarding(val enabled: Boolean) : MeEvent
+    /** 把判上车的判定记录交给系统分享面板（issue #49） */
+    data object ExportBoardingTrace : MeEvent
     data class SetVoiceAlerts(val enabled: Boolean) : MeEvent
     data class SetAlertThresholdStops(val stops: Int) : MeEvent
     data class ToggleReminder(val id: String, val enabled: Boolean) : MeEvent
@@ -84,6 +89,9 @@ sealed interface MeEvent {
     data object OpenThemeSettings : MeEvent
 }
 
+/** 点了「导出上车判定记录」但还没有记录（或分享面板打不开）时的提示 */
+const val NO_BOARDING_TRACE_MESSAGE = "还没有判定记录：开着「上车后自动结束追踪」追一次车之后再导出"
+
 /** 到站前提醒能选的站数（和通知上「切换」按钮的 1 → 2 → 3 一致） */
 val ALERT_THRESHOLD_CHOICES: List<Int> = listOf(1, 2, 3)
 
@@ -94,7 +102,8 @@ class MeViewModel(
     private val notices: MeNotices,
     private val liveUpdateAccess: LiveUpdateAccess? = null,
     private val versionName: String? = null,
-    private val notificationHealthAccess: NotificationHealthAccess? = null
+    private val notificationHealthAccess: NotificationHealthAccess? = null,
+    private val boardingTrace: BoardingTraceLog? = null
 ) : ViewModel() {
 
     private val liveUpdateStatus = MutableStateFlow(liveUpdateAccess?.status())
@@ -170,6 +179,9 @@ class MeViewModel(
             is MeEvent.SetAlertThresholdStops -> settings.setAlertThresholdStops(event.stops)
             is MeEvent.SetShowTransitCodeButton -> settings.setShowTransitCodeButton(event.visible)
             is MeEvent.SetAutoStopAfterBoarding -> settings.setAutoStopAfterBoarding(event.enabled)
+            MeEvent.ExportBoardingTrace -> viewModelScope.launch {
+                if (boardingTrace?.share() != true) notices.post(NO_BOARDING_TRACE_MESSAGE)
+            }
             is MeEvent.SetVoiceAlerts -> settings.setVoiceAlerts(event.enabled)
             is MeEvent.ToggleReminder -> viewModelScope.launch {
                 try {
@@ -211,6 +223,7 @@ class MeViewModel(
         preferredTransitCode = part.transitCode,
         showTransitCodeButton = part.showTransitCodeButton,
         autoStopAfterBoarding = part.autoStopAfterBoarding,
+        canExportBoardingTrace = boardingTrace != null,
         voiceAlerts = part.voiceAlerts,
         alertThresholdStops = part.alertThresholdStops,
         reminders = reminders,
