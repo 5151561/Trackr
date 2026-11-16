@@ -186,6 +186,8 @@ fun BusHomeScreen(
 
                 favoritesSection(state = state, onEvent = onEvent)
 
+                cityLinesSection(state = state, onEvent = onEvent)
+
                 nearbySection(state = state, onEvent = onEvent)
             }
         }
@@ -202,7 +204,8 @@ fun BusHomeScreen(
             onSelectProvince = { onEvent(BusHomeEvent.ProvinceSelected(it)) },
             onSelectCity = { onEvent(BusHomeEvent.CitySelected(it)) },
             onRelocate = { onEvent(BusHomeEvent.RelocateCity) },
-            onDismiss = { onEvent(BusHomeEvent.CloseCityPicker) }
+            onDismiss = { onEvent(BusHomeEvent.CloseCityPicker) },
+            unreachableCityNames = state.unreachableCityNames
         )
     }
 

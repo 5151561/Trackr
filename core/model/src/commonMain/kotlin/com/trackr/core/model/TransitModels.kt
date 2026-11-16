@@ -8,20 +8,22 @@ import kotlinx.serialization.Serializable
 @Serializable
 enum class DataSourceType(val displayName: String) {
     CHELAILE("车来了"),
-    MYGOLBS("掌上公交")
+    MYGOLBS("掌上公交"),
+    LENZ("掌上出行")
 }
 
 /**
- * 引擎运行模式：车来了 / 掌上公交（独立单源模式）
+ * 引擎运行模式：车来了 / 掌上公交 / 掌上出行（朗斯）
  */
 @Serializable
 enum class EngineMode(val displayName: String, val shortLabel: String) {
     CHELAILE("车来了", "车来了"),
-    MYGOLBS("掌上公交", "掌上公交")
+    MYGOLBS("掌上公交", "掌上公交"),
+    LENZ("掌上出行", "掌上出行")
 }
 
 /**
- * 城市实体（聚合车来了 cityId 与掌上公交 cityCode）
+ * 城市实体（聚合车来了 cityId、掌上公交 cityCode 与朗斯掌上出行 Server 信息）
  */
 @Serializable
 data class TransitCity(
@@ -31,7 +33,12 @@ data class TransitCity(
     val supportSubway: Boolean = false,
     val isHot: Boolean = false,
     val mygolbsCityCode: String? = null,
-    val province: String = ""
+    val province: String = "",
+    val lenzServerIp: String? = null,
+    val lenzServerPort: Int? = null,
+    val lenzAreaCode: String? = null,
+    /** 朗斯县级公交的上级地级市（如「范县」→「濮阳」），用于同城县级服务器联查 */
+    val lenzRegion: String? = null
 ) {
     /**
      * 城市全局唯一标识（用于 Compose 列表 key，防止仅支持单数据源时 cityId 为空导致 key 重复崩溃）
@@ -40,6 +47,7 @@ data class TransitCity(
         get() = when {
             cityId.isNotBlank() -> "cl_${cityId}_$cityName"
             !mygolbsCityCode.isNullOrBlank() -> "mg_${mygolbsCityCode}_$cityName"
+            !lenzServerIp.isNullOrBlank() -> "lz_${cityName}_$lenzServerIp"
             else -> "name_$cityName"
         }
 
@@ -73,6 +81,14 @@ data class TransitCity(
         return true
     }
 }
+
+/**
+ * 只由朗斯「掌上出行」支撑的县级城市（车来了与掌上公交都没有这个城市）
+ */
+val TransitCity.isLenzOnlyCity: Boolean
+    get() = cityId.isBlank() &&
+        mygolbsCityCode.isNullOrBlank() &&
+        !lenzServerIp.isNullOrBlank()
 
 /**
  * 线路运营状态
