@@ -173,9 +173,12 @@ fun BusFollowContent(
                         Text(stringResource(LineRes.string.line_follow_to_terminus), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Text(stringResource(LineRes.string.line_follow_stops, stopsLeftToTerminus), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
                     }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(stringResource(LineRes.string.line_follow_speed), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("${followedBus.speedKmh.toInt()} km/h", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                    // 掌上公交不给时速（一直是 0），车来了停站时也是 0：和线路列表、到站页一样，没有时速就不画这一栏（#58）
+                    if (followedBus.speedKmh > 0) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(stringResource(LineRes.string.line_follow_speed), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text("${followedBus.speedKmh.toInt()} km/h", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+                        }
                     }
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
