@@ -529,6 +529,85 @@ class TransitProviderCoordinatorTest {
     fun testEngineMode_mapsToDataSource() {
         assertEquals(DataSourceType.CHELAILE, EngineMode.CHELAILE.dataSource)
         assertEquals(DataSourceType.MYGOLBS, EngineMode.MYGOLBS.dataSource)
+        assertEquals(DataSourceType.LENZ, EngineMode.LENZ.dataSource)
+    }
+
+    // ---- 掌上出行（lz:）路由 ----
+
+    private val lzLineId = "lz:1.2.3.4:8615:7:0:1路"
+
+    /** 三个源按真实的 id 归属规则：车来了接走除 mg: / lz: 以外的全部 */
+    private fun lenzTrio(): Triple<FakeTestTransitProvider, FakeTestTransitProvider, FakeTestTransitProvider> {
+        val chelaile = FakeTestTransitProvider(
+            DataSourceType.CHELAILE,
+            lineSupportPredicate = { !it.startsWith("mg:") && !it.startsWith("lz:") },
+            stopSupportPredicate = { r -> r.stopId?.let { !it.startsWith("mg:") && !it.startsWith("lz:") } ?: true }
+        )
+        val mygolbs = FakeTestTransitProvider(
+            DataSourceType.MYGOLBS,
+            lineSupportPredicate = { it.startsWith("mg:") },
+            stopSupportPredicate = { r -> r.stopId?.startsWith("mg:") == true }
+        )
+        val lenz = FakeTestTransitProvider(
+            DataSourceType.LENZ,
+            lineSupportPredicate = { it.startsWith("lz:") },
+            stopSupportPredicate = { r -> r.stopId?.startsWith("lz:") == true }
+        )
+        return Triple(chelaile, mygolbs, lenz)
+    }
+
+    @Test
+    fun testTimetable_lenzLine_routesToLenz() = runBlocking {
+        val (chelaile, mygolbs, lenz) = lenzTrio()
+        val coord = TransitProviderCoordinator(chelaile, mygolbs, lenz)
+
+        val bySource = BusLineDirection(lineId = lzLineId, name = "1路", startStop = "A", endStop = "B", source = DataSourceType.LENZ)
+        coord.getTimetable(testCity, bySource, mode = EngineMode.CHELAILE)
+        // source 缺省为 CHELAILE 时也要按 lz: 前缀认出来
+        coord.getTimetable(testCity, bySource.copy(source = DataSourceType.CHELAILE), mode = EngineMode.CHELAILE)
+
+        assertEquals(2, lenz.timetableCallCount)
+        assertEquals(0, chelaile.timetableCallCount)
+        assertEquals(0, mygolbs.timetableCallCount)
+    }
+
+    @Test
+    fun testStopDetail_lenzStop_routesToLenz() = runBlocking {
+        val (chelaile, mygolbs, lenz) = lenzTrio()
+        val coord = TransitProviderCoordinator(chelaile, mygolbs, lenz)
+
+        coord.getStopDetail(testCity, StopDetailRequest(stopId = "lz:1.2.3.4:8615:3:县城"), EngineMode.CHELAILE)
+
+        assertEquals(1, lenz.stopDetailCallCount)
+        assertEquals(0, chelaile.stopDetailCallCount)
+        assertEquals(0, mygolbs.stopDetailCallCount)
+    }
+
+    @Test
+    fun testLineDetail_lenzLine_routesToLenz() = runBlocking {
+        val (chelaile, mygolbs, lenz) = lenzTrio()
+        val coord = TransitProviderCoordinator(chelaile, mygolbs, lenz)
+
+        coord.getLineDetail(testCity, LineDetailRequest(lineId = lzLineId), EngineMode.CHELAILE)
+
+        assertEquals(1, lenz.lineDetailCallCount)
+        assertEquals(0, chelaile.lineDetailCallCount)
+    }
+
+    @Test
+    fun testListAllLines_onlyInLenzMode() = runBlocking {
+        val (chelaile, mygolbs, lenz) = lenzTrio()
+        lenz.listAllLinesResult = listOf(createSummary("1路", source = DataSourceType.LENZ))
+        val coord = TransitProviderCoordinator(chelaile, mygolbs, lenz)
+        val fuzhou = testCity.copy(cityName = "福州", lenzServerIp = "1.2.3.4", lenzServerPort = 8615)
+
+        // 车来了 / 掌上公交模式的首页不混入朗斯线路，也不发朗斯请求
+        assertTrue(coord.listAllLines(fuzhou, EngineMode.CHELAILE).isEmpty())
+        assertTrue(coord.listAllLines(fuzhou, EngineMode.MYGOLBS).isEmpty())
+        assertEquals(0, lenz.listAllLinesCallCount)
+
+        assertEquals(1, coord.listAllLines(fuzhou, EngineMode.LENZ).size)
+        assertEquals(1, lenz.listAllLinesCallCount)
     }
 }
 
@@ -562,6 +641,13 @@ class FakeTestTransitProvider(
         buses = emptyList()
     )
     var timetableResult: LineTimetable = LineTimetable(lineId = "dummy", lineName = "dummy")
+    var listAllLinesResult: List<BusLineSummary>? = null
+    var listAllLinesCallCount = 0
+
+    override suspend fun listAllLines(city: TransitCity): List<BusLineSummary>? {
+        listAllLinesCallCount++
+        return listAllLinesResult
+    }
 
     override fun supportsLine(lineId: String): Boolean = lineSupportPredicate(lineId)
 

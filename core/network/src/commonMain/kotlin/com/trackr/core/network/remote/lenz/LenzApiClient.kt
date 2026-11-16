@@ -16,6 +16,8 @@ import com.trackr.core.network.remote.common.BaseTransitApiClient
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.statement.bodyAsText
+import kotlinx.atomicfu.locks.SynchronizedObject
+import kotlinx.atomicfu.locks.synchronized
 import kotlin.time.Clock
 
 /**
@@ -222,8 +224,10 @@ class LenzApiClient(
         /** 组帧：载荷一律按 GBK 编码（服务器只认 GBK，UTF-8 的中文关键词会被丢弃） */
         fun packFrame(cmd: Int, payload: String): ByteArray {
             val payloadBytes = lenzEncodeGbk(payload)
+            // s3 的低 10 位是载荷长度（见 [LenzFrames]），单帧最多 1023 字节
             val len = payloadBytes.size
-            val header = byteArrayOf(0x02, 0x00, len.toByte(), cmd.toByte(), 0x00, 0x01)
+            require(len <= 0x3FF) { "Lenz 请求载荷过长：$len 字节" }
+            val header = byteArrayOf(0x02, ((len shr 8) and 0x03).toByte(), (len and 0xFF).toByte(), cmd.toByte(), 0x00, 0x01)
             val tail = byteArrayOf(0x00, 0xFE.toByte(), 0x03)
             return header + payloadBytes + tail
         }
@@ -348,34 +352,50 @@ class LenzApiClient(
         }
     }
 
-    /** 城市表缓存；测试可预置，避免连真实服务器 */
+    /** 城市表缓存（只缓存线上拉到的清单）；测试可预置，避免连真实服务器 */
     internal var cachedCities: List<TransitCity>? = null
+
+    /**
+     * 下面两张表会被追踪轮询、首页、可达性并发探测同时读写，一律在 [lock] 里访问。
+     * 锁里只做读写 map，不挂起、不发网络请求。
+     */
+    private val lock = SynchronizedObject()
 
     /** 线路运营信息（首末班 / 下一班发车），按线路 id 存；随查询顺带更新 */
     private val lineMeta = LinkedHashMap<String, LineMeta>()
 
     /** 取线路的首末班与下一班发车时间；没有就返回空串 */
-    internal fun lineMetaOf(lineId: String): LineMeta = lineMeta[lineId] ?: LineMeta()
+    internal fun lineMetaOf(lineId: String): LineMeta = synchronized(lock) { lineMeta[lineId] } ?: LineMeta()
 
     private fun rememberLineMeta(lineId: String, firstTime: String, lastTime: String) {
-        val old = lineMeta[lineId]
         if (firstTime.isBlank() && lastTime.isBlank()) return
-        lineMeta[lineId] = LineMeta(
-            firstTime = firstTime.ifBlank { old?.firstTime.orEmpty() },
-            lastTime = lastTime.ifBlank { old?.lastTime.orEmpty() },
-            nextDeparture = old?.nextDeparture.orEmpty()
-        )
-        if (lineMeta.size > 200) {
-            lineMeta.remove(lineMeta.keys.first())
+        synchronized(lock) {
+            val old = lineMeta[lineId]
+            lineMeta[lineId] = LineMeta(
+                firstTime = firstTime.ifBlank { old?.firstTime.orEmpty() },
+                lastTime = lastTime.ifBlank { old?.lastTime.orEmpty() },
+                nextDeparture = old?.nextDeparture.orEmpty()
+            )
+            trimLineMeta()
         }
     }
 
     private fun rememberNextDeparture(lineId: String, nextDeparture: String) {
-        val old = lineMeta[lineId] ?: LineMeta()
-        lineMeta[lineId] = old.copy(nextDeparture = nextDeparture)
+        synchronized(lock) {
+            val old = lineMeta[lineId] ?: LineMeta()
+            lineMeta[lineId] = old.copy(nextDeparture = nextDeparture)
+            trimLineMeta()
+        }
     }
 
-    /** 可达性探测结果缓存：cityName -> (是否在线, 探测时刻毫秒) */
+    /** 调用方已持有 [lock] */
+    private fun trimLineMeta() {
+        while (lineMeta.size > 200) {
+            lineMeta.remove(lineMeta.keys.first())
+        }
+    }
+
+    /** 可达性探测结果缓存：cityName -> (是否在线, 探测时刻毫秒)；在 [lock] 里访问 */
     private val reachability = LinkedHashMap<String, Pair<Boolean, Long>>()
 
     /**
@@ -389,11 +409,11 @@ class LenzApiClient(
         val port = city.lenzServerPort ?: return true
         val key = "${city.cityName}@$ip:$port"
         val now = Clock.System.now().toEpochMilliseconds()
-        reachability[key]?.let { (online, at) ->
+        synchronized(lock) { reachability[key] }?.let { (online, at) ->
             if (now - at < ttlMs) return online
         }
         val online = lenzSocketProbe(ip, port, 2500)
-        reachability[key] = online to now
+        synchronized(lock) { reachability[key] = online to now }
         return online
     }
 
@@ -421,15 +441,15 @@ class LenzApiClient(
     /**
      * 获取朗斯支持的所有城市。
      *
-     * 清单是明文 HTTP，先走原始 socket（不受系统明文策略拦截），再退回 OkHttp，
-     * 两条路都失败时用内置目录 [BUNDLED_LENZ_CITIES]，保证县级城市永远可选。
+     * 清单是明文 HTTP（Android 的网络安全配置对这台主机单独放行了明文），
+     * 拉不到时用内置目录 [BUNDLED_LENZ_CITIES]，保证县级城市永远可选；
+     * 内置目录不缓存，下次再试线上清单。
      * 线上清单拿到的条目若缺省份，用内置目录按名字补齐（清单里没有县一级归属字段）。
      */
     suspend fun getCities(): List<TransitCity> {
         cachedCities?.let { return it }
 
-        val xml = runCatching { lenzHttpGetText(CITY_INDEX_URL) }.getOrNull()
-            ?: runCatching { httpClient.get(CITY_INDEX_URL).bodyAsText() }.getOrNull()
+        val xml = runCatching { httpClient.get(CITY_INDEX_URL).bodyAsText() }.getOrNull()
 
         val remote = xml?.let { runCatching { parseCitiesXml(it) }.getOrNull() }.orEmpty()
         val list = if (remote.isNotEmpty()) {
@@ -443,15 +463,15 @@ class LenzApiClient(
                 }
             }
         } else {
-            BUNDLED_LENZ_CITIES
+            null
         }
 
         // 官方清单没有拼音，补上，城市选择器才能按拼音找
-        val withPinyin = list.map { city ->
+        val withPinyin = (list ?: BUNDLED_LENZ_CITIES).map { city ->
             if (city.pinyin.isBlank()) city.copy(pinyin = PINYIN[city.cityName].orEmpty()) else city
         }
 
-        cachedCities = withPinyin
+        if (list != null) cachedCities = withPinyin
         return withPinyin
     }
 

@@ -12,6 +12,4 @@ internal actual fun lenzDecodeGbk(bytes: ByteArray): String = bytes.decodeToStri
 
 internal actual fun lenzEncodeGbk(text: String): ByteArray = text.encodeToByteArray()
 
-internal actual suspend fun lenzHttpGetText(url: String, timeoutMs: Int): String? = null
-
 internal actual suspend fun lenzSocketProbe(host: String, port: Int, timeoutMs: Int): Boolean = false

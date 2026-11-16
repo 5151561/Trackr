@@ -16,6 +16,7 @@ import com.trackr.core.network.provider.model.LineDetailRequest
 import com.trackr.core.network.provider.model.StopDetailRequest
 import com.trackr.core.network.remote.chelaile.ChelaileApiClient
 import com.trackr.core.network.remote.common.SingleFlightCache
+import com.trackr.core.network.remote.lenz.LenzIds
 import com.trackr.core.network.remote.mygolbs.MygolbsIds
 import kotlinx.atomicfu.locks.SynchronizedObject
 import kotlinx.atomicfu.locks.synchronized
@@ -57,8 +58,8 @@ class ChelaileTransitProvider(
     /** 主查询返回空结果的站点 key -> 记录时刻；有效期内直接走经纬度兜底，不再重复主查询 */
     private val emptyMainQueryAt = LockedLongMap()
 
-    /** 车来了接住所有不是掌上公交协议的 id（旧行为） */
-    override fun ownsId(id: String): Boolean = !MygolbsIds.isMygolbsId(id)
+    /** 车来了接住所有不是掌上公交 / 掌上出行协议的 id（旧行为） */
+    override fun ownsId(id: String): Boolean = !MygolbsIds.isMygolbsId(id) && !LenzIds.isLenzId(id)
 
     /** 一个 id 都没给时按旧行为算车来了 */
     override val missingIdMeansOwned: Boolean = true

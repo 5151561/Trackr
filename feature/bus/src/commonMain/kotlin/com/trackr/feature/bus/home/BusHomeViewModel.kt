@@ -652,8 +652,10 @@ class BusHomeViewModel(
     }
 
     fun toggleEngineMode() {
+        // 没有任何掌上出行城市（iOS 没接这个数据源、或城市表还没拉到）时跳过它，免得切进一个查不到东西的模式
+        val lenzAvailable = _uiState.value.cities.any { !it.lenzServerIp.isNullOrBlank() }
         val nextMode = when (_uiState.value.engineMode) {
-            EngineMode.MYGOLBS -> EngineMode.LENZ
+            EngineMode.MYGOLBS -> if (lenzAvailable) EngineMode.LENZ else EngineMode.CHELAILE
             EngineMode.LENZ -> EngineMode.CHELAILE
             EngineMode.CHELAILE -> EngineMode.MYGOLBS
         }

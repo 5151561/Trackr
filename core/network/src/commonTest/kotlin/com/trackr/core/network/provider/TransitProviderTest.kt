@@ -46,6 +46,9 @@ class TransitProviderTest {
 
         assertTrue(provider.supportsLine("cl_line_1"))
         assertFalse(provider.supportsLine("mg:line_1"))
+        // 掌上出行的 id 不能被车来了接走（否则时刻表 / 站点会拿 lz: id 去请求车来了）
+        assertFalse(provider.supportsLine("lz:1.2.3.4:8615:7:0:1路"))
+        assertFalse(provider.supportsStop(StopDetailRequest(stopId = "lz:1.2.3.4:8615:3:县城")))
 
         assertTrue(provider.supportsStop(StopDetailRequest(stopId = "cl_s1")))
         assertFalse(provider.supportsStop(StopDetailRequest(stopId = "mg:s1")))

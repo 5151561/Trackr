@@ -235,6 +235,8 @@ class BusHomeViewModelTest {
 
     @Test
     fun testEngineModeSwitching() = runTest(main.dispatcher) {
+        val fanxian = TransitCity(cityId = "", cityName = "范县", lenzServerIp = "ip-fan", lenzServerPort = 8619, province = "河南")
+        fakeRepository.supportedCitiesResult = Result.success(listOf(shanghai, fanxian))
         val viewModel = createViewModel()
         testScheduler.runCurrent()
 
@@ -256,6 +258,21 @@ class BusHomeViewModelTest {
         viewModel.setEngineMode(EngineMode.MYGOLBS)
         testScheduler.runCurrent()
         assertEquals(EngineMode.MYGOLBS, viewModel.uiState.value.engineMode)
+    }
+
+    /** 没有掌上出行城市（iOS 没接这个数据源）时，切换跳过掌上出行 */
+    @Test
+    fun testEngineModeSwitching_skipsLenz_whenNoLenzCities() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.toggleEngineMode()
+        testScheduler.runCurrent()
+        assertEquals(EngineMode.MYGOLBS, viewModel.uiState.value.engineMode)
+
+        viewModel.toggleEngineMode()
+        testScheduler.runCurrent()
+        assertEquals(EngineMode.CHELAILE, viewModel.uiState.value.engineMode)
     }
 
     @Test

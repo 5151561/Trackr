@@ -63,63 +63,6 @@ internal actual fun lenzDecodeGbk(bytes: ByteArray): String =
 internal actual fun lenzEncodeGbk(text: String): ByteArray =
     text.toByteArray(Charset.forName("GBK"))
 
-/** 原始 socket 发明文 HTTP/1.0 GET，绕开 Android 的明文 HTTP 拦截 */
-internal actual suspend fun lenzHttpGetText(url: String, timeoutMs: Int): String? =
-    withContext(Dispatchers.IO) {
-        var socket: Socket? = null
-        try {
-            val uri = java.net.URI(url)
-            val host = uri.host ?: return@withContext null
-            val path = (uri.rawPath ?: "/") + (uri.rawQuery?.let { "?$it" } ?: "")
-            val port = if (uri.port > 0) uri.port else 80
-
-            socket = Socket()
-            socket.connect(InetSocketAddress(host, port), timeoutMs)
-            socket.soTimeout = timeoutMs
-
-            val request = buildString {
-                append("GET ").append(path).append(" HTTP/1.0\r\n")
-                append("Host: ").append(host).append("\r\n")
-                append("User-Agent: Trackr/1.0\r\n")
-                append("Accept: */*\r\n")
-                append("Connection: close\r\n\r\n")
-            }
-            socket.getOutputStream().apply {
-                write(request.toByteArray(Charsets.US_ASCII))
-                flush()
-            }
-
-            val baos = ByteArrayOutputStream()
-            val buffer = ByteArray(8192)
-            val input = socket.getInputStream()
-            while (baos.size() < MAX_RESPONSE_BYTES) {
-                val read = try {
-                    input.read(buffer)
-                } catch (_: SocketTimeoutException) {
-                    break
-                }
-                if (read <= 0) break
-                baos.write(buffer, 0, read)
-            }
-            val raw = baos.toByteArray()
-            if (raw.isEmpty()) return@withContext null
-
-            // 去掉响应头：找第一个空行
-            val headerEnd = indexOfHeaderEnd(raw)
-            if (headerEnd < 0) return@withContext null
-            val statusLine = String(raw, 0, minOf(32, raw.size), Charsets.US_ASCII)
-            if (!statusLine.contains(" 200")) return@withContext null
-            String(raw, headerEnd, raw.size - headerEnd, Charset.forName("UTF-8"))
-        } catch (_: Exception) {
-            null
-        } finally {
-            try {
-                socket?.close()
-            } catch (_: Exception) {
-            }
-        }
-    }
-
 internal actual suspend fun lenzSocketProbe(host: String, port: Int, timeoutMs: Int): Boolean =
     withContext(Dispatchers.IO) {
         var socket: Socket? = null
@@ -136,14 +79,3 @@ internal actual suspend fun lenzSocketProbe(host: String, port: Int, timeoutMs: 
             }
         }
     }
-
-private fun indexOfHeaderEnd(bytes: ByteArray): Int {
-    for (i in 0..bytes.size - 4) {
-        if (bytes[i] == 13.toByte() && bytes[i + 1] == 10.toByte() &&
-            bytes[i + 2] == 13.toByte() && bytes[i + 3] == 10.toByte()
-        ) {
-            return i + 4
-        }
-    }
-    return -1
-}

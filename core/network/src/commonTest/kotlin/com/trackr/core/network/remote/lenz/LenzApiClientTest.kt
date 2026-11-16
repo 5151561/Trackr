@@ -193,4 +193,14 @@ class LenzApiClientTest {
         assertEquals(5, buses[0].order)
         assertEquals(true, buses[0].isArrived)
     }
+
+    /** 载荷超过 255 字节时长度要写进 s3 的高位，不能只留低 8 位 */
+    @Test
+    fun packFrame_writesTenBitLength() {
+        val payload = "a".repeat(300)
+        val frame = LenzApiClient.packFrame(83, payload)
+        val s3 = ((frame[1].toInt() and 0xFF) shl 8) or (frame[2].toInt() and 0xFF)
+        assertEquals(300, s3 and 0x3FF)
+        assertEquals(6 + 300 + 3, frame.size)
+    }
 }

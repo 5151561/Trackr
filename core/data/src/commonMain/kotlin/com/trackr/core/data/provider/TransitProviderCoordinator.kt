@@ -15,6 +15,7 @@ import com.trackr.core.model.isPureSubwayStation
 import com.trackr.core.network.provider.ITransitProvider
 import com.trackr.core.network.provider.model.LineDetailRequest
 import com.trackr.core.network.provider.model.StopDetailRequest
+import com.trackr.core.network.remote.lenz.LenzIds
 import com.trackr.core.network.remote.mygolbs.MygolbsIds
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -194,13 +195,11 @@ class TransitProviderCoordinator(
         city: TransitCity,
         mode: EngineMode = EngineMode.CHELAILE
     ): List<BusLineSummary> {
-        val provider = providers[mode.dataSource]
-        val primary = provider?.let { runCatching { it.listAllLines(city) }.getOrNull() }.orEmpty()
-        if (primary.isNotEmpty() || mode == EngineMode.LENZ) return primary
-
-        // 当前源列不出全部（车来了 / 掌上公交都不支持），县级城市再问问掌上出行
-        val lenz = providers[DataSourceType.LENZ] ?: return primary
-        return runCatching { lenz.listAllLines(city) }.getOrNull().orEmpty()
+        // 只在掌上出行模式下列：车来了 / 掌上公交模式的首页不混入别的数据源的线路
+        // （福州、自贡这类两边都有的城市，否则车来了首页会铺出整城朗斯线路）
+        if (mode != EngineMode.LENZ) return emptyList()
+        val provider = providers[DataSourceType.LENZ] ?: return emptyList()
+        return runCatching { provider.listAllLines(city) }.getOrNull().orEmpty()
     }
 
     /**
@@ -337,6 +336,13 @@ class TransitProviderCoordinator(
     ): List<NearbyStop> {
         val chelaileProvider = providers[DataSourceType.CHELAILE]
         val mygolbsProvider = providers[DataSourceType.MYGOLBS]
+        val lenzProvider = providers[DataSourceType.LENZ]
+
+        // 掌上出行的站点 id（lz:）只交给掌上出行；它没有站点接口，返回空表，
+        // 不能落到车来了 / 掌上公交拿一个它们不认识的 id 去请求
+        if (lenzProvider?.supportsStop(request) == true) {
+            return lenzProvider.getStopDetail(city, request)
+        }
 
         // 若请求明确包含掌上公交前缀特征，或当前引擎模式为掌上公交，路由至掌上公交
         val isExplicitMygolbs = when {
@@ -389,6 +395,7 @@ class TransitProviderCoordinator(
         val defaultFallback = fallbackProvider(mode)
 
         val targetProvider = when {
+            line.source == DataSourceType.LENZ || LenzIds.isLenzId(line.lineId) -> providers[DataSourceType.LENZ]
             line.source == DataSourceType.MYGOLBS || MygolbsIds.isMygolbsId(line.lineId) -> providers[DataSourceType.MYGOLBS]
             line.source == DataSourceType.CHELAILE -> providers[DataSourceType.CHELAILE]
             providers[DataSourceType.MYGOLBS]?.supportsLine(line.lineId) == true -> providers[DataSourceType.MYGOLBS]
