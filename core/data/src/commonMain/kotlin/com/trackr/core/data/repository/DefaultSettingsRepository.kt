@@ -38,6 +38,8 @@ class DefaultSettingsRepository private constructor(
 
     private val _voiceAlerts = MutableStateFlow(initial.voiceAlerts ?: false)
     override val voiceAlerts: StateFlow<Boolean> = _voiceAlerts.asStateFlow()
+    private val _sortLinesByArrival = MutableStateFlow(initial.sortLinesByArrival ?: false)
+    override val sortLinesByArrival: StateFlow<Boolean> = _sortLinesByArrival.asStateFlow()
 
     private val _nearbyStopsCount = MutableStateFlow((initial.nearbyStopsCount ?: 4).coerceIn(1, 16))
     override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
@@ -111,6 +113,11 @@ class DefaultSettingsRepository private constructor(
     override fun setVoiceAlerts(enabled: Boolean) {
         _voiceAlerts.value = enabled
         writer.enqueue { store.saveVoiceAlerts(enabled) }
+    }
+
+    override fun setSortLinesByArrival(enabled: Boolean) {
+        _sortLinesByArrival.value = enabled
+        writer.enqueue { store.saveSortLinesByArrival(enabled) }
     }
 
     override fun setAlertThresholdStops(stops: Int) {

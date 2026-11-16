@@ -288,25 +288,9 @@ internal object BusHomeMapper {
         )
     }
 
-    /**
-     * 站里一条线的先后：到站了最先，其次按分钟（没有分钟按站数估），没车的排最后。
-     * 和 [arrivalDisplayFor] 选的是同一辆车。
-     */
-    private fun arrivalRank(status: NearbyStopLineStatus): Int {
-        val bus = ArrivalText.nearestBus(status.targetOrder, status.approachingBuses)
-            ?: status.approachingBuses.firstOrNull()
-            ?: return Int.MAX_VALUE
-        return when (val state = ArrivalText.stateForBus(status.targetOrder, bus)) {
-            is ArrivalState.Arriving -> 0
-            is ArrivalState.OnTheWay -> state.minutes?.let { it * 60 }
-                ?: state.stopsAway?.let { it * STOP_SECONDS_ESTIMATE }
-                ?: (Int.MAX_VALUE - 1)
-            else -> Int.MAX_VALUE - 1
-        }
-    }
-
-    /** 只有站数时按一站约 2 分钟估，用来和有分钟数的线排先后 */
-    private const val STOP_SECONDS_ESTIMATE = 120
+    /** 站里一条线的先后，见 [ArrivalText.arrivalRank]；和 [arrivalDisplayFor] 选的是同一辆车 */
+    private fun arrivalRank(status: NearbyStopLineStatus): Int =
+        ArrivalText.arrivalRank(status.targetOrder, status.approachingBuses, status.statusText)
 
     private fun routeRow(item: FavoriteItem.Route): FavoriteRowUi.Route {
         val route = item.route
@@ -343,6 +327,8 @@ internal object BusHomeMapper {
     fun nearbyCards(state: BusHomeUiState): List<NearbyStopUi> {
         val cityId = state.currentCity.cityId
         return state.nearbyStops.map { stop ->
+            // 排序切换开着时先到的线在前（issue #56），同样先后时保持接口顺序；关着按接口顺序
+            val lines = if (state.sortNearbyByArrival) stop.lines.sortedBy { arrivalRank(it) } else stop.lines
             NearbyStopUi(
                 key = nearbyKey(stop),
                 name = stop.name,
@@ -351,7 +337,7 @@ internal object BusHomeMapper {
                     if (stop.lines.isNotEmpty()) "${stop.lines.size} 条线" else "",
                     stop.subwayLineNames.firstOrNull().orEmpty()
                 ),
-                lines = stop.lines.mapIndexed { index, status ->
+                lines = lines.mapIndexed { index, status ->
                     NearbyLineUi(
                         key = "${status.line.lineId}_${status.targetOrder}_$index",
                         lineName = status.line.displayLineName,

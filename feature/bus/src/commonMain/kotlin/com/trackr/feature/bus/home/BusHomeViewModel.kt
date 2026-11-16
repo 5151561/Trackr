@@ -227,6 +227,13 @@ class BusHomeViewModel(
             }
         }
 
+        // 附近站线路排序（issue #56）：和站点页同一个开关
+        viewModelScope.launch {
+            settings.sortLinesByArrival.collect { enabled ->
+                edit { it.copy(sortNearbyByArrival = enabled) }
+            }
+        }
+
         // 初始化加载支持的城市
         loadSupportedCities()
 
@@ -239,6 +246,7 @@ class BusHomeViewModel(
         when (event) {
             BusHomeEvent.Refresh -> refresh()
             BusHomeEvent.RetryLocation -> refreshLocationAndNearby()
+            is BusHomeEvent.SetNearbySortByArrival -> settings.setSortLinesByArrival(event.enabled)
             is BusHomeEvent.StopTracking -> stopTracking(event.sessionId, event.watchLineId)
             is BusHomeEvent.SelectGroup -> selectGroup(event.groupId)
             BusHomeEvent.TransitCodeClicked -> onTransitCodeClicked()

@@ -66,6 +66,8 @@ data class BusHomeUiState(
     val isTransitCodeSheetOpen: Boolean = false,
     /** 右下角「乘车码」悬浮按钮显不显示（「我的」里可以关掉，用 NFC 的嫌它挡列表） */
     val showTransitCodeButton: Boolean = true,
+    /** 附近站卡片里的线按到站先后排（issue #56）；关时按数据源顺序。和站点页同一个开关，切了会记住 */
+    val sortNearbyByArrival: Boolean = false,
     /** 一次性消息（重构计划 §2.1 UDF）：页面显示后回调 [BusHomeEvent.MessageShown] */
     val userMessages: List<UserMessage> = emptyList(),
 

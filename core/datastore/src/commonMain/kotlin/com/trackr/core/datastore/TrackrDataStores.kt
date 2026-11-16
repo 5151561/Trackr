@@ -59,6 +59,7 @@ object SettingsKeys {
 
     /** 语音播报提醒（issue #52）：追踪提醒同时朗读出来；没有 = 关 */
     val VOICE_ALERTS = booleanPreferencesKey("voice_alerts")
+    val SORT_LINES_BY_ARRIVAL = booleanPreferencesKey("sort_lines_by_arrival")
 
     /** 界面模式（`UiMode` 的名字，第 30 步新加，旧存储没有这个键）；没有或认不出 = 标准版 */
     val UI_MODE = stringPreferencesKey("ui_mode")

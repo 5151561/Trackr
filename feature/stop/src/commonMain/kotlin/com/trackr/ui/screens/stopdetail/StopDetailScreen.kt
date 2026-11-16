@@ -81,6 +81,7 @@ import com.trackr.feature.stop.resources.stop_selected_count
 import com.trackr.feature.stop.resources.stop_watch_count
 import com.trackr.feature.stop.resources.stop_watch_hint
 import com.trackr.feature.stop.resources.stop_watch_these
+import com.trackr.ui.components.sort.LineSortToggle
 import com.trackr.ui.components.transitcode.TransitCodeChooserSheet
 import com.trackr.ui.icons.TrackrIcons
 import org.jetbrains.compose.resources.stringResource
@@ -328,6 +329,17 @@ private fun LazyListScope.lineItems(state: StopDetailUiState, onEvent: (StopDeta
     if (state.stops.size > 1) {
         item(key = "platforms", contentType = "platforms") {
             PlatformChips(state.platformLabels, state.selectedStopIndex, onEvent)
+        }
+    }
+    // 排序切换（issue #56）：两条以上线才有得排
+    if (state.rows.size > 1) {
+        item(key = "sort", contentType = "sort") {
+            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                LineSortToggle(
+                    sortByArrival = state.sortByArrival,
+                    onChange = { onEvent(StopDetailEvent.SetSortByArrival(it)) }
+                )
+            }
         }
     }
     if (state.rows.isEmpty()) {

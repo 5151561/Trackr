@@ -148,6 +148,12 @@ class StopDetailViewModel(
                 _uiState.update { it.copy(showTransitCodeButton = visible) }
             }
         }
+        // 排序切换（issue #56）：和首页附近站同一个开关
+        viewModelScope.launch {
+            settings.sortLinesByArrival.collectLatest { enabled ->
+                publish { it.copy(sortByArrival = enabled) }
+            }
+        }
         // 同时可能追着好几项：只认这个站的那一份一起等（第 36 步）
         viewModelScope.launch {
             trackingRepository.sessions.collectLatest { onSession(watchSessionFor(it)) }
@@ -163,6 +169,7 @@ class StopDetailViewModel(
             StopDetailEvent.Back -> handleBack()
             is StopDetailEvent.OpenLine -> Unit // 导航由 Route 处理
             StopDetailEvent.PullRefresh -> pullRefresh()
+            is StopDetailEvent.SetSortByArrival -> settings.setSortLinesByArrival(event.enabled)
             StopDetailEvent.Retry -> loadStopDetail(isInitial = true)
             is StopDetailEvent.SelectPlatform -> selectStopIndex(event.index)
             is StopDetailEvent.ToggleFavorite -> toggleFavoriteByKey(event.rowKey)
@@ -659,7 +666,7 @@ class StopDetailViewModel(
                 isStationFavorite = station != null,
                 defaultPlatformPrompt = defaultPlatformPromptOf(s, station),
                 subtitle = subtitleOf(stop),
-                rows = rowsOf(cityId, stop, s.favoriteIds),
+                rows = rowsOf(cityId, stop, s.favoriteIds, sortByArrival = s.sortByArrival),
                 transferText = transferTextOf(stop),
                 watch = watchUiOf(session, stopId, s.stops),
                 boardChoice = boardChoiceUiOf(session, stopId, s.stops, dismissedBoardChoiceSince)

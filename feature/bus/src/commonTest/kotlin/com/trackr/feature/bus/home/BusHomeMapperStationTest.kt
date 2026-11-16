@@ -104,4 +104,25 @@ class BusHomeMapperStationTest {
         assertEquals("科技园", row.title)
         assertEquals(listOf("A", "B"), row.lines.map { it.lineName })
     }
+
+    @Test
+    fun nearbyCard_sortToggle_byArrivalOrSourceOrder() {
+        val stop = NearbyStop(
+            stopId = "s-north",
+            name = "科技园",
+            lines = listOf(
+                status("1路", "A", etaSeconds = 1920),
+                status("2路", "B"),
+                status("3路", "C", etaSeconds = 360),
+                status("4路", "D", etaSeconds = 900)
+            )
+        )
+
+        val sorted = BusHomeMapper.nearbyCards(BusHomeUiState(nearbyStops = listOf(stop), sortNearbyByArrival = true)).single()
+        assertEquals(listOf("3路", "4路", "1路", "2路"), sorted.lines.map { it.lineName })
+
+        // 默认（关着）按接口顺序
+        val plain = BusHomeMapper.nearbyCards(BusHomeUiState(nearbyStops = listOf(stop))).single()
+        assertEquals(listOf("1路", "2路", "3路", "4路"), plain.lines.map { it.lineName })
+    }
 }

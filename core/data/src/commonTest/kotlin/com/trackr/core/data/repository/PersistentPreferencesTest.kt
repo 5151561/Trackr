@@ -77,6 +77,7 @@ private class MemoryPreferencesStore(var snapshot: TransitLocalSnapshot = Transi
     override suspend fun saveShowTransitCodeButton(enabled: Boolean) { snapshot = snapshot.copy(showTransitCodeButton = enabled) }
     override suspend fun saveAutoStopAfterBoarding(enabled: Boolean) { snapshot = snapshot.copy(autoStopAfterBoarding = enabled) }
     override suspend fun saveVoiceAlerts(enabled: Boolean) { snapshot = snapshot.copy(voiceAlerts = enabled) }
+    override suspend fun saveSortLinesByArrival(enabled: Boolean) { snapshot = snapshot.copy(sortLinesByArrival = enabled) }
     override suspend fun saveNearbyStopsCount(count: Int) { snapshot = snapshot.copy(nearbyStopsCount = count) }
     override suspend fun saveLiveNotificationEnabled(enabled: Boolean) { snapshot = snapshot.copy(liveNotificationEnabled = enabled) }
     override suspend fun saveShowOnLockScreen(enabled: Boolean) { snapshot = snapshot.copy(showOnLockScreen = enabled) }

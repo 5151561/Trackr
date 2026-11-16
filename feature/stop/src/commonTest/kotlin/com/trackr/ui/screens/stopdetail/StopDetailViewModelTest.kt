@@ -571,6 +571,57 @@ class StopDetailViewModelTest {
         assertTrue(rows[3].isFavorite)
     }
 
+    @Test
+    fun testRows_inServiceSortedByArrivalThenFavorite() {
+        fun status(n: Int, eta: Int? = null, text: String = "") = NearbyStopLineStatus(
+            line = line("L$n", "${n}路", "终点$n"),
+            targetOrder = 5,
+            targetStopId = "s$n",
+            targetStopName = "大站",
+            statusText = text,
+            approachingBuses = eta?.let { listOf(LiveBus(busId = "b$n", plateOrFleetNo = "", order = 2, etaSeconds = it)) }.orEmpty()
+        )
+        val stop = NearbyStop(
+            stopId = "stop_x",
+            name = "大站",
+            lines = listOf(
+                status(1, eta = 1920), // 32 分钟
+                status(2, text = "末班已过"),
+                status(3, eta = 360), // 6 分钟
+                status(4, text = "等待发车"), // 运营中但没车
+                status(5, eta = 900), // 15 分钟
+                status(6, eta = 360) // 6 分钟，收藏的：同样先后时排在 3 路前
+            )
+        )
+
+        // 排序切换开着：运营中的按到站先后
+        val rows = rowsOf("034", stop, setOf("034_L6_5"), sortByArrival = true)
+        assertEquals(listOf("6路", "3路", "5路", "1路", "4路", "2路"), rows.map { it.lineName })
+
+        // 默认（关着）：和以前一样，运营中的在前、收藏的在前，其余按数据源顺序
+        val defaultRows = rowsOf("034", stop, setOf("034_L6_5"))
+        assertEquals(listOf("6路", "1路", "3路", "4路", "5路", "2路"), defaultRows.map { it.lineName })
+    }
+
+    @Test
+    fun testSortToggle_savesSettingAndReordersRows() = runTest(main.dispatcher) {
+        // 49 路「即将到站」、71 路 8 分钟：默认按数据源顺序，切到「先到的在前」后顺序不变但开关要记住
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertFalse(viewModel.uiState.value.sortByArrival)
+
+        viewModel.onEvent(StopDetailEvent.SetSortByArrival(true))
+        testScheduler.runCurrent()
+
+        assertTrue(settings.sortLinesByArrival.value)
+        assertTrue(viewModel.uiState.value.sortByArrival)
+
+        // 别处（首页）切回默认，站点页跟着变
+        settings.setSortLinesByArrival(false)
+        testScheduler.runCurrent()
+        assertFalse(viewModel.uiState.value.sortByArrival)
+    }
+
     // ================================================================ 选线 / 收藏 / 一起等
 
     @Test

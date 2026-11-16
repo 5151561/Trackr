@@ -72,6 +72,8 @@ class FakeSettingsRepository(
     override val autoStopAfterBoarding: StateFlow<Boolean> = _autoStopAfterBoarding.asStateFlow()
     private val _voiceAlerts = MutableStateFlow(false)
     override val voiceAlerts: StateFlow<Boolean> = _voiceAlerts.asStateFlow()
+    private val _sortLinesByArrival = MutableStateFlow(false)
+    override val sortLinesByArrival: StateFlow<Boolean> = _sortLinesByArrival.asStateFlow()
 
     private val _nearbyStopsCount = MutableStateFlow(4)
     override val nearbyStopsCount: StateFlow<Int> = _nearbyStopsCount.asStateFlow()
@@ -146,6 +148,10 @@ class FakeSettingsRepository(
 
     override fun setVoiceAlerts(enabled: Boolean) {
         _voiceAlerts.value = enabled
+    }
+
+    override fun setSortLinesByArrival(enabled: Boolean) {
+        _sortLinesByArrival.value = enabled
     }
 
     override fun setAlertThresholdStops(stops: Int) {

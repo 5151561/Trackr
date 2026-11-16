@@ -24,6 +24,9 @@ sealed interface BusHomeEvent {
     data object Refresh : BusHomeEvent
     data object RetryLocation : BusHomeEvent
 
+    /** 「附近」标题旁的排序切换：默认顺序 ↔ 先到的在前（issue #56） */
+    data class SetNearbySortByArrival(val enabled: Boolean) : BusHomeEvent
+
     /** 定位提示里的「去开启」：跳系统位置信息页（总开关 / 定位模式在那里） */
     data object OpenLocationSettings : BusHomeEvent
 

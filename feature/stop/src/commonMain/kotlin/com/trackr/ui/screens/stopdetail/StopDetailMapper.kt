@@ -58,7 +58,8 @@ internal fun arrivalOf(status: NearbyStopLineStatus): ArrivalDisplay {
     if (text.isNotEmpty()) {
         return ArrivalDisplay(value = text, unit = null, detail = "", short = text, tone = ArrivalTone.Mute, spoken = text)
     }
-    val bus = status.approachingBuses.firstOrNull()
+    // 和排序（ArrivalText.arrivalRank）、首页用同一辆车：开到本站之前最近的那辆
+    val bus = ArrivalText.nearestBus(status.targetOrder, status.approachingBuses) ?: status.approachingBuses.firstOrNull()
     val state = if (bus != null) {
         ArrivalText.stateForBus(status.targetOrder, bus)
     } else {
@@ -83,10 +84,16 @@ internal fun isInService(status: NearbyStopLineStatus): Boolean {
 }
 
 /**
- * 站点页的线路行。排序：运营中的在前、不在运营的在后；每一段里收藏的在前；
- * 其余保持数据源给的顺序（稳定排序）。傍晚停运的线多，运营中的线不再夹在中间难找。
+ * 站点页的线路行。排序：运营中的在前、不在运营的在后（傍晚停运的线多，运营中的线不再夹在中间难找）；
+ * [sortByArrival] 开着时（issue #56，页面上的排序切换）每一段里先到的在前（[ArrivalText.arrivalRank]）；
+ * 再按收藏的在前；其余保持数据源给的顺序（稳定排序）。
  */
-internal fun rowsOf(cityId: String, stop: NearbyStop?, favoriteIds: Set<String>): List<StopLineRowUi> =
+internal fun rowsOf(
+    cityId: String,
+    stop: NearbyStop?,
+    favoriteIds: Set<String>,
+    sortByArrival: Boolean = false
+): List<StopLineRowUi> =
     stop?.lines.orEmpty().map { status ->
         val inService = isInService(status)
         val line = status.line
@@ -102,9 +109,9 @@ internal fun rowsOf(cityId: String, stop: NearbyStop?, favoriteIds: Set<String>)
             targetOrder = status.targetOrder,
             stopId = stop?.stopId.orEmpty(),
             source = line.source
-        ) to inService
+        ) to (inService to if (sortByArrival) ArrivalText.arrivalRank(status.targetOrder, status.approachingBuses, status.statusText) else 0)
     }
-        .sortedWith(compareBy({ !it.second }, { !it.first.isFavorite }))
+        .sortedWith(compareBy({ !it.second.first }, { it.second.second }, { !it.first.isFavorite }))
         .map { it.first }
 
 /** 顶栏小字「120米 · 8 条线」 */

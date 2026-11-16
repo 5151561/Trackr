@@ -72,6 +72,12 @@ interface SettingsRepository {
      * 旧 Android 上通知不显眼，戴耳机、手机在兜里时也能听到。
      */
     val voiceAlerts: StateFlow<Boolean>
+
+    /**
+     * 线路按到站先后排（issue #56），默认关（按数据源给的顺序）：站点页和首页附近站卡片共用这一个开关，
+     * 两处各有一个切换，切了会记住。首页「收藏的站」不听它，一直按到站先后排。
+     */
+    val sortLinesByArrival: StateFlow<Boolean>
     val nearbyStopsCount: StateFlow<Int>
     val isLiveNotificationEnabled: StateFlow<Boolean>
 
@@ -113,6 +119,7 @@ interface SettingsRepository {
     fun setShowTransitCodeButton(enabled: Boolean)
     fun setAutoStopAfterBoarding(enabled: Boolean)
     fun setVoiceAlerts(enabled: Boolean)
+    fun setSortLinesByArrival(enabled: Boolean)
 }
 
 /**

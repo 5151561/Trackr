@@ -40,6 +40,8 @@ data class StopDetailUiState(
     val isTransitCodeSheetOpen: Boolean = false,
     /** 乘车码圆钮显不显示（「我的」里的开关，和首页、线路页同一个） */
     val showTransitCodeButton: Boolean = true,
+    /** 线路按到站先后排（issue #56）；关时按数据源顺序。和首页附近站同一个开关，切了会记住 */
+    val sortByArrival: Boolean = false,
     /** 这个站收藏了没有（顶栏 ☆，issue #47） */
     val isStationFavorite: Boolean = false,
     /**
@@ -130,6 +132,9 @@ sealed interface StopDetailEvent {
     data class OpenLine(val row: StopLineRowUi) : StopDetailEvent
 
     data object PullRefresh : StopDetailEvent
+
+    /** 线路列表上方的排序切换：默认顺序 ↔ 按到站先后（issue #56） */
+    data class SetSortByArrival(val enabled: Boolean) : StopDetailEvent
     data object Retry : StopDetailEvent
     data class SelectPlatform(val index: Int) : StopDetailEvent
     data class ToggleFavorite(val rowKey: String) : StopDetailEvent
