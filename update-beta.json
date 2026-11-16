@@ -2,7 +2,7 @@
   "versionCode": 17,
   "versionName": "0.1.13-beta.1",
   "minSupportedVersionCode": 1,
-  "changelog": "feat(update): 加 beta 通道，关于页可选接收测试版；版本 0.1.13-beta.1\n- 关于页「检查新版本」下加「接收测试版」开关（SettingsRepository.betaUpdates，默认关，新旧存储都存）\n- 开着时 GithubUpdateChecker 同时查 update.json 和 update-beta.json，取 versionCode 最大的\n- update_metadata.py：带后缀的 tag（v*-beta.N）只写 update-beta.json，正式通道和旧版 App 看不到\n- 修 MeViewModelTest 里漏了掌上出行的数据源断言\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>",
+  "changelog": "> 这是测试版（beta），功能还没定型，可能有问题。想稳定使用请留在 0.1.12。\n\n## 更新内容\n\n**新增**\n\n- 新数据源「掌上出行」（朗斯通信），支持县域公交实时查询与时刻表\n- 追这辆车（下车提醒）：线路页单车跟随里只追这一辆到选定的站\n- 语音播报提醒：「我的」里打开后，追踪提醒同时念出来\n- 站点页、首页附近站可切换线路排序（按到站先后 / 数据源顺序）\n- 关于页新增「接收测试版」开关：打开后检查更新也会提示 beta 版\n\n**改进**\n\n- 判上车收成一套规则，不再一次定论；追踪轮询跟着定位走，页面 3 秒刷新\n- 「我的 → 导出上车判定记录」，方便反馈判上车问题\n\n**修复**\n\n- 切换城市后重拉本城线路，不再停留在上一个城市\n- 前台服务不丢定位；判上车暂停时给出提示\n- 跟车视图没有时速时不显示时速栏\n- 乘车码静态快捷方式失效\n\n## 下载\n\n- Android 64 位设备：`trackr-0.1.13-beta.1-arm64-v8a.apk`\n- Android 32 位设备：`trackr-0.1.13-beta.1-armeabi-v7a.apk`\n\nAndroid 覆盖安装即可，收藏与设置保留。这一版要手动安装；装好后在「我的 → 关于」打开「接收测试版」，之后的测试版就能在应用内更新。",
   "downloadUrl": "https://github.com/5151561/Trackr/releases/tag/v0.1.13-beta.1",
   "downloadUrls": {
     "arm64-v8a": "https://github.com/5151561/Trackr/releases/download/v0.1.13-beta.1/trackr-0.1.13-beta.1-arm64-v8a.apk",
