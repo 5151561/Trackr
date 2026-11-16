@@ -221,10 +221,12 @@ interface UpdateChecker {
      * 检查是否有新版本
      * @param currentVersionCode 当前安装版本的 versionCode
      * @param currentVersionName 当前安装版本的 versionName
+     * @param includeBeta 也看测试版（beta 通道）：正式版和测试版里取 versionCode 最大的那个
      */
     suspend fun checkForUpdates(
         currentVersionCode: Int,
-        currentVersionName: String
+        currentVersionName: String,
+        includeBeta: Boolean = false
     ): UpdateCheckResult
 }
 

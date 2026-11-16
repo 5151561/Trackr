@@ -61,6 +61,9 @@ object SettingsKeys {
     val VOICE_ALERTS = booleanPreferencesKey("voice_alerts")
     val SORT_LINES_BY_ARRIVAL = booleanPreferencesKey("sort_lines_by_arrival")
 
+    /** 检查更新也收测试版（beta 通道）；没有 = 关 */
+    val BETA_UPDATES = booleanPreferencesKey("beta_updates")
+
     /** 界面模式（`UiMode` 的名字，第 30 步新加，旧存储没有这个键）；没有或认不出 = 标准版 */
     val UI_MODE = stringPreferencesKey("ui_mode")
 

@@ -2,6 +2,7 @@ package com.trackr.ui.screens.me
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.domain.platform.AppUpdateInstaller
 import com.trackr.core.domain.platform.UpdateChecker
 import com.trackr.core.model.AppUpdateInfo
@@ -29,12 +30,14 @@ sealed interface AboutUpdateUiState {
 /**
  * @param canCheckUpdates 有没有应用内「检查更新」：只有 Android 有（§2.9，iOS 走 App Store）
  * @param showLiveUpdateNote 显示「实时通知支持哪些系统」那段说明（只对 Android 有意义，跟 [canCheckUpdates] 同一个平台条件）
+ * @param betaUpdates 检查更新时也收测试版（beta 通道）；只在 [canCheckUpdates] 时显示开关
  * @param install 应用内下载安装的进度；iOS 不会变化
  */
 data class AboutUiState(
     val versionName: String = "",
     val canCheckUpdates: Boolean = false,
     val showLiveUpdateNote: Boolean = false,
+    val betaUpdates: Boolean = false,
     val update: AboutUpdateUiState = AboutUpdateUiState.Idle,
     val install: AppUpdateInstallState = AppUpdateInstallState.Idle
 )
@@ -42,6 +45,9 @@ data class AboutUiState(
 sealed interface AboutEvent {
     data object CheckForUpdates : AboutEvent
     data object DismissUpdateDialog : AboutEvent
+
+    /** 「接收测试版」开关 */
+    data class SetBetaUpdates(val enabled: Boolean) : AboutEvent
     data object Back : AboutEvent
 
     /** 下载安装包并调系统安装器 */
@@ -68,9 +74,11 @@ const val PROJECT_URL: String = "https://github.com/5151561/Trackr"
  * @param updateInstaller 应用内下载安装；平台没有（iOS）时为 null，更新弹窗只给「下载」按钮
  * @param versionProvider 当前安装包的版本号（code to name）；Koin 里由 `AppVersionInfo` 给出
  *   （Android：androidApp 的 `androidAppVersion(context)`，即原 `getDefaultAppVersion`）
+ * @param settings 读写「接收测试版」；为 null 时（旧测试）按只收正式版
  */
 class AboutViewModel(
     private val updateChecker: UpdateChecker?,
+    private val settings: SettingsRepository? = null,
     private val updateInstaller: AppUpdateInstaller? = null,
     private val versionProvider: () -> Pair<Int, String> = { 1 to "0.0.1" }
 ) : ViewModel() {
@@ -79,10 +87,19 @@ class AboutViewModel(
         AboutUiState(
             versionName = versionProvider().second,
             canCheckUpdates = updateChecker != null,
-            showLiveUpdateNote = updateChecker != null
+            showLiveUpdateNote = updateChecker != null,
+            betaUpdates = settings?.betaUpdates?.value ?: false
         )
     )
     val uiState: StateFlow<AboutUiState> = _uiState.asStateFlow()
+
+    init {
+        settings?.let { repo ->
+            viewModelScope.launch {
+                repo.betaUpdates.collect { enabled -> _uiState.update { it.copy(betaUpdates = enabled) } }
+            }
+        }
+    }
 
     private var installJob: Job? = null
 
@@ -94,6 +111,7 @@ class AboutViewModel(
         when (event) {
             AboutEvent.CheckForUpdates -> checkForUpdates()
             AboutEvent.DismissUpdateDialog -> dismissUpdateDialog()
+            is AboutEvent.SetBetaUpdates -> setBetaUpdates(event.enabled)
             AboutEvent.Back -> Unit
             AboutEvent.StartInstall -> startInstall()
             AboutEvent.CancelInstall -> cancelInstall()
@@ -112,7 +130,8 @@ class AboutViewModel(
             val (currentVersionCode, currentVersionName) = versionProvider()
             val result = checker.checkForUpdates(
                 currentVersionCode = currentVersionCode,
-                currentVersionName = currentVersionName
+                currentVersionName = currentVersionName,
+                includeBeta = _uiState.value.betaUpdates
             )
 
             setUpdate(
@@ -125,6 +144,16 @@ class AboutViewModel(
                         AboutUpdateUiState.Error(result.message)
                 }
             )
+        }
+    }
+
+    /** 切通道后上一次的检查结果不再作数，回到「点击检测」（正在检查 / 下载时不打断） */
+    fun setBetaUpdates(enabled: Boolean) {
+        settings?.setBetaUpdates(enabled)
+        _uiState.update { it.copy(betaUpdates = enabled) }
+        val state = _uiState.value
+        if (state.update !is AboutUpdateUiState.Checking && state.install is AppUpdateInstallState.Idle) {
+            setUpdate(AboutUpdateUiState.Idle)
         }
     }
 

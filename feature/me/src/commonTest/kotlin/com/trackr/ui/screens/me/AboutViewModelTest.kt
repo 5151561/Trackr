@@ -4,6 +4,7 @@ import com.trackr.core.model.AppUpdateInfo
 import com.trackr.core.model.AppUpdateInstallState
 import com.trackr.core.model.UpdateCheckResult
 import com.trackr.core.testing.FakeAppUpdateInstaller
+import com.trackr.core.testing.FakeSettingsRepository
 import com.trackr.core.testing.FakeUpdateChecker
 import com.trackr.core.testing.MainDispatcherHolder
 import kotlinx.coroutines.CompletableDeferred
@@ -46,6 +47,29 @@ class AboutViewModelTest {
         assertTrue(viewModel.uiState.value.canCheckUpdates)
         assertTrue(viewModel.uiState.value.showLiveUpdateNote)
         assertEquals("0.0.2", viewModel.uiState.value.versionName)
+    }
+
+    @Test
+    fun betaToggle_persistsAndIsPassedToChecker() = runTest(main.dispatcher) {
+        val settings = FakeSettingsRepository()
+        val fakeChecker = FakeUpdateChecker(UpdateCheckResult.UpToDate("0.0.2"))
+        val viewModel = AboutViewModel(updateChecker = fakeChecker, settings = settings, versionProvider = { 2 to "0.0.2" })
+        assertFalse(viewModel.uiState.value.betaUpdates)
+
+        viewModel.onEvent(AboutEvent.CheckForUpdates)
+        advanceUntilIdle()
+        assertEquals(false, fakeChecker.lastIncludeBeta)
+
+        viewModel.onEvent(AboutEvent.SetBetaUpdates(true))
+        advanceUntilIdle()
+        assertTrue(settings.betaUpdates.value)
+        assertTrue(viewModel.uiState.value.betaUpdates)
+        // 切通道后上次的结果作废
+        assertEquals(AboutUpdateUiState.Idle, viewModel.uiState.value.update)
+
+        viewModel.onEvent(AboutEvent.CheckForUpdates)
+        advanceUntilIdle()
+        assertEquals(true, fakeChecker.lastIncludeBeta)
     }
 
     @Test

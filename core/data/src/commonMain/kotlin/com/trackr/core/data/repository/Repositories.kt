@@ -80,6 +80,9 @@ interface SettingsRepository {
      * 两处各有一个切换，切了会记住。首页「收藏的站」不听它，一直按到站先后排。
      */
     val sortLinesByArrival: StateFlow<Boolean>
+
+    /** 检查更新时也收测试版（beta 通道），默认关；只有 Android 有应用内更新 */
+    val betaUpdates: StateFlow<Boolean>
     val nearbyStopsCount: StateFlow<Int>
     val isLiveNotificationEnabled: StateFlow<Boolean>
 
@@ -122,6 +125,7 @@ interface SettingsRepository {
     fun setAutoStopAfterBoarding(enabled: Boolean)
     fun setVoiceAlerts(enabled: Boolean)
     fun setSortLinesByArrival(enabled: Boolean)
+    fun setBetaUpdates(enabled: Boolean)
 }
 
 /**

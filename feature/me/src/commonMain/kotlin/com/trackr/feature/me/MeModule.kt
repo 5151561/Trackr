@@ -46,6 +46,7 @@ val meModule = module {
         val version = getOrNull<AppVersionInfo>() ?: AppVersionInfo(1, "0.0.1")
         AboutViewModel(
             updateChecker = getOrNull(),
+            settings = get(),
             updateInstaller = getOrNull(),
             versionProvider = { version.code to version.name }
         )

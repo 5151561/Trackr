@@ -16,6 +16,8 @@
     <string name="me_about_live_body_1">追踪时把到站倒计时和站点进度常驻在状态栏/通知栏。各家系统的叫法不同：Android 16 叫实时活动，小米澎湃OS 叫焦点通知（OS3 起是超级岛），OPPO 叫流体云。</string>
     <string name="me_about_live_body_2">若没看到常驻进度，去系统设置为本应用开启对应开关；系统本身没有这项功能时（例如 MIUI 全系），进度只在通知栏里显示。</string>
     <string name="me_about_check_update">检查新版本</string>
+    <string name="me_about_beta_updates">接收测试版</string>
+    <string name="me_about_beta_updates_desc">检查更新时也提示 beta 版。测试版功能还没定型，可能有问题；关掉后等下一个正式版发布再升级回正式通道。</string>
     <string name="me_about_checking">正在检查...</string>
     <string name="me_about_new_version">发现新版本</string>
     <string name="me_about_up_to_date">已是最新</string>

@@ -273,8 +273,17 @@ class FakeUpdateChecker(var result: UpdateCheckResult) : UpdateChecker {
     var checkCount: Int = 0
         private set
 
-    override suspend fun checkForUpdates(currentVersionCode: Int, currentVersionName: String): UpdateCheckResult {
+    /** 最近一次检查是否带了测试版 */
+    var lastIncludeBeta: Boolean? = null
+        private set
+
+    override suspend fun checkForUpdates(
+        currentVersionCode: Int,
+        currentVersionName: String,
+        includeBeta: Boolean
+    ): UpdateCheckResult {
         checkCount++
+        lastIncludeBeta = includeBeta
         return result
     }
 }

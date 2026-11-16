@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -31,6 +32,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -39,6 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.trackr.core.designsystem.resources.Res
@@ -51,6 +54,8 @@ import com.trackr.core.designsystem.resources.ic_check
 import com.trackr.core.designsystem.resources.ic_warning
 import com.trackr.core.model.AppUpdateInstallState
 import com.trackr.feature.me.resources.Res as MeRes
+import com.trackr.feature.me.resources.me_about_beta_updates
+import com.trackr.feature.me.resources.me_about_beta_updates_desc
 import com.trackr.feature.me.resources.me_about_changelog
 import com.trackr.feature.me.resources.me_about_check_failed
 import com.trackr.feature.me.resources.me_about_check_failed_retry
@@ -183,6 +188,10 @@ fun AboutScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     if (state.canCheckUpdates) {
                         UpdateRow(state = state, onClick = { onEvent(AboutEvent.CheckForUpdates) })
+                        BetaUpdatesRow(
+                            checked = state.betaUpdates,
+                            onCheckedChange = { onEvent(AboutEvent.SetBetaUpdates(it)) }
+                        )
                         DottedDivider()
                     }
 
@@ -304,6 +313,33 @@ private fun UpdateRow(state: AboutUiState, onClick: () -> Unit) {
                 color = MaterialTheme.colorScheme.primary
             )
         }
+    }
+}
+
+/** 「接收测试版」开关：整行可点 */
+@Composable
+private fun BetaUpdatesRow(checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange)
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = stringResource(MeRes.string.me_about_beta_updates),
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = stringResource(MeRes.string.me_about_beta_updates_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Switch(checked = checked, onCheckedChange = null)
     }
 }
 

@@ -44,8 +44,13 @@ def main():
         except Exception:
             changelog = f"发布版本 {tag or version_name}"
 
+    # 版本比较只看 versionCode：每个测试版、以及之后的正式版，versionCode 都要比上一个发出去的大。
+    # 带后缀的 tag（v0.1.13-beta.1、v0.2.0-rc.1）是测试版：只写 update-beta.json，
+    # 打开「接收测试版」的 App 才会去读；没打开的和旧版本 App 只读 update.json，看不到测试版。
+    is_beta = "-" in version_name
     out_dir = os.environ.get("OUTPUT_DIR", "update-branch")
-    out_json_path = os.path.join(out_dir, "update.json")
+    out_files = ["update-beta.json"] if is_beta else ["update.json", "version.json"]
+    out_json_path = os.path.join(out_dir, out_files[0])
 
     min_supported_version_code = 1
     force_update = False
@@ -89,13 +94,13 @@ def main():
     }
 
     os.makedirs(out_dir, exist_ok=True)
-    for filename in ["update.json", "version.json"]:
+    for filename in out_files:
         target = os.path.join(out_dir, filename)
         with open(target, "w", encoding="utf-8") as f:
             json.dump(update_data, f, ensure_ascii=False, indent=2)
             f.write("\n")
 
-    print(f"Successfully updated metadata in {out_dir}:")
+    print(f"Successfully updated {', '.join(out_files)} in {out_dir}:")
     print(json.dumps(update_data, ensure_ascii=False, indent=2))
 
 if __name__ == "__main__":

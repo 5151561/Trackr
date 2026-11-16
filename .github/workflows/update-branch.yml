@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Tag name (e.g. v0.0.3)'
+        description: 'Tag name (e.g. v0.0.3, or v0.0.4-beta.1 for the beta channel)'
         required: false
         default: ''
 
@@ -54,7 +54,7 @@ jobs:
           cd update-branch
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add update.json version.json
+          git add --all
           if git diff --staged --quiet; then
             echo "No changes to commit in update branch."
           else

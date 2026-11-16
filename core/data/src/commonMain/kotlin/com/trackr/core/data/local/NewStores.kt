@@ -30,6 +30,7 @@ class RoomDataStoreTransitStore(
             autoStopAfterBoarding = prefs[SettingsKeys.AUTO_STOP_AFTER_BOARDING],
             voiceAlerts = prefs[SettingsKeys.VOICE_ALERTS],
             sortLinesByArrival = prefs[SettingsKeys.SORT_LINES_BY_ARRIVAL],
+            betaUpdates = prefs[SettingsKeys.BETA_UPDATES],
             nearbyStopsCount = prefs[SettingsKeys.NEARBY_STOPS_COUNT],
             liveNotificationEnabled = prefs[SettingsKeys.LIVE_NOTIFICATION_ENABLED],
             showOnLockScreen = prefs[SettingsKeys.SHOW_ON_LOCK_SCREEN],
@@ -73,6 +74,10 @@ class RoomDataStoreTransitStore(
 
     override suspend fun saveSortLinesByArrival(enabled: Boolean) {
         settings.edit { it[SettingsKeys.SORT_LINES_BY_ARRIVAL] = enabled }
+    }
+
+    override suspend fun saveBetaUpdates(enabled: Boolean) {
+        settings.edit { it[SettingsKeys.BETA_UPDATES] = enabled }
     }
     override suspend fun saveLiveNotificationEnabled(enabled: Boolean) {
         settings.edit { it[SettingsKeys.LIVE_NOTIFICATION_ENABLED] = enabled }

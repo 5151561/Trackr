@@ -171,10 +171,10 @@ class MeViewModelTest {
     }
 
     @Test
-    fun dataSource_isSingleChoiceOfTwo_andStateFollows() = runTest(main.dispatcher) {
+    fun dataSource_isSingleChoice_andStateFollows() = runTest(main.dispatcher) {
         val viewModel = createViewModel()
-        // D1：数据源只有车来了 / 掌上公交两个，没有聚合
-        assertEquals(listOf(EngineMode.CHELAILE, EngineMode.MYGOLBS), EngineMode.entries.toList())
+        // D1：数据源单选（车来了 / 掌上公交 / 掌上出行），没有聚合
+        assertEquals(listOf(EngineMode.CHELAILE, EngineMode.MYGOLBS, EngineMode.LENZ), EngineMode.entries.toList())
 
         viewModel.onEvent(MeEvent.SetEngineMode(EngineMode.MYGOLBS))
         testScheduler.advanceUntilIdle()

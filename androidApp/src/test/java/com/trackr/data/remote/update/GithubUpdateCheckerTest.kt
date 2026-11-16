@@ -190,6 +190,50 @@ class GithubUpdateCheckerTest {
         )
     }
 
+    @Test
+    fun checkForUpdates_betaOff_ignoresBetaSources() = runTest {
+        val result = checkChannels(stable = releasePayload(10), beta = releasePayload(11), includeBeta = false)
+        assertEquals(UpdateCheckResult.UpToDate("0.1.6"), result)
+    }
+
+    @Test
+    fun checkForUpdates_betaOn_picksNewerBeta() = runTest {
+        val result = checkChannels(stable = releasePayload(10), beta = releasePayload(11), includeBeta = true)
+        assertEquals(11, (result as UpdateCheckResult.HasUpdate).updateInfo.versionCode)
+    }
+
+    @Test
+    fun checkForUpdates_betaOn_stableNewerThanBetaWins() = runTest {
+        val result = checkChannels(stable = releasePayload(12), beta = releasePayload(11), includeBeta = true)
+        assertEquals(12, (result as UpdateCheckResult.HasUpdate).updateInfo.versionCode)
+    }
+
+    @Test
+    fun checkForUpdates_betaOn_missingBetaFileStillUsesStable() = runTest {
+        val result = checkChannels(stable = releasePayload(11), beta = null, includeBeta = true)
+        assertEquals(11, (result as UpdateCheckResult.HasUpdate).updateInfo.versionCode)
+    }
+
+    private suspend fun checkChannels(stable: String, beta: String?, includeBeta: Boolean): UpdateCheckResult {
+        val client = HttpClient(MockEngine { request ->
+            when (request.url.encodedPath) {
+                "/stable" -> respondJson(stable)
+                "/beta" -> beta?.let { respondJson(it) } ?: respond("Not Found", HttpStatusCode.NotFound)
+                else -> error("unexpected ${request.url}")
+            }
+        })
+        return try {
+            GithubUpdateChecker(
+                httpClient = client,
+                endpointUrls = listOf("https://example.com/stable"),
+                betaEndpointUrls = listOf("https://example.com/beta"),
+                supportedAbis = listOf("arm64-v8a")
+            ).checkForUpdates(currentVersionCode = 10, currentVersionName = "0.1.6", includeBeta = includeBeta)
+        } finally {
+            client.close()
+        }
+    }
+
     private suspend fun checkSources(vararg payloads: String?): UpdateCheckResult {
         val client = HttpClient(MockEngine { request ->
             val index = request.url.encodedPath.removePrefix("/").toInt()
