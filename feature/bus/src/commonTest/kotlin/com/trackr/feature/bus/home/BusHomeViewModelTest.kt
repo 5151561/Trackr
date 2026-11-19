@@ -260,7 +260,7 @@ class BusHomeViewModelTest {
         assertEquals(EngineMode.MYGOLBS, viewModel.uiState.value.engineMode)
     }
 
-    /** 没有掌上出行城市（iOS 没接这个数据源）时，切换跳过掌上出行 */
+    /** 没有掌上出行城市（例如城市表尚未加载或未注入该数据源）时，切换跳过掌上出行 */
     @Test
     fun testEngineModeSwitching_skipsLenz_whenNoLenzCities() = runTest(main.dispatcher) {
         val viewModel = createViewModel()

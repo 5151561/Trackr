@@ -10,9 +10,11 @@ import com.trackr.core.database.createTrackrDatabase
 import com.trackr.core.datastore.*
 import com.trackr.core.domain.platform.*
 import com.trackr.core.network.provider.chelaile.ChelaileTransitProvider
+import com.trackr.core.network.provider.lenz.LenzTransitProvider
 import com.trackr.core.network.provider.mygolbs.MygolbsTransitProvider
 import com.trackr.core.network.remote.amap.AmapTransitApiClient
 import com.trackr.core.network.remote.chelaile.ChelaileApiClient
+import com.trackr.core.network.remote.lenz.LenzApiClient
 import com.trackr.core.network.remote.mygolbs.MygolbsApiClient
 import com.trackr.core.network.remote.common.createTrackrHttpClient
 import com.trackr.data.repository.IRouteGroupRepository
@@ -73,7 +75,8 @@ internal class IosAppRuntime(val module: Module, val resolveFavorite: (String) -
                         val locationStore = IosUserLocationStore()
                         val coordinator = TransitProviderCoordinator(
                             ChelaileTransitProvider(ChelaileApiClient(http, monotonicClock = IosMonotonicClock), IosMonotonicClock),
-                            MygolbsTransitProvider(MygolbsApiClient(http, clock = IosMonotonicClock))
+                            MygolbsTransitProvider(MygolbsApiClient(http, clock = IosMonotonicClock)),
+                            LenzTransitProvider(LenzApiClient(http))
                         )
                         val tracking = DefaultTrackingRepository(
                             DataStoreTrackingSessionStore(createTrackingSessionDataStore("$privateDir/tracking_session.json", scope)),
