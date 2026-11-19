@@ -24,6 +24,7 @@ import com.trackr.ui.screens.me.AmapKeyViewModel
 import com.trackr.ui.screens.me.MeEvent
 import com.trackr.ui.screens.me.MeScreen
 import com.trackr.ui.screens.me.MeViewModel
+import com.trackr.ui.screens.me.rememberBackgroundLocationRequester
 import com.trackr.ui.screens.me.ReminderEditEvent
 import com.trackr.ui.screens.me.ReminderEditScreen
 import com.trackr.ui.screens.me.ReminderEditViewModel
@@ -74,6 +75,8 @@ private fun MeRoute(viewModel: MeViewModel, navigator: TrackrNavigator) {
         onPauseOrDispose { }
     }
 
+    val bgLocationRequester = rememberBackgroundLocationRequester { viewModel.onScreenResumed() }
+
     // 跳转只在 RESUMED 时做（防连点压两层，和 dropUnlessResumed 一样）
     val lifecycleOwner = LocalLifecycleOwner.current
     val whenResumed: (() -> Unit) -> Unit = { block ->
@@ -81,13 +84,14 @@ private fun MeRoute(viewModel: MeViewModel, navigator: TrackrNavigator) {
     }
 
     MeScreen(
-        state = state,
+        state = if (bgLocationRequester == null) state.copy(backgroundLocationGranted = null) else state,
         onEvent = { event ->
             when (event) {
                 is MeEvent.OpenReminder -> whenResumed { navigator.open(ScreenKey.ReminderEdit(event.id)) }
                 MeEvent.OpenAmapKey -> whenResumed { navigator.open(ScreenKey.AmapKey) }
                 MeEvent.OpenAbout -> whenResumed { navigator.open(ScreenKey.About) }
                 MeEvent.OpenThemeSettings -> whenResumed { navigator.open(ScreenKey.ThemeSettings) }
+                MeEvent.RequestBackgroundLocation -> bgLocationRequester?.request()
                 else -> viewModel.onEvent(event)
             }
         }

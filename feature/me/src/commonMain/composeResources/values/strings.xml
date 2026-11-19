@@ -70,6 +70,9 @@
     <string name="me_arrival_alert_desc">车离上车站还剩几站时震动提醒</string>
     <string name="me_auto_stop_after_boarding">上车后自动结束追踪</string>
     <string name="me_auto_stop_after_boarding_desc">定位判断你已上车就结束追踪，不再等下一班；路线仍跟到下车站</string>
+    <string name="me_background_location">后台定位（始终允许）</string>
+    <string name="me_background_location_desc_off">设为「始终允许」后，定时提醒在后台启动也能自动判断上车，无需打开 App</string>
+    <string name="me_background_location_desc_on">已开启，定时提醒在后台启动也能自动判断上车</string>
     <string name="me_export_boarding_trace">导出上车判定记录</string>
     <string name="me_export_boarding_trace_desc">自动结束没生效时发给开发者排查；记录只存在本机，含追踪时的位置</string>
     <string name="me_voice_alerts">语音播报提醒</string>

@@ -82,6 +82,9 @@ import com.trackr.feature.me.resources.me_arrival_alert
 import com.trackr.feature.me.resources.me_arrival_alert_desc
 import com.trackr.feature.me.resources.me_auto_stop_after_boarding
 import com.trackr.feature.me.resources.me_auto_stop_after_boarding_desc
+import com.trackr.feature.me.resources.me_background_location
+import com.trackr.feature.me.resources.me_background_location_desc_off
+import com.trackr.feature.me.resources.me_background_location_desc_on
 import com.trackr.feature.me.resources.me_export_boarding_trace
 import com.trackr.feature.me.resources.me_export_boarding_trace_desc
 import com.trackr.feature.me.resources.me_voice_alerts
@@ -236,6 +239,21 @@ fun MeScreen(
                         checked = state.autoStopAfterBoarding,
                         onCheckedChange = { onEvent(MeEvent.SetAutoStopAfterBoarding(it)) }
                     )
+                    state.backgroundLocationGranted?.let { granted ->
+                        GroupDivider()
+                        SettingRow(
+                            title = stringResource(MeRes.string.me_background_location),
+                            subtitle = stringResource(
+                                if (granted) MeRes.string.me_background_location_desc_on
+                                else MeRes.string.me_background_location_desc_off
+                            ),
+                            value = stringResource(
+                                if (granted) MeRes.string.me_status_chip_on else MeRes.string.me_notify_fix
+                            ),
+                            valueColor = if (granted) null else TrackrTheme.colors.warn,
+                            onClick = { if (!granted) onEvent(MeEvent.RequestBackgroundLocation) }
+                        )
+                    }
                     if (state.canExportBoardingTrace) {
                         GroupDivider()
                         SettingRow(

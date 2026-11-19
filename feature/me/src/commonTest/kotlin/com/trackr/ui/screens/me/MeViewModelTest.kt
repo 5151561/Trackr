@@ -1,6 +1,7 @@
 package com.trackr.ui.screens.me
 
 import com.trackr.core.domain.platform.BoardingTraceLog
+import com.trackr.core.domain.platform.LocationSource
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.RailMode
 import com.trackr.core.model.ThemeMode
@@ -8,6 +9,7 @@ import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.core.model.UiMode
 import com.trackr.core.testing.FakeAmapKeyRepository
+import com.trackr.core.testing.FakeLocationSource
 import com.trackr.core.testing.FakeSettingsRepository
 import com.trackr.core.testing.MainDispatcherHolder
 import com.trackr.data.repository.FakeScheduledReminderRepository
@@ -52,7 +54,8 @@ class MeViewModelTest {
     private fun createViewModel(
         liveUpdateAccess: LiveUpdateAccess? = liveUpdate,
         versionName: String? = "0.0.3",
-        boardingTrace: BoardingTraceLog? = null
+        boardingTrace: BoardingTraceLog? = null,
+        locationSource: LocationSource? = null
     ) = MeViewModel(
         settings = settings,
         reminderRepository = reminders,
@@ -60,7 +63,8 @@ class MeViewModelTest {
         notices = notices,
         liveUpdateAccess = liveUpdateAccess,
         versionName = versionName,
-        boardingTrace = boardingTrace
+        boardingTrace = boardingTrace,
+        locationSource = locationSource
     )
 
     /** 假的判定记录：[shareResult] 是分享面板开没开成 */
@@ -243,6 +247,28 @@ class MeViewModelTest {
         testScheduler.advanceUntilIdle()
         assertTrue(settings.autoStopAfterBoarding.value)
         assertTrue(viewModel.uiState.value.autoStopAfterBoarding)
+    }
+
+    @Test
+    fun backgroundLocation_reflectsPermission_hidesWhenAutoStopOff_andRefreshesOnResume() = runTest(main.dispatcher) {
+        val location = FakeLocationSource(precisePermission = true).apply { backgroundPermission = false }
+        val viewModel = createViewModel(locationSource = location)
+        assertEquals(false, viewModel.uiState.value.backgroundLocationGranted)
+
+        // 关掉「上车后自动结束追踪」后隐藏这一行
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(false))
+        testScheduler.advanceUntilIdle()
+        assertNull(viewModel.uiState.value.backgroundLocationGranted)
+
+        // 重新打开，并在系统设置授予「始终允许」后回到页面刷新为 true
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(true))
+        testScheduler.advanceUntilIdle()
+        assertEquals(false, viewModel.uiState.value.backgroundLocationGranted)
+
+        location.backgroundPermission = true
+        viewModel.onScreenResumed()
+        testScheduler.advanceUntilIdle()
+        assertEquals(true, viewModel.uiState.value.backgroundLocationGranted)
     }
 
     @Test

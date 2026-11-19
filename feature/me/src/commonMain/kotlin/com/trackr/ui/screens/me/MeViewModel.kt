@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.trackr.core.data.repository.AmapKeyRepository
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.domain.platform.BoardingTraceLog
+import com.trackr.core.domain.platform.LocationSource
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.ScheduledReminder
 import com.trackr.core.model.TransitCodeProvider
@@ -43,6 +44,8 @@ data class MeUiState(
     val preferredTransitCode: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
     val showTransitCodeButton: Boolean = true,
     val autoStopAfterBoarding: Boolean = true,
+    /** 后台定位（「始终允许」）：true = 已开启，false = 未开启，null = 不需要显示（未开自动结束或平台不需要） */
+    val backgroundLocationGranted: Boolean? = null,
     val canExportBoardingTrace: Boolean = false,
     val voiceAlerts: Boolean = false,
     val alertThresholdStops: Int = 2,
@@ -67,6 +70,8 @@ sealed interface MeEvent {
     data class SetTransitCode(val provider: TransitCodeProvider) : MeEvent
     data class SetShowTransitCodeButton(val visible: Boolean) : MeEvent
     data class SetAutoStopAfterBoarding(val enabled: Boolean) : MeEvent
+    /** 申请「始终允许」后台定位权限（issue #49） */
+    data object RequestBackgroundLocation : MeEvent
     /** 把判上车的判定记录交给系统分享面板（issue #49） */
     data object ExportBoardingTrace : MeEvent
     data class SetVoiceAlerts(val enabled: Boolean) : MeEvent
@@ -103,15 +108,22 @@ class MeViewModel(
     private val liveUpdateAccess: LiveUpdateAccess? = null,
     private val versionName: String? = null,
     private val notificationHealthAccess: NotificationHealthAccess? = null,
-    private val boardingTrace: BoardingTraceLog? = null
+    private val boardingTrace: BoardingTraceLog? = null,
+    private val locationSource: LocationSource? = null
 ) : ViewModel() {
 
     private val liveUpdateStatus = MutableStateFlow(liveUpdateAccess?.status())
 
     private val notificationHealthStatus = MutableStateFlow(notificationHealthAccess?.status())
 
-    /** 两个平台状态的合流：`combine` 的 5 参数重载已经用满，先把这两个并成一个 */
-    private val platformStatus = combine(liveUpdateStatus, notificationHealthStatus) { live, health -> live to health }
+    private val backgroundLocationGranted = MutableStateFlow(locationSource?.hasBackgroundLocationPermission())
+
+    /** 三个平台状态的合流：`combine` 的 5 参数重载已经用满，先把这几个并成一个 */
+    private val platformStatus = combine(
+        liveUpdateStatus,
+        notificationHealthStatus,
+        backgroundLocationGranted
+    ) { live, health, bgLoc -> PlatformStatus(live, health, bgLoc) }
 
     private val settingsPart = combine(
         settings.engineMode,
@@ -138,7 +150,7 @@ class MeViewModel(
         mapKeyStatus,
         notices.messages
     ) { part, reminders, platform, keyStatus, messages ->
-        buildState(part, reminders, platform.first, platform.second, keyStatus, messages)
+        buildState(part, reminders, platform, keyStatus, messages)
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.Eagerly,
@@ -157,8 +169,7 @@ class MeViewModel(
                 settings.voiceAlerts.value
             ),
             reminderRepository.reminders.value,
-            liveUpdateStatus.value,
-            notificationHealthStatus.value,
+            PlatformStatus(liveUpdateStatus.value, notificationHealthStatus.value, backgroundLocationGranted.value),
             amapKeyStatusText(amapKeys.hasMapKey.value, amapKeys.canShowMap.value),
             notices.messages.value
         )
@@ -200,22 +211,26 @@ class MeViewModel(
             is MeEvent.SetRailMode -> settings.setRailMode(event.mode)
             is MeEvent.SetThemeMode -> settings.setThemeMode(event.mode)
             is MeEvent.MessageShown -> notices.consume(event.id)
-            // 导航事件由 Route 处理
-            is MeEvent.OpenReminder, MeEvent.OpenAmapKey, MeEvent.OpenAbout, MeEvent.OpenThemeSettings -> Unit
+            // 导航与系统权限申请由 Route 处理
+            is MeEvent.OpenReminder,
+            MeEvent.OpenAmapKey,
+            MeEvent.OpenAbout,
+            MeEvent.OpenThemeSettings,
+            MeEvent.RequestBackgroundLocation -> Unit
         }
     }
 
-    /** 回到前台时重查实时活动通知的权限和通知体检（用户可能刚从系统设置回来） */
+    /** 回到前台时重查实时活动通知的权限、通知体检与后台定位权限（用户可能刚从系统设置回来） */
     fun onScreenResumed() {
         liveUpdateStatus.value = liveUpdateAccess?.status()
         notificationHealthStatus.value = notificationHealthAccess?.status()
+        backgroundLocationGranted.value = locationSource?.hasBackgroundLocationPermission()
     }
 
     private fun buildState(
         part: SettingsPart,
         reminders: List<ScheduledReminder>,
-        liveUpdate: LiveUpdateStatus?,
-        notificationHealth: NotificationHealth?,
+        platform: PlatformStatus,
         keyStatus: String,
         messages: List<UserMessage>
     ) = MeUiState(
@@ -223,6 +238,7 @@ class MeViewModel(
         preferredTransitCode = part.transitCode,
         showTransitCodeButton = part.showTransitCodeButton,
         autoStopAfterBoarding = part.autoStopAfterBoarding,
+        backgroundLocationGranted = platform.backgroundLocationGranted.takeIf { part.autoStopAfterBoarding },
         canExportBoardingTrace = boardingTrace != null,
         voiceAlerts = part.voiceAlerts,
         alertThresholdStops = part.alertThresholdStops,
@@ -234,12 +250,18 @@ class MeViewModel(
         railMode = part.railMode,
         themeMode = part.themeMode,
         // 和原来一样：实时通知关着时不显示胶囊权限
-        liveUpdate = liveUpdate?.takeIf { part.liveNotification },
+        liveUpdate = platform.liveUpdate?.takeIf { part.liveNotification },
         // 只在真有问题时出现，正常时那一行不该占地方
-        notificationHealth = notificationHealth?.takeIf { !it.healthy },
+        notificationHealth = platform.notificationHealth?.takeIf { !it.healthy },
         amapKeyStatus = keyStatus,
         versionName = versionName,
         userMessages = messages
+    )
+
+    private data class PlatformStatus(
+        val liveUpdate: LiveUpdateStatus?,
+        val notificationHealth: NotificationHealth?,
+        val backgroundLocationGranted: Boolean?
     )
 
     private data class SettingsPart(
