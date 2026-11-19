@@ -756,8 +756,10 @@ class ChelaileApiClient(
             )
         }
 
-        // 若传入 targetOrder > 0，请求 encryptedBusDetail.action 获取到目标站的预测 travelTime 与 recommTip
+        // 若传入 targetOrder > 0，请求 encryptedBusDetail.action 获取到目标站的预测 travelTime、recommTip 与距候车站距离
         val etaMap = HashMap<String, Pair<Int, String?>>() // busId -> (travelTime, recommTip)
+        val distanceMap = HashMap<String, Int>() // busId -> distanceToWaitStn（针对 targetOrder）
+        var busDetailFetched = false
         if (targetOrder != null && targetOrder > 0) {
             try {
                 val targetStop = stopsList.find { it.order == targetOrder }
@@ -786,6 +788,7 @@ class ChelaileApiClient(
                     put("secret", "")
                 }
                 val busData = executeEncrypted("$BASE_URL/bus/line!encryptedBusDetail.action", busDetailParams)
+                busDetailFetched = true
                 val busArr = busData.optJSONArray("buses") ?: JSONArray()
                 for (i in 0 until busArr.length()) {
                     val b = busArr.getJSONObject(i)
@@ -797,6 +800,11 @@ class ChelaileApiClient(
                         val recommTip = tr.optString("recommTip").takeIf { it.isNotBlank() }
                         etaMap[bId] = Pair(travelTime, recommTip)
                     }
+                    if (b.has("distanceToWaitStn")) {
+                        b.optInt("distanceToWaitStn", -1).takeIf { it > 0 }?.let {
+                            distanceMap[bId] = it
+                        }
+                    }
                 }
             } catch (_: Exception) {
                 // 忽略非致命预测拉取失败，保持主干可用
@@ -804,6 +812,7 @@ class ChelaileApiClient(
         }
 
         // 解析在途车辆并计算站间投影进度
+        val lineDetailTargetOrder = data.optInt("targetOrder", -1)
         val busesArr = data.optJSONArray("buses") ?: JSONArray()
         val liveBuses = ArrayList<LiveBus>()
         for (i in 0 until busesArr.length()) {
@@ -836,11 +845,17 @@ class ChelaileApiClient(
                 targetStop = targetStop
             )
 
-            // distanceToWaitStn = 车辆到候车站（targetOrder）的距离；未指定候车站、或车已过站时上游给 -1，都不展示
-            val distanceToWait = if (targetOrder != null && targetOrder > 0 && b.has("distanceToWaitStn")) {
-                b.optInt("distanceToWaitStn", -1).takeIf { it > 0 }
-            } else {
-                null
+            // distanceToWaitStn = 车辆到候车站（targetOrder）的距离：
+            // encryptedLineDetail 未传 targetOrder，上游默认按终点站或定位最近站算 distanceToWaitStn；
+            // 必须取 encryptedBusDetail（带 targetOrder）返回的距候车站距离，
+            // 仅在 encryptedBusDetail 拉取失败且 lineDetail 响应的 targetOrder 恰好一致时回退；
+            // 未指定候车站、或车已过站上游给 -1 / 0 时都不展示。
+            val distanceToWait = when {
+                targetOrder == null || targetOrder <= 0 -> null
+                busDetailFetched -> distanceMap[bId]
+                lineDetailTargetOrder == targetOrder && b.has("distanceToWaitStn") ->
+                    b.optInt("distanceToWaitStn", -1).takeIf { it > 0 }
+                else -> null
             }
 
             liveBuses.add(
