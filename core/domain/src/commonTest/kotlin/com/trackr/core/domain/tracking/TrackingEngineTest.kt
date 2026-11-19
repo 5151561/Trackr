@@ -785,6 +785,102 @@ class TrackingEngineTest {
     }
 
     @Test
+    fun confirm_stationaryUserDownstream_neverBoards() {
+        // 人在站下游 150 m 原地不动（家里 / 办公室）：车过站时满足 u2b < u2s，但人没移动，不能误判上车
+        val arrived = singlePoll(
+            beginSingle(),
+            listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)),
+            serviceFixNorth(150, ageMillis = 25_000)
+        )
+        assertEquals("b1", arrived.session.state.boardingCandidateBusId)
+        val first = singlePoll(
+            arrived.session,
+            listOf(boardingBus("b1", order = 11, metersNorth = 80)),
+            serviceFixNorth(150, ageMillis = 20_000),
+            nowMillis = NOW_MILLIS + 10_000
+        )
+        assertTrue(first.effects.none { it is TrackingEngine.Effect.Finished })
+        val second = singlePoll(
+            first.session,
+            listOf(boardingBus("b1", order = 11, metersNorth = 160)),
+            serviceFixNorth(152, ageMillis = 5_000),
+            nowMillis = NOW_MILLIS + 25_000
+        )
+        assertTrue(second.effects.none { it is TrackingEngine.Effect.Finished })
+    }
+
+    @Test
+    fun confirm_userFarDownstream_doesNotRecoverOrBoard() {
+        // 人在站下游 3 km 处，车刚离站 60 m：人离车太远（> 600 m），不能补建待确认更不能误判上车
+        val approaching = singlePoll(
+            beginSingle(),
+            listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)),
+            serviceFixNorth(3000, ageMillis = 20_000)
+        )
+        assertNull(approaching.session.state.boardingCandidateBusId)
+        val departed = singlePoll(
+            approaching.session,
+            listOf(boardingBus("b1", order = 11, metersNorth = 60)),
+            serviceFixNorth(3000, ageMillis = 5_000),
+            nowMillis = NOW_MILLIS + 15_000
+        )
+        assertNull(departed.session.state.boardingCandidateBusId)
+        assertTrue(departed.effects.none { it is TrackingEngine.Effect.Finished })
+    }
+
+    @Test
+    fun confirm_lateWatchStationaryUserDownstream_neverBoards_movingUserBoards() {
+        // 车过站时没定位开了补判，人在下游 1200 m 原地不动：不误判；人确实沿线继续往前坐才判上车
+        val t0 = NOW_MILLIS + 1
+        val arrivedNoFix = trackPoll(
+            beginSingle(),
+            listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)),
+            null,
+            t0
+        )
+        assertTrue(arrivedNoFix.session.state.boardWatchSinceMillis != 0L)
+        val still1 = trackPoll(
+            arrivedNoFix.session,
+            listOf(boardingBus("b1", order = 12, metersNorth = 800)),
+            serviceFixNorth(1200, ageMillis = 20_000),
+            t0 + 60_000
+        )
+        assertFalse(still1.boarded())
+        val still2 = trackPoll(
+            still1.session,
+            listOf(boardingBus("b1", order = 13, metersNorth = 1200)),
+            serviceFixNorth(1205, ageMillis = 5_000),
+            t0 + 75_000
+        )
+        assertFalse(still2.boarded())
+        val moving = trackPoll(
+            still2.session,
+            listOf(boardingBus("b1", order = 13, metersNorth = 1300)),
+            serviceFixNorth(1320, ageMillis = 2_000),
+            t0 + 80_000
+        )
+        assertTrue(moving.boarded())
+    }
+
+    @Test
+    fun confirm_walkingBackTowardStop_neverBoards() {
+        // 人在站下游 220 m 往回走向候车站：位移虽大但是靠近站，不能判上车
+        val first = singlePoll(
+            singleCandidate(),
+            listOf(boardingBus("b1", order = 11, metersNorth = 180)),
+            serviceFixNorth(220, ageMillis = 20_000)
+        )
+        assertTrue(first.effects.none { it is TrackingEngine.Effect.Finished })
+        val walkingBack = singlePoll(
+            first.session,
+            listOf(boardingBus("b1", order = 11, metersNorth = 240)),
+            serviceFixNorth(160, ageMillis = 5_000),
+            nowMillis = NOW_MILLIS + 15_000
+        )
+        assertTrue(walkingBack.effects.none { it is TrackingEngine.Effect.Finished })
+    }
+
+    @Test
     fun engine_single_departedBus_keepsRetryingUntilFixQualifies() {
         // 车临近时人离站 800 m（没有站旁记忆）
         val approaching = singlePoll(beginSingle(),

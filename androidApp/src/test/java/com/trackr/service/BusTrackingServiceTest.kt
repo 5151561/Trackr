@@ -696,6 +696,44 @@ class BusTrackingServiceTest {
     }
 
     @Test
+    fun startedInBackgroundWithLocationType_withoutBgPermission_showsNoticeAndUpgradesOnForeground() {
+        // 定时提醒在后台启动：startForeground(..., LOCATION) 没抛异常，但只有「使用期间」权限，
+        // Android 11+ 后台不会给定位——必须立刻提示「打开 App 恢复」，回到前台时重调 startForeground 并重订定位
+        location.backgroundPermission = false
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 6, segmentProgress = 0.5f)))
+        )
+        val notifier: LiveProgressNotifier = GlobalContext.get().get()
+        val session = requireNotNull(trackingRepository.start(singleTarget()))
+        val controller = Robolectric.buildService(BusTrackingService::class.java, BusTrackingService.startIntent(app, session.sessionId))
+        val service = controller.get()
+        service.appInForegroundProvider = { false }
+        var locationForegroundCalls = 0
+        val real = service.foregroundStarter
+        service.foregroundStarter = { id, notification, type ->
+            if (type and ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION != 0) locationForegroundCalls++
+            real(id, notification, type)
+        }
+        controller.create().startCommand(0, 1)
+        waitUntil("写回") { trackingRepository.sessionById(session.sessionId)?.state?.currentBusId == "b1" }
+
+        val id = notifier.notificationIdOf(session.sessionId)
+        assertEquals(withLocation, service.lastForegroundServiceType)
+        val callsBefore = locationForegroundCalls
+        assertTrue(callsBefore >= 1)
+        assertEquals(BusTrackingService.BOARDING_NOTICE_OPEN_APP, notificationText(id, "android.subText"))
+        val tiersBefore = location.requestedTiers.size
+
+        // 打开 App：在前台重调一次 startForeground(..., LOCATION) 并重订阅定位流，提示撤掉
+        service.appInForegroundProvider = { true }
+        service.onAppForeground()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(callsBefore + 1, locationForegroundCalls)
+        assertTrue("回到前台后应重订阅定位流", location.requestedTiers.size > tiersBefore)
+        assertTrue(notificationText(id, "android.subText") != BusTrackingService.BOARDING_NOTICE_OPEN_APP)
+    }
+
+    @Test
     fun locationWantedButNoFixForAMinute_showsNoFixNotice_fixClearsIt() {
         // issue #49：前台服务带着 location、权限也在，系统却一个定位都不给——以前悄悄判不了，现在通知上说
         transit.realtime.lineDetailResult = Result.success(

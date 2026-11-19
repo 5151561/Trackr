@@ -326,6 +326,8 @@ internal object WatchTogetherTracker {
                     boardingMissStreak = wl.missStreak,
                     boardingLastFixElapsedMillis = wl.lastFixElapsedMillis,
                     boardingPositiveFixElapsedMillis = wl.positiveFixElapsedMillis,
+                    boardingPositiveLat = wl.positiveFixLat,
+                    boardingPositiveLng = wl.positiveFixLng,
                     updatedAtMillis = input.nowMillis
                 )
                 val result = BoardingDetector.evaluateCandidate(probe, candidate, input)
@@ -336,14 +338,18 @@ internal object WatchTogetherTracker {
                             confirmStreak = result.state.boardingConfirmStreak,
                             missStreak = result.state.boardingMissStreak,
                             lastFixElapsedMillis = result.state.boardingLastFixElapsedMillis,
-                        positiveFixElapsedMillis = result.state.boardingPositiveFixElapsedMillis
+                            positiveFixElapsedMillis = result.state.boardingPositiveFixElapsedMillis,
+                            positiveFixLat = result.state.boardingPositiveLat,
+                            positiveFixLng = result.state.boardingPositiveLng
                         )
                     }
                     BoardingDetector.Verdict.PENDING -> return atStop(wl, candidate, candidateId, lp).copy(
                         confirmStreak = result.state.boardingConfirmStreak,
                         missStreak = result.state.boardingMissStreak,
                         lastFixElapsedMillis = result.state.boardingLastFixElapsedMillis,
-                        positiveFixElapsedMillis = result.state.boardingPositiveFixElapsedMillis
+                        positiveFixElapsedMillis = result.state.boardingPositiveFixElapsedMillis,
+                        positiveFixLat = result.state.boardingPositiveLat,
+                        positiveFixLng = result.state.boardingPositiveLng
                     )
                     BoardingDetector.Verdict.MISSED -> {
                         // 没赶上：放掉这辆，改等这条线的下一班
@@ -411,7 +417,9 @@ internal object WatchTogetherTracker {
         candidateSinceMillis = 0L,
         confirmStreak = 0,
         missStreak = 0,
-        positiveFixElapsedMillis = -1L
+        positiveFixElapsedMillis = -1L,
+        positiveFixLat = 0.0,
+        positiveFixLng = 0.0
     )
 
     /**

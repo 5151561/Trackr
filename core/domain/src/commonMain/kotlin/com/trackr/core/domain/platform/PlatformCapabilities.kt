@@ -151,6 +151,9 @@ interface LocationSource {
     /** 是否有精确定位权限 */
     fun hasPrecisePermission(): Boolean
 
+    /** 是否有后台定位权限（Android 10+「始终允许」）；后台启动的前台服务没有它时系统不会在后台给定位 */
+    fun hasBackgroundLocationPermission(): Boolean = hasPrecisePermission()
+
     /** 是否有任一定位权限（精确或模糊）；首页取城市、附近站用模糊定位也行 */
     fun hasAnyPermission(): Boolean = hasPrecisePermission()
 

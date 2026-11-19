@@ -150,6 +150,24 @@ class BusTrackingService : LifecycleService() {
     /** 带上 location 类型那一刻 App 在不在后台（判定记录诊断用）；null = 没带上 */
     private var locationTypeFromBackground: Boolean? = null
 
+    /**
+     * 前台服务是在后台带上的 location 类型，且只有「使用期间」定位权限（issue #49）：
+     * Android 11+ 在定时提醒等后台豁免场景下 startForeground(..., LOCATION) 不会抛异常，
+     * 但系统不给后台 while-in-use 定位；必须等 App 回到前台再调一次 startForeground(..., LOCATION) 才能恢复。
+     */
+    private val needsForegroundLocationUpgrade: Boolean
+        get() = foregroundHasLocation &&
+            locationTypeFromBackground == true &&
+            !locationSource.hasBackgroundLocationPermission()
+
+    /** 测试替换：判断 App 当前是否在前台 */
+    @VisibleForTesting
+    internal var appInForegroundProvider: () -> Boolean = {
+        runCatching {
+            ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+        }.getOrDefault(false)
+    }
+
     /** 从什么时候起（单调毫秒）有会话要定位；-1 = 现在没有。连续要了一分钟还没收到定位就在通知上说 */
     private var locationWantedSinceMillis: Long = -1L
 
@@ -216,8 +234,12 @@ class BusTrackingService : LifecycleService() {
     internal fun onAppForeground() {
         // 还没进前台（服务刚创建，加观察者时 App 本来就在前台会马上回调）：进前台那一步自己会带 location
         if (foregroundSessionId == null) return
+        val wasStarved = isLocationStarved()
         lastForegroundMoveFailMillis = -1L
-        upgradeLocationTypeIfNeeded(force = true)
+        upgradeLocationTypeIfNeeded(force = true, inForeground = true)
+        if (wasStarved && activeTier != LocationCadence.Tier.OFF) {
+            restartLocationUpdates()
+        }
         val live = trackingRepository.sessions.value.filter { !it.interrupted && it.state.isActive }
         val focus = live.lastOrNull() ?: return
         if (foregroundSessionId != focus.sessionId || foregroundAliasKey != null) moveForegroundTo(focus, live)
@@ -357,7 +379,12 @@ class BusTrackingService : LifecycleService() {
      * 进入前台。带 location 类型失败时（如从后台启动、Android 14+ 不允许使用期间定位）退回只用 specialUse。
      * @return 是否成功带上了 location 类型
      */
-    private fun enterForeground(notification: Notification, wantLocation: Boolean, notificationId: Int): Boolean {
+    private fun enterForeground(
+        notification: Notification,
+        wantLocation: Boolean,
+        notificationId: Int,
+        inForeground: Boolean = isAppInForeground()
+    ): Boolean {
         val baseType = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
         } else {
@@ -368,7 +395,10 @@ class BusTrackingService : LifecycleService() {
             try {
                 foregroundStarter(notificationId, notification, withLocation)
                 lastForegroundServiceType = withLocation
-                if (!foregroundHasLocation) locationTypeFromBackground = !isAppInForeground()
+                val fromBg = !inForeground
+                if (!foregroundHasLocation || (locationTypeFromBackground == true && !fromBg)) {
+                    locationTypeFromBackground = fromBg
+                }
                 foregroundHasLocation = true
                 foregroundNotifyId = notificationId
                 postedNotifyIds += notificationId
@@ -673,7 +703,7 @@ class BusTrackingService : LifecycleService() {
         if (phase == LegPhase.SINGLE && session.state.pinnedBusId != null) return null
         return when {
             !locationSource.hasPrecisePermission() -> BOARDING_NOTICE_NO_PERMISSION
-            !locationTrackingAllowed -> BOARDING_NOTICE_OPEN_APP
+            !locationTrackingAllowed || needsForegroundLocationUpgrade -> BOARDING_NOTICE_OPEN_APP
             TrackingEngine.locationTier(session.state, locationEnabled = true, stopAfterBoarding) != LocationCadence.Tier.OFF &&
                 isLocationStarved() -> BOARDING_NOTICE_NO_FIX
             else -> null
@@ -691,9 +721,7 @@ class BusTrackingService : LifecycleService() {
         return newestFixElapsedMillis < 0L || now - newestFixElapsedMillis >= NO_FIX_NOTICE_AFTER_MILLIS
     }
 
-    private fun isAppInForeground(): Boolean = runCatching {
-        ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
-    }.getOrDefault(false)
+    private fun isAppInForeground(): Boolean = appInForegroundProvider()
 
     /** 判定记录里的定位来源诊断（`ld`） */
     private fun locationDiagnostics(): LocationDiagnostics {
@@ -799,20 +827,26 @@ class BusTrackingService : LifecycleService() {
      * 之前只在进前台那一刻决定一次，这一整次追踪都判不了上车。现在会话每次变化时补试（用户回到 App、
      * 或在「我的」里打开开关时就能成功）；不是开关触发的补试最多一分钟一次。
      */
-    private fun upgradeLocationTypeIfNeeded(force: Boolean) {
-        if (locationTrackingAllowed) return
+    private fun upgradeLocationTypeIfNeeded(force: Boolean, inForeground: Boolean = isAppInForeground()) {
+        val needBgUpgrade = needsForegroundLocationUpgrade && inForeground
+        if (locationTrackingAllowed && !needBgUpgrade) return
         val focusId = foregroundSessionId ?: return
         val live = trackingRepository.sessions.value.filter { !it.interrupted && it.state.isActive }
         val focus = live.firstOrNull { it.sessionId == focusId } ?: return
         if (live.none { TrackingEngine.wantsLocation(it.target, stopAfterBoarding) }) return
         if (!locationSource.hasPrecisePermission()) return
         val now = monotonicClock.elapsedMillis()
-        if (!force && lastLocationUpgradeAttemptMillis >= 0L &&
+        if (!force && !needBgUpgrade && lastLocationUpgradeAttemptMillis >= 0L &&
             now - lastLocationUpgradeAttemptMillis < LOCATION_UPGRADE_RETRY_MILLIS
         ) return
         lastLocationUpgradeAttemptMillis = now
         locationTrackingAllowed = try {
-            enterForeground(notificationOf(focus), wantLocation = true, notificationId = foregroundNotifyId)
+            enterForeground(
+                notification = notificationOf(focus),
+                wantLocation = true,
+                notificationId = foregroundNotifyId,
+                inForeground = inForeground
+            )
         } catch (e: IllegalStateException) {
             Log.w(TAG, "Cannot add location type to foreground tracking", e)
             false
@@ -822,8 +856,16 @@ class BusTrackingService : LifecycleService() {
         }
         if (locationTrackingAllowed) {
             locationSource.lastKnownFixes().forEach { onServiceFix(it) }
-            updateLocationCadence()
+            if (needBgUpgrade) restartLocationUpdates() else updateLocationCadence()
         }
+    }
+
+    /** 重启定位收集（从后台升回前台、或长时间收不到定位后重新注册监听器） */
+    private fun restartLocationUpdates() {
+        locationJob?.cancel()
+        locationJob = null
+        activeTier = LocationCadence.Tier.OFF
+        updateLocationCadence()
     }
 
     /** 按所有会话里最勤的那一档调整定位频率；都不需要时关闭定位 */

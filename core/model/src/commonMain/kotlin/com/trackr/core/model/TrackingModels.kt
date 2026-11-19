@@ -121,6 +121,9 @@ data class WatchedLine(
     val lastFixElapsedMillis: Long = -1L,
     /** 第一个「像是上了车」的定位的单调时刻（同 `TrackingSessionState.boardingPositiveFixElapsedMillis`）；-1 = 还没有 */
     val positiveFixElapsedMillis: Long = -1L,
+    /** 第一个「像是上了车」的定位坐标（WGS-84） */
+    val positiveFixLat: Double = 0.0,
+    val positiveFixLng: Double = 0.0,
     val approachAlertedBusId: String? = null,
     val arrivedAlertedBusId: String? = null
 )

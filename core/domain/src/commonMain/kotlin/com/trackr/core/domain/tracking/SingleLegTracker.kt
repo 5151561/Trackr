@@ -366,6 +366,8 @@ internal object SingleLegTracker {
             boardingConfirmStreak = evaluated.state.boardingConfirmStreak,
             boardingMissStreak = evaluated.state.boardingMissStreak,
             boardingPositiveFixElapsedMillis = evaluated.state.boardingPositiveFixElapsedMillis,
+            boardingPositiveLat = evaluated.state.boardingPositiveLat,
+            boardingPositiveLng = evaluated.state.boardingPositiveLng,
             boardingLastFixElapsedMillis = evaluated.state.boardingLastFixElapsedMillis
         )
         // 超时兜底给的结论单线路不认（人可能正往站上走）：只放掉待确认，补判和「像是上了车」的那个定位留着
@@ -374,8 +376,11 @@ internal object SingleLegTracker {
                 nowMillis - session.boardingCandidateSinceMillis >= BoardingDetector.CANDIDATE_TIMEOUT_MILLIS)
         ) {
             return BoardingCheck(
-                BoardingDetector.clearBoardingFields(state)
-                    .copy(boardingPositiveFixElapsedMillis = state.boardingPositiveFixElapsedMillis),
+                BoardingDetector.clearBoardingFields(state).copy(
+                    boardingPositiveFixElapsedMillis = state.boardingPositiveFixElapsedMillis,
+                    boardingPositiveLat = state.boardingPositiveLat,
+                    boardingPositiveLng = state.boardingPositiveLng
+                ),
                 false
             )
         }
@@ -510,20 +515,41 @@ internal object SingleLegTracker {
 
     /** 判上车相关的字段全部清掉（判出上车、不再判上车时用） */
     private fun clearAllBoarding(state: TrackingSessionState): TrackingSessionState =
-        BoardingDetector.clearBoardingFields(state)
-            .copy(nearWaitStopAtMillis = 0L, boardWatchSinceMillis = 0L, boardingPositiveFixElapsedMillis = -1L)
+        BoardingDetector.clearBoardingFields(state).copy(
+            nearWaitStopAtMillis = 0L,
+            boardWatchSinceMillis = 0L,
+            boardingPositiveFixElapsedMillis = -1L,
+            boardingPositiveLat = 0.0,
+            boardingPositiveLng = 0.0
+        )
 
     /** 补判阶段用的同一条「两个定位」规则（[BoardingDetector.confirmPositive]） */
     private fun confirmPositive(state: TrackingSessionState, input: BoardingDetector.Input): BoardingCheck {
         val fix = input.user ?: input.coarseUser ?: return BoardingCheck(state, false)
-        val (first, confirmed) = BoardingDetector.confirmPositive(state.boardingPositiveFixElapsedMillis, fix)
-        return BoardingCheck(state.copy(boardingPositiveFixElapsedMillis = first), confirmed)
+        val anchor = BoardingDetector.PositiveAnchor(
+            elapsedMillis = state.boardingPositiveFixElapsedMillis,
+            lat = state.boardingPositiveLat,
+            lng = state.boardingPositiveLng
+        )
+        val result = BoardingDetector.confirmPositive(anchor, fix, input.boardStopLat, input.boardStopLng)
+        return BoardingCheck(
+            state.copy(
+                boardingPositiveFixElapsedMillis = result.anchor.elapsedMillis,
+                boardingPositiveLat = result.anchor.lat,
+                boardingPositiveLng = result.anchor.lng
+            ),
+            result.confirmed
+        )
     }
 
     /** 精定位显示人还在（又回到）候车站上：之前那次「像是上了车」作废 */
     private fun resetPositiveWhenBackAtStop(state: TrackingSessionState, input: BoardingDetector.Input): TrackingSessionState =
         if (state.boardingPositiveFixElapsedMillis >= 0L && BoardingDetector.isBackAtBoardStop(input)) {
-            state.copy(boardingPositiveFixElapsedMillis = -1L)
+            state.copy(
+                boardingPositiveFixElapsedMillis = -1L,
+                boardingPositiveLat = 0.0,
+                boardingPositiveLng = 0.0
+            )
         } else {
             state
         }

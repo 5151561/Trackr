@@ -33,6 +33,17 @@ internal object BoardingDetector {
     /** 判上车：两个定位相隔超过这么久就不算同一回事 */
     const val CONFIRM_MAX_GAP_MILLIS = 2 * 60_000L
 
+    /** 判上车：人与车的上报位置最多相距这么远（车载 GPS 滞后 20–30 秒也只在几百米内，排除人在几公里外下游的误判） */
+    const val MAX_USER_TO_BUS_METERS = 600
+
+    /** 判上车：第二个定位至少要比第一个移动这么远（排除人在站下游原地不动、GPS 漂移的误判） */
+    const val CONFIRM_MIN_MOVE_METERS = 30
+
+    /** 判上车：第二个定位离候车站至少比第一个多走这么远；或总位移 ≥ [CONFIRM_TURN_MOVE_METERS] 且没有往回走（转弯路段） */
+    private const val CONFIRM_MIN_AWAY_PROGRESS_METERS = 20
+    private const val CONFIRM_TURN_MOVE_METERS = 60
+    private const val CONFIRM_TURN_MAX_BACKTRACK_METERS = 15
+
     /** 判没赶上：连续这么多个定位都显示人还在站上、车已过站开远（5 秒一个定位，大约 20 秒） */
     const val MISS_STREAK = 4
     const val RELOCK_STREAK = 3
@@ -228,7 +239,7 @@ internal object BoardingDetector {
         val userToBus = distance(fix.lat, fix.lng, candidate.wgsLat, candidate.wgsLng)
             // 车没有坐标：判不了方向，同样退回「人已经走远」
             ?: return userToStop >= FAR_FROM_BOARD_STOP_METERS + margin
-        return userToBus < userToStop
+        return userToBus < userToStop && userToBus <= MAX_USER_TO_BUS_METERS + margin
     }
 
     /** 用户离上车站 A 的距离（米），算不出时为 null */
@@ -238,22 +249,58 @@ internal object BoardingDetector {
         return distance(user.lat, user.lng, input.boardStopLat, input.boardStopLng)
     }
 
+    /** 第一个「像是上了车」的定位锚点（单调时刻 + 坐标） */
+    data class PositiveAnchor(
+        val elapsedMillis: Long = -1L,
+        val lat: Double = 0.0,
+        val lng: Double = 0.0
+    ) {
+        val hasCoords: Boolean get() = lat > 0.0 && lng > 0.0
+    }
+
+    /** [confirmPositive] 的结果：更新后的第一个定位锚点，以及是否已确认上车 */
+    data class PositiveConfirm(
+        val anchor: PositiveAnchor,
+        val confirmed: Boolean
+    )
+
     /**
-     * 「像是上了车」不能一个定位说了算（定位会飘；车刚起步、还没真开走时也可能凑巧满足）：
-     * 记下第一个这么说的定位，要等至少 [CONFIRM_MIN_GAP_MILLIS] 之后的**另一个**定位也这么说才算上了车。
+     * 「像是上了车」不能一个定位说了算（定位会飘；人也可能就待在站下游 150 m 原地没动）：
+     * 记下第一个这么说的定位，要等至少 [CONFIRM_MIN_GAP_MILLIS] 之后的**另一个**定位也这么说、
+     * 且人确实向前移动了（位移 ≥ max([CONFIRM_MIN_MOVE_METERS], 1.5×精度)，并继续远离候车站，
+     * 或转弯位移 ≥ [CONFIRM_TURN_MOVE_METERS] 且没有往回走）才算上了车。
      * 两个定位相隔超过 [CONFIRM_MAX_GAP_MILLIS] 就不算同一回事，从头再来。
-     *
-     * @param firstPositiveElapsed 第一个「像是上了车」的定位的单调时刻，-1 = 还没有
-     * @param fix 这一个也「像是上了车」的定位
-     * @return 更新后的第一个定位时刻，以及是不是可以判上车了
      */
-    fun confirmPositive(firstPositiveElapsed: Long, fix: UserPosition): Pair<Long, Boolean> {
-        val gap = fix.elapsedMillis - firstPositiveElapsed
-        return when {
-            firstPositiveElapsed < 0L || gap < 0L || gap > CONFIRM_MAX_GAP_MILLIS -> fix.elapsedMillis to false
-            gap >= CONFIRM_MIN_GAP_MILLIS -> firstPositiveElapsed to true
-            else -> firstPositiveElapsed to false
+    fun confirmPositive(
+        first: PositiveAnchor,
+        fix: UserPosition,
+        boardStopLat: Double = 0.0,
+        boardStopLng: Double = 0.0
+    ): PositiveConfirm {
+        val gap = fix.elapsedMillis - first.elapsedMillis
+        if (first.elapsedMillis < 0L || gap < 0L || gap > CONFIRM_MAX_GAP_MILLIS) {
+            return PositiveConfirm(PositiveAnchor(fix.elapsedMillis, fix.lat, fix.lng), false)
         }
+        if (gap < CONFIRM_MIN_GAP_MILLIS) {
+            return PositiveConfirm(first, false)
+        }
+        if (!first.hasCoords) {
+            return PositiveConfirm(first, true)
+        }
+        val moved = distance(first.lat, first.lng, fix.lat, fix.lng) ?: return PositiveConfirm(first, true)
+        val minMove = max(CONFIRM_MIN_MOVE_METERS, (fix.accuracyMeters * 1.5f).toInt())
+        if (moved < minMove) return PositiveConfirm(first, false)
+        if (boardStopLat > 0.0 && boardStopLng > 0.0) {
+            val firstToStop = distance(first.lat, first.lng, boardStopLat, boardStopLng)
+            val nowToStop = distance(fix.lat, fix.lng, boardStopLat, boardStopLng)
+            if (firstToStop != null && nowToStop != null) {
+                val awayProgress = nowToStop - firstToStop
+                val movedAway = awayProgress >= CONFIRM_MIN_AWAY_PROGRESS_METERS ||
+                    (moved >= CONFIRM_TURN_MOVE_METERS && awayProgress >= -CONFIRM_TURN_MAX_BACKTRACK_METERS)
+                if (!movedAway) return PositiveConfirm(first, false)
+            }
+        }
+        return PositiveConfirm(first, true)
     }
 
     /** 精定位显示人还在（又回到）候车站上（< [LEFT_BOARD_STOP_METERS]）：之前那次「像是上了车」作废 */
@@ -278,7 +325,11 @@ internal object BoardingDetector {
         // 没有精定位时退而用粗定位：粗定位能判「跟着车走了」（多留一个精度半径），判不了「人还在站上」
         val probe = user ?: input.coarseUser
         var miss = session.boardingMissStreak
-        var positive = session.boardingPositiveFixElapsedMillis
+        var positive = PositiveAnchor(
+            elapsedMillis = session.boardingPositiveFixElapsedMillis,
+            lat = session.boardingPositiveLat,
+            lng = session.boardingPositiveLng
+        )
         var boarded = false
         val userToStop = user?.takeIf { input.hasBoardStop }
             ?.let { distance(it.lat, it.lng, input.boardStopLat, input.boardStopLng) }
@@ -290,11 +341,11 @@ internal object BoardingDetector {
         if (isNewFix && input.hasBoardStop) {
             val fix = probe!!
             // 上车：不因为中间夹着一个不符合的定位就清零，只有精定位显示人回到站上才作废
-            if (isBackAtBoardStop(input)) positive = -1L
+            if (isBackAtBoardStop(input)) positive = PositiveAnchor()
             if (isRidingAwayWithBus(input, candidate, boardOrder)) {
-                val (first, confirmed) = confirmPositive(positive, fix)
-                positive = first
-                boarded = confirmed
+                val confirmed = confirmPositive(positive, fix, input.boardStopLat, input.boardStopLng)
+                positive = confirmed.anchor
+                boarded = confirmed.confirmed
             }
             // 没赶上：人还在站上，而且有车的位置作证——车已经过站并开远了。
             // 车只是这一轮不在数据里、或者还在往站上开（离站也有几百米），都不算
@@ -313,9 +364,11 @@ internal object BoardingDetector {
 
         val updated = session.copy(
             // 旧字段：现在只表示「已经有一个定位像是上了车」
-            boardingConfirmStreak = if (positive >= 0L) 1 else 0,
+            boardingConfirmStreak = if (positive.elapsedMillis >= 0L) 1 else 0,
             boardingMissStreak = miss,
-            boardingPositiveFixElapsedMillis = positive,
+            boardingPositiveFixElapsedMillis = positive.elapsedMillis,
+            boardingPositiveLat = positive.lat,
+            boardingPositiveLng = positive.lng,
             boardingLastFixElapsedMillis = if (isNewFix) probe!!.elapsedMillis else session.boardingLastFixElapsedMillis
         )
         val timedOut = input.nowMillis - session.boardingCandidateSinceMillis >= CANDIDATE_TIMEOUT_MILLIS
@@ -378,6 +431,8 @@ internal object BoardingDetector {
         boardingMissStreak = 0,
         boardingLastFixElapsedMillis = -1L,
         boardingPositiveFixElapsedMillis = -1L,
+        boardingPositiveLat = 0.0,
+        boardingPositiveLng = 0.0,
         boardingLockAttempts = 0,
         relockCandidateBusId = null,
         relockStreak = 0,

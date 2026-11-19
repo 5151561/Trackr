@@ -184,6 +184,11 @@ class FakeLocationSource(
 
     override fun hasPrecisePermission(): Boolean = precisePermission
 
+    /** 是否有后台定位权限；默认跟着 [precisePermission] */
+    var backgroundPermission: Boolean? = null
+
+    override fun hasBackgroundLocationPermission(): Boolean = backgroundPermission ?: precisePermission
+
     /** 有任一定位权限；默认跟着 [precisePermission] */
     var anyPermission: Boolean? = null
 

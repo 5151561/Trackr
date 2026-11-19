@@ -412,10 +412,13 @@ data class TrackingSessionState(
     /** 最近一次用于判上车的定位单调时钟时间；同一定位只计一次 */
     val boardingLastFixElapsedMillis: Long = -1L,
     /**
-     * 单线路判上车：第一次「看着像上了车」的那个定位的单调时刻（和 [boardingLastFixElapsedMillis] 同一时基）；-1 = 还没有。
-     * 要隔一段时间之后的另一个定位也这么说，才算真上了车
+     * 判上车：第一次「看着像上了车」的那个定位的单调时刻（和 [boardingLastFixElapsedMillis] 同一时基）；-1 = 还没有。
+     * 要隔一段时间之后的另一个定位也这么说、且人确实往前移动了，才算真上了车
      */
     val boardingPositiveFixElapsedMillis: Long = -1L,
+    /** 第一次「看着像上了车」的定位坐标（WGS-84），用来核对两次定位之间人真的在跟着走、不是原地不动 */
+    val boardingPositiveLat: Double = 0.0,
+    val boardingPositiveLng: Double = 0.0,
     /** 手动确认上车后尚未锁到车的补查次数 */
     val boardingLockAttempts: Int = 0,
     /** ON_BOARD：疑似锁错车时，离用户更近的那辆车 */
