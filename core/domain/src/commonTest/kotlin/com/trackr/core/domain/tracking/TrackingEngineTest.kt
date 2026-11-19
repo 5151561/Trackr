@@ -1243,6 +1243,35 @@ class TrackingEngineTest {
     }
 
     @Test
+    fun trajectory_noFixAtAllUntilRiding_lateRuleStillEndsTracking() {
+        // issue #49 用户记录 b928：手机在后台一直没定位，车到站、开走都没有，补建时限（3 分钟）也过了；
+        // 十几分钟后定位才来，人已沿线坐出 1.5 km——补判得开着，两个定位就结束
+        val t0 = NOW_MILLIS + 1
+        val atStop = trackPoll(beginSingle(), listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)), null, t0)
+        assertNull(atStop.session.state.boardingCandidateBusId)
+        assertTrue(atStop.session.state.boardWatchSinceMillis != 0L)
+        val departed = trackPoll(atStop.session, listOf(boardingBus("b1", order = 11, metersNorth = 300)), null, t0 + 20_000)
+        val quiet = trackPoll(departed.session, listOf(boardingBus("b1", order = 13, metersNorth = 1200)), null, t0 + 5 * 60_000)
+        assertNull(quiet.session.state.recentDepartedBusId)
+        // 定位一直开着（高精度档），定位一来就能判
+        assertEquals(LocationCadence.Tier.WAITING_NEAR, quiet.tier())
+        val first = trackPoll(quiet.session, emptyList(), serviceFixNorth(1500, ageMillis = 12_000), t0 + 12 * 60_000)
+        assertFalse(first.boarded())
+        val second = trackPoll(first.session, emptyList(), serviceFixNorth(1600, ageMillis = 1_000), t0 + 12 * 60_000 + 11_000)
+        assertTrue(second.boarded())
+    }
+
+    @Test
+    fun trajectory_fixShowsUserAwayFromStop_doesNotArmLateRule() {
+        // 有定位、人明明不在站附近（还在家里）：车到站不开补判，之后人坐别的车沿线走也不算上了这条线
+        val t0 = NOW_MILLIS + 1
+        val atStop = trackPoll(beginSingle(), listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)),
+            UserFix(STOP_LAT, STOP_LNG + 1000 / 95_000.0, 10f, ELAPSED_NOW - 2_000), t0)
+        assertNull(atStop.session.state.boardingCandidateBusId)
+        assertEquals(0L, atStop.session.state.boardWatchSinceMillis)
+    }
+
+    @Test
     fun trajectory_busMissingFromData_isNotMissed() {
         // 漏洞 6：人在车上刚离站 80–110 m，车这两轮不在数据里——以前连续两轮就判「没赶上」
         val t0 = NOW_MILLIS + 1

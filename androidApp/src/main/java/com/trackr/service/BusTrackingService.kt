@@ -4,15 +4,18 @@ import android.app.Notification
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.location.LocationManager
 import android.os.Build
 import android.util.Log
 import androidx.annotation.VisibleForTesting
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.ProcessLifecycleOwner
 import androidx.lifecycle.lifecycleScope
+import com.trackr.core.data.repository.LocationDiagnostics
 import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.data.repository.TrackingPoller
@@ -114,7 +117,7 @@ class BusTrackingService : LifecycleService() {
             locationEnabled = { locationTrackingAllowed && locationSource.hasPrecisePermission() },
             serviceFix = { serviceFix }, onEffect = ::runEffect,
             onExpired = { arrivalAlerts.triggerTrackingExpired(this, it.state) }, requestDispatcher = Dispatchers.IO,
-            boardingTrace = boardingTrace)
+            boardingTrace = boardingTrace, locationDiagnostics = ::locationDiagnostics)
     }
 
     /**
@@ -143,6 +146,16 @@ class BusTrackingService : LifecycleService() {
 
     /** 当前前台服务带着 location 类型（换前台通知时不能把它丢掉，issue #49） */
     private var foregroundHasLocation: Boolean = false
+
+    /** 带上 location 类型那一刻 App 在不在后台（判定记录诊断用）；null = 没带上 */
+    private var locationTypeFromBackground: Boolean? = null
+
+    /** 从什么时候起（单调毫秒）有会话要定位；-1 = 现在没有。连续要了一分钟还没收到定位就在通知上说 */
+    private var locationWantedSinceMillis: Long = -1L
+
+    /** 这段要定位以来收到过的定位个数、最新那个的单调时刻（-1 = 一个也没收到；只算比上一个新的） */
+    private var rawFixCount: Int = 0
+    private var newestFixElapsedMillis: Long = -1L
 
     /**
      * 前台通知没能挪走、原来那条的主人又没了时，哪条通知（key）画在 [foregroundNotifyId] 上（issue #49）。
@@ -355,6 +368,7 @@ class BusTrackingService : LifecycleService() {
             try {
                 foregroundStarter(notificationId, notification, withLocation)
                 lastForegroundServiceType = withLocation
+                if (!foregroundHasLocation) locationTypeFromBackground = !isAppInForeground()
                 foregroundHasLocation = true
                 foregroundNotifyId = notificationId
                 postedNotifyIds += notificationId
@@ -370,6 +384,7 @@ class BusTrackingService : LifecycleService() {
         foregroundStarter(notificationId, notification, baseType)
         lastForegroundServiceType = baseType
         foregroundHasLocation = false
+        locationTypeFromBackground = null
         foregroundNotifyId = notificationId
         postedNotifyIds += notificationId
         return false
@@ -659,8 +674,42 @@ class BusTrackingService : LifecycleService() {
         return when {
             !locationSource.hasPrecisePermission() -> BOARDING_NOTICE_NO_PERMISSION
             !locationTrackingAllowed -> BOARDING_NOTICE_OPEN_APP
+            TrackingEngine.locationTier(session.state, locationEnabled = true, stopAfterBoarding) != LocationCadence.Tier.OFF &&
+                isLocationStarved() -> BOARDING_NOTICE_NO_FIX
             else -> null
         }
+    }
+
+    /**
+     * 要定位已经一分钟以上，却一直没收到新定位（issue #49：用户记录里 `loc` 是 true，几十分钟一个定位都没有，
+     * 用户只看到「怎么又没自动结束」）。前台服务类型、权限都在，多半是系统 / 厂商省电不给后台定位。
+     */
+    private fun isLocationStarved(): Boolean {
+        if (locationWantedSinceMillis < 0L) return false
+        val now = monotonicClock.elapsedMillis()
+        if (now - locationWantedSinceMillis < NO_FIX_NOTICE_AFTER_MILLIS) return false
+        return newestFixElapsedMillis < 0L || now - newestFixElapsedMillis >= NO_FIX_NOTICE_AFTER_MILLIS
+    }
+
+    private fun isAppInForeground(): Boolean = runCatching {
+        ProcessLifecycleOwner.get().lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)
+    }.getOrDefault(false)
+
+    /** 判定记录里的定位来源诊断（`ld`） */
+    private fun locationDiagnostics(): LocationDiagnostics {
+        val now = monotonicClock.elapsedMillis()
+        val manager = getSystemService(Context.LOCATION_SERVICE) as? LocationManager
+        return LocationDiagnostics(
+            serviceHasLocationType = foregroundHasLocation,
+            locationTypeFromBackground = locationTypeFromBackground,
+            appInForeground = isAppInForeground(),
+            requestedTier = activeTier,
+            listening = locationJob?.isActive == true,
+            enabledProviders = runCatching { manager?.getProviders(true).orEmpty() }.getOrDefault(emptyList()),
+            lastKnownCount = runCatching { locationSource.lastKnownFixes().size }.getOrDefault(0),
+            rawFixCount = rawFixCount,
+            lastRawFixAgeMillis = newestFixElapsedMillis.takeIf { it >= 0L }?.let { now - it }
+        )
     }
 
     /**
@@ -789,6 +838,13 @@ class BusTrackingService : LifecycleService() {
                 .minByOrNull { it.intervalMillis }
                 ?: LocationCadence.Tier.OFF
         }
+        if (tier == LocationCadence.Tier.OFF) {
+            locationWantedSinceMillis = -1L
+        } else if (locationWantedSinceMillis < 0L) {
+            locationWantedSinceMillis = monotonicClock.elapsedMillis()
+            rawFixCount = 0
+            newestFixElapsedMillis = -1L
+        }
         if (tier == activeTier) return
         locationJob?.cancel()
         locationJob = null
@@ -805,6 +861,10 @@ class BusTrackingService : LifecycleService() {
     }
 
     private fun onServiceFix(fix: UserFix) {
+        if (fix.elapsedMillis > newestFixElapsedMillis) {
+            newestFixElapsedMillis = fix.elapsedMillis
+            rawFixCount++
+        }
         if (!TrackingEngine.shouldAcceptServiceFix(serviceFix, fix)) return
         serviceFix = fix
         // 服务定位同时喂给下车站辅助判定
@@ -863,6 +923,12 @@ class BusTrackingService : LifecycleService() {
 
         /** 通知副标题：前台服务没带上 location 类型（从后台开始的追踪），打开一次 App 就能补上 */
         const val BOARDING_NOTICE_OPEN_APP = "自动判上车已暂停 · 打开 App 恢复"
+
+        /** 通知副标题：要了一分钟定位一个都没收到（系统 / 省电不给后台定位） */
+        const val BOARDING_NOTICE_NO_FIX = "收不到定位 · 自动判上车可能不生效"
+
+        /** 要定位这么久还没收到新定位，就在通知上说 */
+        private const val NO_FIX_NOTICE_AFTER_MILLIS = 60_000L
 
         /** 通知副标题：没有精确定位权限 */
         const val BOARDING_NOTICE_NO_PERMISSION = "自动判上车需要精确定位权限"

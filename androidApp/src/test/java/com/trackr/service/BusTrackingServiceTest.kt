@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationManager
 import android.content.pm.ServiceInfo
 import android.os.Looper
+import android.os.SystemClock
 import androidx.test.core.app.ApplicationProvider
 import com.trackr.TrackrApp
 import com.trackr.core.data.repository.TrackingRepository
@@ -22,6 +23,7 @@ import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.WatchLine
 import com.trackr.core.model.TransitGroup
 import com.trackr.core.model.TransitLeg
+import com.trackr.core.model.UserFix
 import com.trackr.core.testing.FakeAnnouncer
 import com.trackr.core.testing.FakeLocationSource
 import com.trackr.data.repository.FakeTransitRepository
@@ -42,6 +44,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ServiceController
+import java.time.Duration
 
 /**
  * 追踪服务（Robolectric，SDK 34）：前台服务类型、定位开关、会话结束时停服务。
@@ -690,6 +693,32 @@ class BusTrackingServiceTest {
         assertEquals(withLocation, service.lastForegroundServiceType)
         assertTrue(notificationText(id, "android.subText") != BusTrackingService.BOARDING_NOTICE_OPEN_APP)
         assertEquals(LocationCadence.Tier.WAITING_NEAR, service.currentLocationTier)
+    }
+
+    @Test
+    fun locationWantedButNoFixForAMinute_showsNoFixNotice_fixClearsIt() {
+        // issue #49：前台服务带着 location、权限也在，系统却一个定位都不给——以前悄悄判不了，现在通知上说
+        transit.realtime.lineDetailResult = Result.success(
+            lineDetail("L59", listOf(LiveBus(busId = "b1", plateOrFleetNo = "闽B1", order = 6, segmentProgress = 0.5f)))
+        )
+        val notifier: LiveProgressNotifier = GlobalContext.get().get()
+        val session = requireNotNull(trackingRepository.start(singleTarget()))
+        val service = startService(session.sessionId).get()
+        waitUntil("写回") { trackingRepository.sessionById(session.sessionId)?.state?.currentBusId == "b1" }
+        assertEquals(LocationCadence.Tier.WAITING_NEAR, service.currentLocationTier)
+        val id = notifier.notificationIdOf(session.sessionId)
+        assertTrue(notificationText(id, "android.subText") != BusTrackingService.BOARDING_NOTICE_NO_FIX)
+
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(61))
+        service.onAppForeground()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals(BusTrackingService.BOARDING_NOTICE_NO_FIX, notificationText(id, "android.subText"))
+
+        location.emit(UserFix(25.007, 119.0, 10f, SystemClock.elapsedRealtime()))
+        shadowOf(Looper.getMainLooper()).idle()
+        service.onAppForeground()
+        shadowOf(Looper.getMainLooper()).idle()
+        assertTrue(notificationText(id, "android.subText") != BusTrackingService.BOARDING_NOTICE_NO_FIX)
     }
 
     @Test

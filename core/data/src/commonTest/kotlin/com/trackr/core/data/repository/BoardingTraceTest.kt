@@ -1,5 +1,6 @@
 package com.trackr.core.data.repository
 
+import com.trackr.core.domain.tracking.LocationCadence
 import com.trackr.core.domain.tracking.TrackingEngine
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
@@ -101,5 +102,35 @@ class BoardingTraceTest {
         assertNull(laterJson["stops"])
         assertNull(laterJson["fix"])
         assertEquals("OFF", laterJson.getValue("tier").jsonPrimitive.content)
+        assertNull(laterJson["ld"], "平台没给诊断就不写")
+    }
+
+    @Test
+    fun line_writesLocationDiagnostics() {
+        val session = begin()
+        val buses = listOf(bus("b1", 10))
+        val result = poll(session, buses, null)
+        val diag = LocationDiagnostics(
+            serviceHasLocationType = true,
+            locationTypeFromBackground = true,
+            appInForeground = false,
+            requestedTier = LocationCadence.Tier.BOARDING_CHECK,
+            listening = true,
+            enabledProviders = listOf("fused", "gps"),
+            lastKnownCount = 0,
+            rawFixCount = 0,
+            lastRawFixAgeMillis = null
+        )
+        val text = BoardingTrace.line(session, result.session.state, detail(buses), result.effects,
+            locationEnabled = true, serviceFix = null, appFix = null, nowMillis = now, nowElapsedMillis = elapsed,
+            includeStops = false, diagnostics = diag)
+        val ld = Json.parseToJsonElement(text).jsonObject.getValue("ld").jsonObject
+        assertTrue(ld.getValue("fgs").jsonPrimitive.boolean)
+        assertTrue(ld.getValue("fgsBg").jsonPrimitive.boolean)
+        assertFalse(ld.getValue("fg").jsonPrimitive.boolean)
+        assertEquals("BOARDING_CHECK", ld.getValue("tier").jsonPrimitive.content)
+        assertEquals(listOf("fused", "gps"), ld.getValue("prov").jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(0, ld.getValue("raw").jsonPrimitive.int)
+        assertNull(ld["rawAge"], "一个定位都没收到就不写年龄")
     }
 }

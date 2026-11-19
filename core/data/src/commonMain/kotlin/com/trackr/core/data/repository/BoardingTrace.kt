@@ -28,6 +28,7 @@ import kotlinx.serialization.json.putJsonObject
  * - `buses` 候车站前后几站内的车：`id` / `o` 站序 / `p` 站间进度 / `arr` 到站标志 / `eta` / `lat` / `lng`
  * - `before` / `after` 判定前后的状态（见 [putState]）、`fx` 这一轮的效果
  * - `stops` 整条线的站点坐标 `[站序, 纬度, 经度]`，每次追踪只在第一行带一次（补判「人沿线过了站」要用）
+ * - `ld` 定位来源的诊断（[LocationDiagnostics]，平台给了才有）：查「`loc` 是 true 却一个定位都没有」
  */
 object BoardingTrace {
 
@@ -62,7 +63,8 @@ object BoardingTrace {
         appFix: UserFix?,
         nowMillis: Long,
         nowElapsedMillis: Long,
-        includeStops: Boolean
+        includeStops: Boolean,
+        diagnostics: LocationDiagnostics? = null
     ): String {
         val before = session.state
         val order = before.targetOrder
@@ -95,6 +97,19 @@ object BoardingTrace {
             put("before", stateJson(before, nowMillis))
             put("after", stateJson(after, nowMillis))
             putJsonArray("fx") { effects.forEach { add(effectName(it)) } }
+            diagnostics?.let { d ->
+                putJsonObject("ld") {
+                    put("fgs", d.serviceHasLocationType)
+                    d.locationTypeFromBackground?.let { put("fgsBg", it) }
+                    put("fg", d.appInForeground)
+                    put("tier", d.requestedTier.name)
+                    put("listen", d.listening)
+                    putJsonArray("prov") { d.enabledProviders.forEach { add(it) } }
+                    put("lk", d.lastKnownCount)
+                    put("raw", d.rawFixCount)
+                    d.lastRawFixAgeMillis?.let { put("rawAge", it) }
+                }
+            }
             if (includeStops) {
                 putJsonArray("stops") {
                     detail.stops.forEach { stop ->
@@ -149,3 +164,30 @@ object BoardingTrace {
         else -> "OTHER"
     }
 }
+
+/**
+ * 追踪服务这一刻的定位来源状态，写进判定记录的 `ld`（issue #49：用户记录里每行 `loc` 都是 true，
+ * 却几十分钟一个定位都没有，光看输入分不清是没去要、系统不给、还是来源本身没数据）。
+ *
+ * @param serviceHasLocationType 前台服务带着 location 类型（`loc` 的来源之一）
+ * @param locationTypeFromBackground 带上 location 类型那一刻 App 在不在后台（定时提醒在后台拉起追踪时为 true，
+ *   Android 11+ 这时不给「使用期间」定位）；null = 没带上
+ * @param appInForeground App 现在有没有界面在前台
+ * @param requestedTier 服务正在按哪一档要定位（OFF = 没在要）
+ * @param listening 定位监听还挂着（流没有因为没有来源而结束）
+ * @param enabledProviders 系统里开着的定位来源
+ * @param lastKnownCount 各来源缓存的最近定位里有几个不是空的（系统不给定位时全是空的）
+ * @param rawFixCount 这一档开着以来服务收到的定位个数（不管准不准）
+ * @param lastRawFixAgeMillis 服务上一次收到定位是多久以前；null = 这一档开着以来一个也没收到
+ */
+data class LocationDiagnostics(
+    val serviceHasLocationType: Boolean,
+    val locationTypeFromBackground: Boolean?,
+    val appInForeground: Boolean,
+    val requestedTier: LocationCadence.Tier,
+    val listening: Boolean,
+    val enabledProviders: List<String>,
+    val lastKnownCount: Int,
+    val rawFixCount: Int,
+    val lastRawFixAgeMillis: Long?
+)

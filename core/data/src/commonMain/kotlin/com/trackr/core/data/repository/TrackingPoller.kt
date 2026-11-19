@@ -30,7 +30,9 @@ class TrackingPoller(
     private val onExpired: (TrackingSession) -> Unit = {},
     private val requestDispatcher: CoroutineDispatcher = Dispatchers.Default,
     /** 判上车的判定记录（issue #49）；默认不记 */
-    private val boardingTrace: BoardingTraceLog = NoBoardingTraceLog
+    private val boardingTrace: BoardingTraceLog = NoBoardingTraceLog,
+    /** 判定记录里的定位来源诊断（issue #49）；平台不给就不记 */
+    private val locationDiagnostics: () -> LocationDiagnostics? = { null }
 ) {
     private val watchPoller = WatchTogetherPoller(realtime)
 
@@ -101,7 +103,7 @@ class TrackingPoller(
                             val reduced = TrackingEngine.reducePoll(latest, detail, canLocate, fix, appFix, nowMillis, nowElapsed, autoStop)
                             trace = if (BoardingTrace.shouldRecord(latest.state, reduced.session.state, reduced.effects, autoStop)) {
                                 BoardingTrace.line(latest, reduced.session.state, detail, reduced.effects, canLocate, fix, appFix,
-                                    nowMillis, nowElapsed, includeStops = !tracedStops)
+                                    nowMillis, nowElapsed, includeStops = !tracedStops, diagnostics = locationDiagnostics())
                             } else {
                                 null
                             }

@@ -23,7 +23,8 @@ import com.trackr.core.model.TrackingSessionState
  *     凭记忆照样开始确认；车过站后最多 [RECOVERY_MAX_STOPS_PAST] 站、[DEPARTURE_RECOVERY_WINDOW_MILLIS] 内都能补建；
  *   - 补判：一开始确认就记下 [TrackingSessionState.boardWatchSinceMillis]，之后 [BOARD_WATCH_MILLIS] 内即使待确认
  *     超时放掉了，只要定位显示人在这条线路上、已经过了站（[BoardingDetector.isPastStopAlongLine]）就判上车；
- *     只有「没赶上」才撤掉补判；
+ *     只有「没赶上」才撤掉补判；车到站 / 过站那一轮一个定位都没有（手机在后台拿不到定位）时也开补判，
+ *     不然定位后来才到、人早已坐出几站，这次追踪就再也结束不了；
  *   - 「没赶上」要有车的位置作证（车已过站且开远），车只是这一轮不在数据里不算，而且要连续 [BoardingDetector.MISS_STREAK] 次；
  *   - 不因为一次不符合就当成没上车：车过站后 [DEPARTURE_RECOVERY_WINDOW_MILLIS] 内每一轮都重新判要不要开始确认，
  *     某一轮线路数据里缺候车站坐标也不清掉已有的判定。
@@ -440,7 +441,9 @@ internal object SingleLegTracker {
         if (departed.order !in (session.targetOrder + 1)..(session.targetOrder + RECOVERY_MAX_STOPS_PAST)) return session
         if (shouldRecover(session, departed, input, nowMillis)) return withCandidate(session, previousId, nowMillis)
         // 这一轮还看不出来（没定位、或定位不符合）：记下这辆车，保持高频定位与轮询，时限内接着判
-        return session.copy(recentDepartedBusId = previousId, recentDepartedAtMillis = nowMillis)
+        val noted = session.copy(recentDepartedBusId = previousId, recentDepartedAtMillis = nowMillis)
+        // 一个定位都没有：补判也开上，3 分钟的补建时限过了、定位才来也还能判
+        return if (input.user == null && input.coarseUser == null) armWatchWithoutFix(noted, nowMillis) else noted
     }
 
     /**
@@ -475,9 +478,18 @@ internal object SingleLegTracker {
         val hasFix = input.user != null || input.coarseUser != null
         // 有定位按定位；这一轮没定位就看站旁记忆（车到站那一刻恰好没定位，issue #49）
         val start = if (hasFix) BoardingDetector.shouldStartCandidate(input) else nearStopRecently(state, nowMillis)
-        if (!start) return state
+        if (!start) return if (hasFix) state else armWatchWithoutFix(state, nowMillis)
         return withCandidate(state, busId, nowMillis)
     }
+
+    /**
+     * 车到站 / 刚过站，这一轮却一个定位都没有、也没有站旁记忆：判不了人在不在站上，但补判照样开
+     * （issue #49：手机在后台一直拿不到定位，等定位终于来了人早已坐出几站，补判没开就再也结束不了）。
+     * 只开补判、不建待确认：之后的定位要沿线过了站才算上车，人不在这条线上不会误判。
+     * 每有一班车到站 / 过站就从这一刻重新算 [BOARD_WATCH_MILLIS]——人可能等的是后面那班。
+     */
+    private fun armWatchWithoutFix(state: TrackingSessionState, nowMillis: Long): TrackingSessionState =
+        state.copy(boardWatchSinceMillis = nowMillis)
 
     /** 记下站旁记忆；补判过期了就撤掉 */
     private fun rememberNearStop(
