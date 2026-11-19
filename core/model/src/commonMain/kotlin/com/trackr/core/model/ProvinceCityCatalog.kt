@@ -283,7 +283,56 @@ object ProvinceCityCatalog {
     )
 
     /**
-     * 剥离行政区划后缀，提取城市核心名称
+     * GB/T 2260 省级行政区划前 2 位编码 -> Trackr 省份短名。
+     * 掌上公交（mygolbsCityCode）与朗斯（lenzAreaCode）均携带 6 位国家标准区划码，
+     * 据此可将全国所有县级市/县精准归省，避免未收录的小县落入「其他」。
+     */
+    private val PROVINCE_BY_CODE2: Map<String, String> = mapOf(
+        "11" to "直辖市", "12" to "直辖市", "31" to "直辖市", "50" to "直辖市",
+        "13" to "河北", "14" to "山西", "15" to "内蒙古",
+        "21" to "辽宁", "22" to "吉林", "23" to "黑龙江",
+        "32" to "江苏", "33" to "浙江", "34" to "安徽", "35" to "福建", "36" to "江西", "37" to "山东",
+        "41" to "河南", "42" to "湖北", "43" to "湖南", "44" to "广东", "45" to "广西", "46" to "海南",
+        "51" to "四川", "52" to "贵州", "53" to "云南", "54" to "西藏",
+        "61" to "陕西", "62" to "甘肃", "63" to "青海", "64" to "宁夏", "65" to "新疆",
+        "71" to "港澳台", "81" to "港澳台", "82" to "港澳台"
+    )
+
+    private val MUNICIPALITY_CODE2: Set<String> = setOf("11", "12", "31", "50")
+
+    /**
+     * 根据 6 位（或至少 2 位）GB/T 2260 行政区划码推断所属省份/直辖市；无法识别返回 null
+     */
+    fun inferProvinceByAreaCode(areaCode: String?): String? {
+        val code = areaCode?.trim().orEmpty()
+        if (code.length < 2 || !code.take(2).all { it.isDigit() }) return null
+        return PROVINCE_BY_CODE2[code.take(2)]
+    }
+
+    /**
+     * 判断 6 位 GB/T 2260 区划码是否代表县级单位（县、县级市、独立市辖区等，末两位非 "00"）
+     */
+    fun isCountyAreaCode(areaCode: String?): Boolean {
+        val code = areaCode?.trim().orEmpty()
+        if (code.length != 6 || !code.all { it.isDigit() }) return false
+        if (code.take(2) !in PROVINCE_BY_CODE2) return false
+        return !code.endsWith("00")
+    }
+
+    /**
+     * 根据 6 位县级区划码计算其上级地级市（或直辖市）的 6 位区划码；非县级码返回 null。
+     * 例："450981"（北流市）-> "450900"（玉林市）；"310151"（崇明区）-> "310000"（上海市）。
+     */
+    fun prefectureCodeOf(areaCode: String?): String? {
+        if (!isCountyAreaCode(areaCode)) return null
+        val code = areaCode!!.trim()
+        val p2 = code.take(2)
+        return if (p2 in MUNICIPALITY_CODE2) "${p2}0000" else "${code.take(4)}00"
+    }
+
+    /**
+     * 剥离行政区划后缀，提取城市核心名称。
+     * 剥离后至少保留 2 个字，避免「范县」「滑县」「容县」「芒市」等二字县市被削成单字。
      */
     fun cleanCityName(raw: String): String {
         var s = raw.trim()
@@ -302,6 +351,7 @@ object ProvinceCityCatalog {
             "蒙古自治州",
             "自治州",
             "自治区",
+            "自治县",
             "地区",
             "新区",
             "盟",
@@ -311,7 +361,7 @@ object ProvinceCityCatalog {
             "省"
         )
         for (suffix in suffixes) {
-            if (s.endsWith(suffix) && s.length > suffix.length) {
+            if (s.endsWith(suffix) && s.length - suffix.length >= 2) {
                 s = s.removeSuffix(suffix)
                 break
             }
@@ -320,9 +370,11 @@ object ProvinceCityCatalog {
     }
 
     /**
-     * 根据城市名推断所属省份或直辖市
+     * 根据城市名与可选的 6 位行政区划码推断所属省份或直辖市
      */
-    fun inferProvince(cityName: String): String {
+    fun inferProvince(cityName: String, areaCode: String? = null): String {
+        inferProvinceByAreaCode(areaCode)?.let { return it }
+
         val clean = cleanCityName(cityName)
         if (clean.isBlank()) return "其他"
 

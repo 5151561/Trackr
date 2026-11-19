@@ -82,4 +82,22 @@ class CityPickerRowsTest {
         assertEquals(1, rows.size)
         assertEquals("鹤壁", (rows[0] as CityPickerRow.City).city.cityName)
     }
+
+    @Test
+    fun testMygolbsCountiesAlsoNestUnderPrefecture() {
+        val yulin = TransitCity(cityId = "440", cityName = "玉林", mygolbsCityCode = "450900", province = "广西")
+        val beiliu = TransitCity(cityId = "", cityName = "北流", mygolbsCityCode = "450981", province = "广西", parentCity = "玉林")
+        val rongxian = TransitCity(cityId = "", cityName = "容县", mygolbsCityCode = "450921", province = "广西", parentCity = "玉林")
+
+        val rows = buildCityPickerRows(listOf(yulin, beiliu, rongxian))
+
+        assertEquals(3, rows.size)
+        val pref = rows[0] as CityPickerRow.City
+        assertEquals("玉林", pref.city.cityName)
+        assertEquals(2, pref.countyCount)
+        assertEquals(
+            listOf("北流", "容县"),
+            rows.drop(1).filterIsInstance<CityPickerRow.County>().map { it.city.cityName }
+        )
+    }
 }

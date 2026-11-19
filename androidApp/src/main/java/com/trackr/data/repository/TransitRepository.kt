@@ -407,6 +407,9 @@ private class AndroidGeocoder(context: Context) : PlatformGeocoder {
             .getFromLocation(wgsLat, wgsLng, 1)
             ?.firstOrNull()
             ?: return null
-        return (address.locality ?: address.subAdminArea ?: address.adminArea) to address.subLocality
+        val city = address.locality ?: address.subAdminArea ?: address.adminArea
+        val district = address.subLocality?.takeIf { it.isNotBlank() }
+            ?: address.subAdminArea?.takeIf { it.isNotBlank() && it != city }
+        return city to district
     }
 }

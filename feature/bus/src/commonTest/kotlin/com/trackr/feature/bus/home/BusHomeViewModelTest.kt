@@ -494,6 +494,31 @@ class BusHomeViewModelTest {
     }
 
     @Test
+    fun testRelocateToMygolbsOnlyCounty_switchesEngineModeAutomatically() = runTest(main.dispatcher) {
+        val beiliu = TransitCity(
+            cityId = "",
+            cityName = "北流",
+            mygolbsCityCode = "450981",
+            province = "广西",
+            parentCity = "玉林"
+        )
+        grantFreshGpsLocation(22.708, 110.354)
+        fakeRepository.resolveCityResult = Result.success(beiliu)
+        fakeRepository.settings.setEngineMode(EngineMode.CHELAILE)
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.setCityPickerOpen(true)
+        viewModel.refreshLocationAndNearby(switchCity = true)
+        testScheduler.runCurrent()
+
+        assertEquals("北流", viewModel.uiState.value.currentCity.cityName)
+        assertEquals(EngineMode.MYGOLBS, fakeRepository.settings.engineMode.value)
+        assertEquals(false, viewModel.uiState.value.isCityPickerOpen)
+    }
+
+    @Test
     fun testStartupLocate_awayFromSavedCity_fallsBackToSavedCityCenter() = runTest(main.dispatcher) {
         // 人在杭州，已选上海：GPS 坐标查不到上海站点，改用上海中心点再查
         grantFreshGpsLocation(30.2741, 120.1551)

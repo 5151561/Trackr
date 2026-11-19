@@ -109,12 +109,13 @@ class TransitProviderCoordinator(
             val rawName = cCity.cityName.trim()
             val cleanName = ProvinceCityCatalog.cleanCityName(rawName)
             val mgMatch = mgMap[cleanName]
-            // 县级名会被 cleanCityName 削掉「县」字（滑县→滑），先用原名匹配，再退回简名
+            // 先用原名匹配朗斯，再退回简名
             val lzMatch = lzMap[rawName] ?: lzMap[cleanName]
-            val effectiveProv = if (cCity.province.isNotBlank()) {
+            val areaCode = mgMatch?.mygolbsCityCode ?: lzMatch?.lenzAreaCode
+            val effectiveProv = if (cCity.province.isNotBlank() && cCity.province != "其他") {
                 cCity.province
             } else {
-                ProvinceCityCatalog.inferProvince(cCity.cityName)
+                ProvinceCityCatalog.inferProvince(cCity.cityName, areaCode)
             }
             if (mgMatch != null) {
                 matchedMgKeys.add(cleanName)
@@ -131,7 +132,8 @@ class TransitProviderCoordinator(
                     lenzServerIp = lzMatch?.lenzServerIp,
                     lenzServerPort = lzMatch?.lenzServerPort,
                     lenzAreaCode = lzMatch?.lenzAreaCode,
-                    lenzRegion = lzMatch?.lenzRegion
+                    lenzRegion = lzMatch?.lenzRegion,
+                    parentCity = cCity.parentCity ?: mgMatch?.parentCity ?: lzMatch?.lenzRegion
                 )
             )
         }
@@ -144,10 +146,11 @@ class TransitProviderCoordinator(
                 if (lzMatch != null) {
                     matchedLzKeys.add(lzMatch.cityName)
                 }
-                val effectiveProv = if (mgCity.province.isNotBlank()) {
+                val areaCode = mgCity.mygolbsCityCode ?: lzMatch?.lenzAreaCode
+                val effectiveProv = if (mgCity.province.isNotBlank() && mgCity.province != "其他") {
                     mgCity.province
                 } else {
-                    ProvinceCityCatalog.inferProvince(mgCity.cityName)
+                    ProvinceCityCatalog.inferProvince(mgCity.cityName, areaCode)
                 }
                 val displayName = lzMatch?.cityName ?: cleanName.ifBlank { mgCity.cityName }
                 result.add(
@@ -158,7 +161,8 @@ class TransitProviderCoordinator(
                         lenzServerIp = lzMatch?.lenzServerIp,
                         lenzServerPort = lzMatch?.lenzServerPort,
                         lenzAreaCode = lzMatch?.lenzAreaCode,
-                        lenzRegion = lzMatch?.lenzRegion
+                        lenzRegion = lzMatch?.lenzRegion,
+                        parentCity = mgCity.parentCity ?: lzMatch?.lenzRegion
                     )
                 )
             }
@@ -167,25 +171,45 @@ class TransitProviderCoordinator(
         // 3. 朗斯掌上出行独有的城市列表追加合入
         for ((lzKey, lzCity) in lzMap) {
             if (!matchedLzKeys.contains(lzKey)) {
-                val effectiveProv = if (lzCity.province.isNotBlank()) {
+                val effectiveProv = if (lzCity.province.isNotBlank() && lzCity.province != "其他") {
                     lzCity.province
                 } else {
-                    ProvinceCityCatalog.inferProvince(lzCity.cityName)
+                    ProvinceCityCatalog.inferProvince(lzCity.cityName, lzCity.lenzAreaCode)
                 }
-                // 县级市保留「县」字（cleanCityName 会把「范县」削成「范」，这里不用它）
                 val displayName = lzCity.cityName
                 result.add(
                     lzCity.copy(
                         cityId = "",
                         cityName = displayName,
-                        province = effectiveProv
+                        province = effectiveProv,
+                        parentCity = lzCity.parentCity ?: lzCity.lenzRegion
                     )
                 )
             }
         }
 
-        cachedCities = result
-        return result
+        // 4. 依据 6 位国标区划码（mygolbsCityCode / lenzAreaCode）补全县级城市的上级地级市，
+        // 使车来了 / 掌上公交的县级市/县也能与朗斯一样按「省 → 地级市 → 县级」归组展示和精准定位校验。
+        val prefectureByCode = HashMap<String, String>()
+        for (city in result) {
+            val code = city.mygolbsCityCode?.trim()?.takeIf { it.length == 6 && it.all(Char::isDigit) }
+                ?: city.lenzAreaCode?.trim()?.takeIf { it.length == 6 && it.all(Char::isDigit) }
+                ?: continue
+            if (code.endsWith("00") && !prefectureByCode.containsKey(code)) {
+                prefectureByCode[code] = city.cityName
+            }
+        }
+        val enriched = result.map { city ->
+            if (!city.parentCity.isNullOrBlank()) return@map city
+            val code = city.mygolbsCityCode ?: city.lenzAreaCode
+            val prefCode = ProvinceCityCatalog.prefectureCodeOf(code)
+            val parent = prefCode?.let { prefectureByCode[it] }
+                ?.takeIf { ProvinceCityCatalog.cleanCityName(it) != ProvinceCityCatalog.cleanCityName(city.cityName) }
+            if (parent != null) city.copy(parentCity = parent) else city
+        }
+
+        cachedCities = enriched
+        return enriched
     }
 
     /**

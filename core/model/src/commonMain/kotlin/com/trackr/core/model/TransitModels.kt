@@ -38,8 +38,24 @@ data class TransitCity(
     val lenzServerPort: Int? = null,
     val lenzAreaCode: String? = null,
     /** 朗斯县级公交的上级地级市（如「范县」→「濮阳」），用于同城县级服务器联查 */
-    val lenzRegion: String? = null
+    val lenzRegion: String? = null,
+    /** 通用上级地级市（如「北流」→「玉林」、「范县」→「濮阳」），覆盖所有数据源的县级城市层级展示与定位校验 */
+    val parentCity: String? = null
 ) {
+    /** 上级地级市（优先通用字段，兼容旧数据的 [lenzRegion]） */
+    val effectivePrefecture: String?
+        get() = parentCity?.trim()?.takeIf { it.isNotBlank() }
+            ?: lenzRegion?.trim()?.takeIf { it.isNotBlank() }
+
+    /** 是否为县级城市（有上级地级市且与自身不同名） */
+    val isCountyLevel: Boolean
+        get() {
+            val pref = effectivePrefecture ?: return false
+            val cleanPref = ProvinceCityCatalog.cleanCityName(pref)
+            val cleanSelf = ProvinceCityCatalog.cleanCityName(cityName)
+            return cleanPref.isNotBlank() && cleanPref != cleanSelf
+        }
+
     /**
      * 城市全局唯一标识（用于 Compose 列表 key，防止仅支持单数据源时 cityId 为空导致 key 重复崩溃）
      */
@@ -72,8 +88,8 @@ data class TransitCity(
         }
 
         // 3. 若名称归一化一致，且双方均有省份信息，则省份不能冲突（防止跨省同名县区误匹配）
-        val selfProv = province.ifBlank { ProvinceCityCatalog.inferProvince(cityName) }
-        val otherProv = other.province.ifBlank { ProvinceCityCatalog.inferProvince(other.cityName) }
+        val selfProv = province.ifBlank { ProvinceCityCatalog.inferProvince(cityName, mygolbsCityCode ?: lenzAreaCode) }
+        val otherProv = other.province.ifBlank { ProvinceCityCatalog.inferProvince(other.cityName, other.mygolbsCityCode ?: other.lenzAreaCode) }
         if (selfProv.isNotBlank() && otherProv.isNotBlank() && selfProv != "其他" && otherProv != "其他") {
             return selfProv == otherProv
         }

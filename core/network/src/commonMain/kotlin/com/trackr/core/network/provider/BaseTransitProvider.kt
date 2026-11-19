@@ -36,8 +36,9 @@ abstract class BaseTransitProvider : ITransitProvider {
     /** 统一给城市补省份；子类只负责把自己的城市列表造出来 */
     final override suspend fun getSupportedCities(): List<TransitCity> =
         loadSupportedCities().map { city ->
-            if (city.province.isBlank()) {
-                city.copy(province = ProvinceCityCatalog.inferProvince(city.cityName))
+            if (city.province.isBlank() || city.province == "其他") {
+                val areaCode = city.mygolbsCityCode ?: city.lenzAreaCode
+                city.copy(province = ProvinceCityCatalog.inferProvince(city.cityName, areaCode))
             } else {
                 city
             }

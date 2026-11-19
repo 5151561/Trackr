@@ -409,20 +409,28 @@ class BusHomeViewModel(
 
                     val shouldSwitchCity = switchCity || !settings.hasSavedCity.value
                     if (resolvedCity != null && shouldSwitchCity) {
+                        // 定位到单数据源县级城市（如掌上公交独有的北流、掌上出行独有的范县）时，
+                        // 自动切到支持该城市的数据源，避免停在不支持该县的源导致附近站为空（Issue #57）。
+                        ensureSupportedEngine(resolvedCity)
                         settings.selectCity(resolvedCity)
                         edit {
                             it.copy(
                                 currentCity = resolvedCity,
                                 locatedCity = resolvedCity,
                                 selectedProvince = resolvedCity.province.ifBlank {
-                                    ProvinceCityCatalog.inferProvince(resolvedCity.cityName)
+                                    ProvinceCityCatalog.inferProvince(
+                                        resolvedCity.cityName,
+                                        resolvedCity.mygolbsCityCode ?: resolvedCity.lenzAreaCode
+                                    )
                                 },
+                                isCityPickerOpen = if (switchCity) false else it.isCityPickerOpen,
                                 currentLat = lat,
                                 currentLng = lng,
                                 isLocating = false,
                                 locationIssue = null
                             )
                         }
+                        loadCityLines(resolvedCity)
                         Triple(lat, lng, resolvedCity)
                     } else {
                         // 保留用户已选城市，只记录定位城市供城市弹窗展示「定位: X」
@@ -611,15 +619,14 @@ class BusHomeViewModel(
 
             // 三个数据源对城市的覆盖是重叠 + 互补的：当前源支持就留着，
             // 不支持就切到能查这个城市的第一顺位源（车来了 > 掌上公交 > 掌上出行）。
-            val supportedEngines = supportedEnginesOf(city)
-            if (supportedEngines.isNotEmpty() && state.engineMode !in supportedEngines) {
-                setEngineMode(supportedEngines.first())
-            }
+            ensureSupportedEngine(city)
 
             edit {
                 it.copy(
                     currentCity = city,
-                    selectedProvince = city.province.ifBlank { ProvinceCityCatalog.inferProvince(city.cityName) },
+                    selectedProvince = city.province.ifBlank {
+                        ProvinceCityCatalog.inferProvince(city.cityName, city.mygolbsCityCode ?: city.lenzAreaCode)
+                    },
                     isCityPickerOpen = false,
                     citySearchQuery = "",
                     currentLat = coords.first,
@@ -632,6 +639,14 @@ class BusHomeViewModel(
             loadCityLines(city)
             loadNearbyStops(coords.first, coords.second, cityOverride = city)
             refreshFavoritesRealtime()
+        }
+    }
+
+    /** 若当前数据源不支持目标城市，切到能查该城市的第一顺位数据源 */
+    private fun ensureSupportedEngine(city: TransitCity) {
+        val supportedEngines = supportedEnginesOf(city)
+        if (supportedEngines.isNotEmpty() && settings.engineMode.value !in supportedEngines) {
+            setEngineMode(supportedEngines.first())
         }
     }
 

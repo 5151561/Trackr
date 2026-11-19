@@ -102,9 +102,11 @@ data class BusHomeUiState(
             return baseList.filter {
                 it.cityName.lowercase().contains(q) ||
                     it.pinyin.lowercase().contains(q) ||
-                    // 搜上级地级市也能搜到下面的县（搜「濮阳」出范县 / 清丰 / 台前）
-                    it.lenzRegion.orEmpty().lowercase().contains(q) ||
-                    (it.province.ifBlank { ProvinceCityCatalog.inferProvince(it.cityName) }).lowercase().contains(q)
+                    // 搜上级地级市也能搜到下面的县（搜「濮阳」出范县 / 清丰 / 台前，搜「玉林」出北流）
+                    it.effectivePrefecture.orEmpty().lowercase().contains(q) ||
+                    (it.province.ifBlank {
+                        ProvinceCityCatalog.inferProvince(it.cityName, it.mygolbsCityCode ?: it.lenzAreaCode)
+                    }).lowercase().contains(q)
             }
         }
 

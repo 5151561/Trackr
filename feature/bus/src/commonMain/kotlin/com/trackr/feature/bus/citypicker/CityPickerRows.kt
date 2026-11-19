@@ -1,13 +1,13 @@
 package com.trackr.feature.bus.citypicker
 
+import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TransitCity
 
 /**
  * 城市选择器右侧列表的一行：省 → 地级市 → 县级市/县 三级。
  *
- * 三个数据源的城市粒度不一样：车来了、掌上公交基本只到地级市，
- * 掌上出行大量是县级（范县、清丰、台前…）。这里把县级条目挂到所属地级市下面，
- * 地级市本身不在列表里时补一个不可点的分组标题，保证层级不乱。
+ * 三个数据源均包含县级城市（掌上公交带 6 位国标区划码、朗斯自带上级地级市）。
+ * 这里把所有县级条目统一挂到所属地级市下面，地级市本身不在列表里时补一个不可点的分组标题，保证层级不乱。
  */
 sealed interface CityPickerRow {
     val key: String
@@ -28,14 +28,11 @@ sealed interface CityPickerRow {
     }
 }
 
-/** 朗斯带来的县级城市：有上级地级市且和上级不同名 */
-fun TransitCity.isCountyLevel(): Boolean {
-    val region = lenzRegion?.trim().orEmpty()
-    return region.isNotBlank() && region != cityName.trim()
-}
+/** 县级城市：有上级地级市且与自身不同名（覆盖车来了 / 掌上公交 / 朗斯全部数据源） */
+fun TransitCity.isCountyLevel(): Boolean = isCountyLevel
 
 /** 展示用的「所属地级市」；地级市本级返回空串 */
-fun TransitCity.prefectureTrail(): String = if (isCountyLevel()) lenzRegion.orEmpty() else ""
+fun TransitCity.prefectureTrail(): String = if (isCountyLevel) effectivePrefecture.orEmpty() else ""
 
 /**
  * 把一个省下的城市摊平成带层级的行。
@@ -44,28 +41,38 @@ fun TransitCity.prefectureTrail(): String = if (isCountyLevel()) lenzRegion.orEm
  * 父级不在列表里的县，在末尾按地级市名归组，前面加一个分组标题。
  */
 fun buildCityPickerRows(cities: List<TransitCity>): List<CityPickerRow> {
-    val countiesByPrefecture = cities
-        .filter { it.isCountyLevel() && !it.lenzServerIp.isNullOrBlank() }
-        .groupBy { it.lenzRegion.orEmpty() }
-    val countyNames = countiesByPrefecture.values.flatten().map { it.cityName }.toSet()
-
-    val rows = ArrayList<CityPickerRow>(cities.size)
-    val handledPrefectures = HashSet<String>()
+    val countiesByPrefKey = linkedMapOf<String, MutableList<TransitCity>>()
+    val prefDisplayNameByKey = HashMap<String, String>()
+    val countyKeys = HashSet<String>()
 
     for (city in cities) {
-        if (city.cityName in countyNames) continue
-        val counties = countiesByPrefecture[city.cityName].orEmpty()
+        if (!city.isCountyLevel) continue
+        val prefRaw = city.effectivePrefecture.orEmpty()
+        val prefKey = ProvinceCityCatalog.cleanCityName(prefRaw)
+        if (prefKey.isBlank()) continue
+        countiesByPrefKey.getOrPut(prefKey) { mutableListOf() }.add(city)
+        if (prefKey !in prefDisplayNameByKey) prefDisplayNameByKey[prefKey] = prefRaw
+        countyKeys.add(city.uniqueKey)
+    }
+
+    val rows = ArrayList<CityPickerRow>(cities.size)
+    val handledPrefKeys = HashSet<String>()
+
+    for (city in cities) {
+        if (city.uniqueKey in countyKeys) continue
+        val cityKey = ProvinceCityCatalog.cleanCityName(city.cityName)
+        val counties = countiesByPrefKey[cityKey].orEmpty()
         rows.add(CityPickerRow.City(city, counties.size))
-        if (counties.isNotEmpty()) {
-            handledPrefectures.add(city.cityName)
+        if (counties.isNotEmpty() && handledPrefKeys.add(cityKey)) {
             counties.forEach { rows.add(CityPickerRow.County(it)) }
         }
     }
 
-    for ((prefecture, counties) in countiesByPrefecture) {
-        if (prefecture.isBlank() || prefecture in handledPrefectures) continue
+    for ((prefKey, counties) in countiesByPrefKey) {
+        if (prefKey in handledPrefKeys) continue
+        val displayPref = prefDisplayNameByKey[prefKey] ?: prefKey
         val province = counties.firstOrNull()?.province.orEmpty()
-        rows.add(CityPickerRow.PrefectureHeader(prefecture, province))
+        rows.add(CityPickerRow.PrefectureHeader(displayPref, province))
         counties.forEach { rows.add(CityPickerRow.County(it)) }
     }
 

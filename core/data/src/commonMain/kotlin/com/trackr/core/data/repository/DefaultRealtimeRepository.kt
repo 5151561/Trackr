@@ -139,11 +139,12 @@ class DefaultRealtimeRepository(
             var resolvedName: String? = coordinator.resolveCityByLocation(wgsLat, wgsLng)
             var rawDistrict: String? = coordinator.resolveDistrictByLocation(wgsLat, wgsLng)
 
-            // 2) 若为空，尝试系统自带的逆地理（Android Geocoder）
-            if (resolvedName.isNullOrBlank()) {
+            // 2) 地级市或区县任一缺失时，用系统自带逆地理（Android Geocoder）补齐：
+            // 掌上公交逆地理只返回地级市不带区县，不补齐会导致县级定位永远落回地级市（Issue #57）。
+            if (resolvedName.isNullOrBlank() || rawDistrict.isNullOrBlank()) {
                 try {
                     geocoder.locate(wgsLat, wgsLng)?.let { (city, district) ->
-                        resolvedName = city
+                        if (resolvedName.isNullOrBlank()) resolvedName = city
                         if (rawDistrict.isNullOrBlank()) rawDistrict = district
                     }
                 } catch (_: Exception) {
@@ -152,11 +153,11 @@ class DefaultRealtimeRepository(
 
             val supportedCities = getSupportedCities().getOrDefault(emptyList())
 
-            // 2.5) 定位在县 / 县级市时，优先匹配支持列表里的同名县城（Issue #6）
+            // 2.5) 定位在县 / 县级市 / 独立县级区时，优先匹配支持列表里的同名县城（Issue #6 / #57）
             matchCountyLevelCity(rawDistrict, resolvedName, supportedCities)?.let { county ->
-                return@withContext county.copy(
-                    province = county.province.ifBlank { ProvinceCityCatalog.inferProvince(county.cityName) }
-                )
+                val prov = county.province.takeIf { it.isNotBlank() && it != "其他" }
+                    ?: ProvinceCityCatalog.inferProvince(county.cityName, county.mygolbsCityCode ?: county.lenzAreaCode)
+                return@withContext county.copy(province = prov)
             }
 
             // 3) 若仍为空，使用内置离线核心城市 Haversine 距离（80km 以内）兜底
@@ -171,19 +172,19 @@ class DefaultRealtimeRepository(
 
             val cleanTarget = ProvinceCityCatalog.cleanCityName(cityName)
 
-            // 4) 在支持的城市列表中匹配（无后缀精准与包含匹配）
+            // 4) 在支持的城市列表中匹配（先无后缀精准匹配，再退回包含匹配，避免「唐山」先命中「唐山汉沽」）
             val matched = supportedCities.firstOrNull { city ->
+                ProvinceCityCatalog.cleanCityName(city.cityName) == cleanTarget
+            } ?: supportedCities.firstOrNull { city ->
                 val cleanItem = ProvinceCityCatalog.cleanCityName(city.cityName)
-                cleanItem == cleanTarget ||
-                        cleanItem.contains(cleanTarget) ||
-                        cleanTarget.contains(cleanItem)
+                cleanItem.contains(cleanTarget) || cleanTarget.contains(cleanItem)
             }
 
             if (matched != null) {
-                val prov = if (matched.province.isNotBlank()) {
+                val prov = if (matched.province.isNotBlank() && matched.province != "其他") {
                     matched.province
                 } else {
-                    ProvinceCityCatalog.inferProvince(matched.cityName)
+                    ProvinceCityCatalog.inferProvince(matched.cityName, matched.mygolbsCityCode ?: matched.lenzAreaCode)
                 }
                 return@withContext matched.copy(province = prov)
             }
@@ -456,12 +457,12 @@ class DefaultRealtimeRepository(
 }
 
 /**
- * 把逆地理得到的区县名匹配为支持列表里的县城（Issue #6）。
+ * 把逆地理得到的区县名匹配为支持列表里的县级城市（Issue #6 / #57）。
  *
- * - 只认 "县"/"市"/"旗" 结尾的县级单位；"区" 是地级市的市辖区，交给地级市匹配，
- *   避免北京 "朝阳区" 被认成辽宁 "朝阳"。
- * - 清洗后名字必须完全相同，不用包含匹配。
- * - 能推断出省份时，县城所在省须与定位地级市所在省一致。
+ * - 县 / 县级市 / 旗：清洗后名字完全相同，省份不冲突；候选带有上级地级市时须与定位地级市一致。
+ * - 市辖区（"区" 结尾，如佛山顺德区、龙岩永定区、连云港赣榆区等撤县设区且独立公交系统）：
+ *   仅在省份**严格一致**（不能因省份未知放行）且上级地级市不冲突时匹配，
+ *   避免北京「朝阳区」误配辽宁「朝阳」或普通市辖区误配。
  */
 internal fun matchCountyLevelCity(
     rawDistrict: String?,
@@ -470,11 +471,15 @@ internal fun matchCountyLevelCity(
 ): TransitCity? {
     val district = rawDistrict?.trim().orEmpty()
     if (district.isBlank()) return null
-    if (!(district.endsWith("县") || district.endsWith("市") || district.endsWith("旗"))) return null
+    val isUrbanDistrict = district.endsWith("区")
+    if (!(district.endsWith("县") || district.endsWith("市") || district.endsWith("旗") || isUrbanDistrict)) {
+        return null
+    }
 
     val cleanDistrict = ProvinceCityCatalog.cleanCityName(district)
     if (cleanDistrict.isBlank()) return null
-    if (!prefectureName.isNullOrBlank() && ProvinceCityCatalog.cleanCityName(prefectureName) == cleanDistrict) {
+    val cleanPrefecture = prefectureName?.takeIf { it.isNotBlank() }?.let { ProvinceCityCatalog.cleanCityName(it) }
+    if (!cleanPrefecture.isNullOrBlank() && cleanPrefecture == cleanDistrict) {
         return null
     }
 
@@ -483,12 +488,33 @@ internal fun matchCountyLevelCity(
         ?.let { ProvinceCityCatalog.cleanCityName(ProvinceCityCatalog.inferProvince(it)) }
         ?.takeIf { it.isNotBlank() && it != "其他" }
 
-    return supportedCities.firstOrNull { city ->
-        if (ProvinceCityCatalog.cleanCityName(city.cityName) != cleanDistrict) return@firstOrNull false
-        if (expectedProvince == null) return@firstOrNull true
+    // 市辖区缺少省份校验时不匹配，防止跨省同名误命中
+    if (isUrbanDistrict && expectedProvince == null) return null
+
+    val candidates = supportedCities.filter { city ->
+        val cleanCity = ProvinceCityCatalog.cleanCityName(city.cityName)
+        if (cleanCity != cleanDistrict && city.cityName.trim() != district) return@filter false
+
+        val cityPrefecture = city.effectivePrefecture?.let { ProvinceCityCatalog.cleanCityName(it) }
+        if (!cleanPrefecture.isNullOrBlank() && !cityPrefecture.isNullOrBlank() && cityPrefecture != cleanPrefecture) {
+            return@filter false
+        }
+
+        if (expectedProvince == null) return@filter true
         val cityProvince = ProvinceCityCatalog.cleanCityName(
-            city.province.ifBlank { ProvinceCityCatalog.inferProvince(city.cityName) }
+            city.province.takeIf { it.isNotBlank() && it != "其他" }
+                ?: ProvinceCityCatalog.inferProvince(city.cityName, city.mygolbsCityCode ?: city.lenzAreaCode)
         )
-        cityProvince.isBlank() || cityProvince == "其他" || cityProvince == expectedProvince
+        if (isUrbanDistrict) {
+            cityProvince == expectedProvince
+        } else {
+            cityProvince.isBlank() || cityProvince == "其他" || cityProvince == expectedProvince
+        }
     }
+
+    // 多个候选时优先选明确挂在当前地级市下面的县
+    return candidates.firstOrNull { city ->
+        !cleanPrefecture.isNullOrBlank() &&
+            city.effectivePrefecture?.let { ProvinceCityCatalog.cleanCityName(it) } == cleanPrefecture
+    } ?: candidates.firstOrNull()
 }

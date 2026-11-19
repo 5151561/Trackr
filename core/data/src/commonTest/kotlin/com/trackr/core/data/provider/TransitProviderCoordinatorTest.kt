@@ -390,12 +390,39 @@ class TransitProviderCoordinatorTest {
         val beiliu = cities.first { it.cityName == "北流" }
         assertEquals("", beiliu.cityId)
         assertEquals("450981", beiliu.mygolbsCityCode)
+        assertEquals("广西", beiliu.province)
+        assertEquals("玉林", beiliu.parentCity)
 
         // 验证缓存有效：forceRefresh = false 时不再调用底层 provider
         val cached = coordinator.getSupportedCities(forceRefresh = false)
         assertEquals(cities.size, cached.size)
         assertEquals(1, fakeChelaileProvider.supportedCitiesCallCount)
         assertEquals(1, fakeMygolbsProvider.supportedCitiesCallCount)
+    }
+
+    @Test
+    fun testGetSupportedCities_infersProvinceAndParentCityFromAreaCodeForCounties() = runBlocking {
+        fakeChelaileProvider.supportedCitiesResult = listOf(
+            TransitCity(cityId = "440", cityName = "玉林", province = "广西")
+        )
+        fakeMygolbsProvider.supportedCitiesResult = listOf(
+            TransitCity(cityId = "", cityName = "玉林市", mygolbsCityCode = "450900"),
+            TransitCity(cityId = "", cityName = "容县", mygolbsCityCode = "450921"),
+            TransitCity(cityId = "", cityName = "陆川县", mygolbsCityCode = "450922")
+        )
+
+        val cities = coordinator.getSupportedCities(forceRefresh = true)
+        val rongxian = cities.first { it.mygolbsCityCode == "450921" }
+        val luchuan = cities.first { it.mygolbsCityCode == "450922" }
+
+        // 二字县名保留「县」字；6 位国标区划码自动归入广西并挂到玉林下
+        assertEquals("容县", rongxian.cityName)
+        assertEquals("广西", rongxian.province)
+        assertEquals("玉林", rongxian.parentCity)
+
+        assertEquals("陆川", luchuan.cityName)
+        assertEquals("广西", luchuan.province)
+        assertEquals("玉林", luchuan.parentCity)
     }
 
     @Test

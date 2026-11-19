@@ -332,9 +332,11 @@ fun CityPickerBottomSheet(
                     effectiveCities.filter {
                         it.cityName.lowercase().contains(q) ||
                             it.pinyin.lowercase().contains(q) ||
-                            // 搜地级市也能带出它下辖的县
-                            it.lenzRegion.orEmpty().lowercase().contains(q) ||
-                            (it.province.ifBlank { ProvinceCityCatalog.inferProvince(it.cityName) }).lowercase().contains(q)
+                            // 搜地级市也能带出它下辖的县（覆盖掌上公交 / 掌上出行等所有数据源）
+                            it.effectivePrefecture.orEmpty().lowercase().contains(q) ||
+                            (it.province.ifBlank {
+                                ProvinceCityCatalog.inferProvince(it.cityName, it.mygolbsCityCode ?: it.lenzAreaCode)
+                            }).lowercase().contains(q)
                     }
                 }
 
@@ -394,6 +396,15 @@ fun CityPickerBottomSheet(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Surface(
+                        modifier = Modifier
+                            .clip(MaterialTheme.shapes.small)
+                            .then(
+                                if (locatedCity != null) {
+                                    Modifier.clickable { onSelectCity(locatedCity) }
+                                } else {
+                                    Modifier
+                                }
+                            ),
                         shape = MaterialTheme.shapes.small,
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
                     ) {
@@ -408,8 +419,16 @@ fun CityPickerBottomSheet(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.width(4.dp))
+                            val locatedLabel = locatedCity?.let { loc ->
+                                val trail = loc.prefectureTrail()
+                                if (trail.isNotBlank()) "${loc.cityName} · $trail" else loc.cityName
+                            }
                             Text(
-                                text = if (locatedCity != null) stringResource(BusRes.string.bus_city_located_name, locatedCity.cityName) else stringResource(BusRes.string.bus_city_selected_name, currentCity.cityName),
+                                text = if (locatedLabel != null) {
+                                    stringResource(BusRes.string.bus_city_located_name, locatedLabel)
+                                } else {
+                                    stringResource(BusRes.string.bus_city_selected_name, currentCity.cityName)
+                                },
                                 style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.primary
                             )
@@ -613,6 +632,7 @@ fun CityPickerBottomSheet(
                                         isLocated = row.city.matchesCity(locatedCity),
                                         onClick = { onSelectCity(row.city) },
                                         showProvinceBadge = false,
+                                        isUnreachable = row.city.cityName in unreachableCityNames,
                                         shape = RoundedCornerShape(10.dp),
                                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)
                                     )
