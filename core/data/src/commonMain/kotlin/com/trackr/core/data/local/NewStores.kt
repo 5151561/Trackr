@@ -30,6 +30,7 @@ class RoomDataStoreTransitStore(
             autoStopAfterBoarding = prefs[SettingsKeys.AUTO_STOP_AFTER_BOARDING],
             voiceAlerts = prefs[SettingsKeys.VOICE_ALERTS],
             sortLinesByArrival = prefs[SettingsKeys.SORT_LINES_BY_ARRIVAL],
+            favoritesCurrentCityOnly = prefs[SettingsKeys.FAVORITES_CURRENT_CITY_ONLY],
             betaUpdates = prefs[SettingsKeys.BETA_UPDATES],
             nearbyStopsCount = prefs[SettingsKeys.NEARBY_STOPS_COUNT],
             liveNotificationEnabled = prefs[SettingsKeys.LIVE_NOTIFICATION_ENABLED],
@@ -74,6 +75,10 @@ class RoomDataStoreTransitStore(
 
     override suspend fun saveSortLinesByArrival(enabled: Boolean) {
         settings.edit { it[SettingsKeys.SORT_LINES_BY_ARRIVAL] = enabled }
+    }
+
+    override suspend fun saveFavoritesCurrentCityOnly(enabled: Boolean) {
+        settings.edit { it[SettingsKeys.FAVORITES_CURRENT_CITY_ONLY] = enabled }
     }
 
     override suspend fun saveBetaUpdates(enabled: Boolean) {

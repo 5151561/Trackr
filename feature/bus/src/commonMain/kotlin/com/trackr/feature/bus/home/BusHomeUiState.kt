@@ -74,12 +74,18 @@ data class BusHomeUiState(
     val showTransitCodeButton: Boolean = true,
     /** 附近站卡片里的线按到站先后排（issue #56）；关时按数据源顺序。和站点页同一个开关，切了会记住 */
     val sortNearbyByArrival: Boolean = false,
+    /** 收藏栏仅显示当前城市的收藏（issue #61）；切了会记住 */
+    val favoritesCurrentCityOnly: Boolean = false,
+    /** 收藏栏是否已展开全部（issue #61）；默认折叠，不持久化 */
+    val isFavoritesExpanded: Boolean = false,
     /** 一次性消息（重构计划 §2.1 UDF）：页面显示后回调 [BusHomeEvent.MessageShown] */
     val userMessages: List<UserMessage> = emptyList(),
 
     // ---- 给页面画的 UI 模型 ----
     val trackingCards: List<TrackingCardUi> = emptyList(),
     val favoriteRows: List<FavoriteRowUi> = emptyList(),
+    /** 收藏列表里是否存在非当前城市的条目（决定「收藏」标题右侧是否显示城市筛选入口） */
+    val hasOtherCityFavorites: Boolean = false,
     val nearbyCards: List<NearbyStopUi> = emptyList()
 ) {
     val filteredCities: List<TransitCity>

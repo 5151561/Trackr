@@ -75,6 +75,8 @@ class FakeSettingsRepository(
     override val voiceAlerts: StateFlow<Boolean> = _voiceAlerts.asStateFlow()
     private val _sortLinesByArrival = MutableStateFlow(false)
     override val sortLinesByArrival: StateFlow<Boolean> = _sortLinesByArrival.asStateFlow()
+    private val _favoritesCurrentCityOnly = MutableStateFlow(false)
+    override val favoritesCurrentCityOnly: StateFlow<Boolean> = _favoritesCurrentCityOnly.asStateFlow()
     private val _betaUpdates = MutableStateFlow(false)
     override val betaUpdates: StateFlow<Boolean> = _betaUpdates.asStateFlow()
 
@@ -155,6 +157,10 @@ class FakeSettingsRepository(
 
     override fun setSortLinesByArrival(enabled: Boolean) {
         _sortLinesByArrival.value = enabled
+    }
+
+    override fun setFavoritesCurrentCityOnly(enabled: Boolean) {
+        _favoritesCurrentCityOnly.value = enabled
     }
 
     override fun setBetaUpdates(enabled: Boolean) {

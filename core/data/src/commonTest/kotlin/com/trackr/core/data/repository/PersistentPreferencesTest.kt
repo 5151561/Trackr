@@ -21,6 +21,7 @@ class PersistentPreferencesTest {
         first.setNearbyStopsCount(100)
         first.setAlertThresholdStops(-5)
         first.setShowTransitCodeButton(false)
+        first.setFavoritesCurrentCityOnly(true)
         first.dismissFontScalePrompt()
         first.flushWrites()
         val reopened = DefaultSettingsRepository.create(store, writer)
@@ -31,6 +32,7 @@ class PersistentPreferencesTest {
         assertEquals(16, reopened.nearbyStopsCount.value)
         assertEquals(AlertThreshold.MIN_STOPS, reopened.alertThresholdStops.value)
         assertFalse(reopened.showTransitCodeButton.value)
+        assertTrue(reopened.favoritesCurrentCityOnly.value)
         assertTrue(reopened.fontScalePromptDismissed.value)
     }
 
@@ -78,6 +80,7 @@ private class MemoryPreferencesStore(var snapshot: TransitLocalSnapshot = Transi
     override suspend fun saveAutoStopAfterBoarding(enabled: Boolean) { snapshot = snapshot.copy(autoStopAfterBoarding = enabled) }
     override suspend fun saveVoiceAlerts(enabled: Boolean) { snapshot = snapshot.copy(voiceAlerts = enabled) }
     override suspend fun saveSortLinesByArrival(enabled: Boolean) { snapshot = snapshot.copy(sortLinesByArrival = enabled) }
+    override suspend fun saveFavoritesCurrentCityOnly(enabled: Boolean) { snapshot = snapshot.copy(favoritesCurrentCityOnly = enabled) }
     override suspend fun saveBetaUpdates(enabled: Boolean) { snapshot = snapshot.copy(betaUpdates = enabled) }
     override suspend fun saveNearbyStopsCount(count: Int) { snapshot = snapshot.copy(nearbyStopsCount = count) }
     override suspend fun saveLiveNotificationEnabled(enabled: Boolean) { snapshot = snapshot.copy(liveNotificationEnabled = enabled) }

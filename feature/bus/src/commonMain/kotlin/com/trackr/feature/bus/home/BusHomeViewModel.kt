@@ -247,6 +247,13 @@ class BusHomeViewModel(
             }
         }
 
+        // 收藏栏仅显示当前城市（issue #61）
+        viewModelScope.launch {
+            settings.favoritesCurrentCityOnly.collect { enabled ->
+                edit { it.copy(favoritesCurrentCityOnly = enabled) }
+            }
+        }
+
         // 初始化加载支持的城市
         loadSupportedCities()
 
@@ -260,6 +267,8 @@ class BusHomeViewModel(
             BusHomeEvent.Refresh -> refresh()
             BusHomeEvent.RetryLocation -> refreshLocationAndNearby()
             is BusHomeEvent.SetNearbySortByArrival -> settings.setSortLinesByArrival(event.enabled)
+            is BusHomeEvent.SetFavoritesCurrentCityOnly -> settings.setFavoritesCurrentCityOnly(event.enabled)
+            BusHomeEvent.ToggleFavoritesExpanded -> edit { it.copy(isFavoritesExpanded = !it.isFavoritesExpanded) }
             is BusHomeEvent.StopTracking -> stopTracking(event.sessionId, event.watchLineId)
             is BusHomeEvent.SelectGroup -> selectGroup(event.groupId)
             BusHomeEvent.TransitCodeClicked -> onTransitCodeClicked()

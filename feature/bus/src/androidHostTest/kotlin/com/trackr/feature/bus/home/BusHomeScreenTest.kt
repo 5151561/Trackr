@@ -359,4 +359,87 @@ class BusHomeScreenTest {
         assertEquals(listOf<BusHomeEvent>(BusHomeEvent.RetryLocation), events)
     }
 
+    @Test
+    fun favorites_collapsesOverFourItems_andExpandsOnToggle() {
+        val items = (1..6).map { i ->
+            val stop = fav.copy(id = "f$i", lineId = "l$i", lineName = "L$i", targetStopName = "站$i")
+            FavoriteItem.Stop(stop, groupId = null, sortOrder = i)
+        }
+        val collapsed = BusHomeMapper.derive(
+            BusHomeUiState(),
+            BusHomeUiState(currentCity = shenzhen, favoriteItems = items, isFavoritesExpanded = false)
+        )
+        val stateHolder = mutableStateOf(collapsed)
+        composeTestRule.setContent {
+            TrackrTheme {
+                BusHomeScreen(state = stateHolder.value, onEvent = { events += it })
+            }
+        }
+
+        // 默认只显示前 4 条 + 底部展开按钮
+        composeTestRule.onNodeWithTag(BusHomeTags.favoriteRow(items[0].key)).assertIsDisplayed()
+        composeTestRule.onNodeWithTag(BusHomeTags.LIST).performScrollToNode(hasText("展开全部（还有 2 条）"))
+        composeTestRule.onNodeWithTag(BusHomeTags.favoriteRow(items[3].key)).assertIsDisplayed()
+        assertEquals(0, composeTestRule.onAllNodesWithTag(BusHomeTags.favoriteRow(items[4].key)).fetchSemanticsNodes().size)
+        composeTestRule.onNodeWithText("展开全部（还有 2 条）").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(BusHomeTags.FAVORITES_EXPAND_TOGGLE).performClick()
+        assertEquals(listOf<BusHomeEvent>(BusHomeEvent.ToggleFavoritesExpanded), events)
+
+        // 展开后全部 6 条可见，按钮变为「收起」
+        stateHolder.value = collapsed.copy(isFavoritesExpanded = true)
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag(BusHomeTags.LIST).performScrollToNode(hasText("收起"))
+        composeTestRule.onNodeWithText("收起").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(BusHomeTags.LIST).performScrollToNode(hasText("站6上车"))
+        composeTestRule.onNodeWithTag(BusHomeTags.favoriteRow(items[5].key)).assertIsDisplayed()
+    }
+
+    @Test
+    fun favorites_cityFilter_hiddenWhenAllInCurrentCity_shownWhenCrossCity() {
+        val stateHolder = mutableStateOf(stateOf())
+        composeTestRule.setContent {
+            TrackrTheme {
+                BusHomeScreen(state = stateHolder.value, onEvent = { events += it })
+            }
+        }
+
+        // 全为本市收藏时不显示城市筛选
+        assertEquals(0, composeTestRule.onAllNodesWithTag(BusHomeTags.FAVORITES_CITY_FILTER_TRIGGER).fetchSemanticsNodes().size)
+
+        // 加入一条外地收藏后显示「全部城市 ▾」，点开选「仅本市」
+        val bjFav = fav.copy(id = "f_bj", cityId = "001", cityName = "北京", lineName = "1路")
+        stateHolder.value = BusHomeMapper.derive(
+            BusHomeUiState(),
+            BusHomeUiState(
+                currentCity = shenzhen,
+                favoriteItems = listOf(
+                    FavoriteItem.Stop(fav, groupId = null, sortOrder = 0),
+                    FavoriteItem.Stop(bjFav, groupId = null, sortOrder = 1)
+                )
+            )
+        )
+        composeTestRule.waitForIdle()
+        composeTestRule.onNodeWithTag(BusHomeTags.FAVORITES_CITY_FILTER_TRIGGER).assertIsDisplayed().performClick()
+        composeTestRule.onNodeWithTag(BusHomeTags.FAVORITES_CITY_FILTER_CURRENT).performClick()
+        assertEquals(listOf<BusHomeEvent>(BusHomeEvent.SetFavoritesCurrentCityOnly(true)), events)
+    }
+
+    @Test
+    fun favorites_cityEmpty_showsFallbackActionToShowAllCities() {
+        val bjFav = fav.copy(id = "f_bj", cityId = "001", cityName = "北京", lineName = "1路")
+        val state = BusHomeMapper.derive(
+            BusHomeUiState(),
+            BusHomeUiState(
+                currentCity = shenzhen,
+                favoriteItems = listOf(FavoriteItem.Stop(bjFav, groupId = null, sortOrder = 0)),
+                favoritesCurrentCityOnly = true
+            )
+        )
+        setContent(state)
+
+        composeTestRule.onNodeWithText("当前城市还没有收藏").assertIsDisplayed()
+        composeTestRule.onNodeWithTag(BusHomeTags.FAVORITES_SHOW_ALL_CITIES).assertIsDisplayed().performClick()
+        assertEquals(listOf<BusHomeEvent>(BusHomeEvent.SetFavoritesCurrentCityOnly(false)), events)
+    }
+
 }

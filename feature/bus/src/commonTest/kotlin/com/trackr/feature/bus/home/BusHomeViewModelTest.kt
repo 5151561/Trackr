@@ -1091,4 +1091,97 @@ class BusHomeViewModelTest {
         assertTrue(announcer.spoken.isEmpty())
         assertEquals(TTS_UNAVAILABLE_MESSAGE, viewModel.uiState.value.userMessages.last().text)
     }
+
+    @Test
+    fun testFavoritesCurrentCityOnly_filtersStopsStationsAndRoutesAndPersists() = runTest(main.dispatcher) {
+        val shStop = FavoriteStationLine(
+            id = "sh_1",
+            cityId = "034",
+            cityName = "上海",
+            lineId = "l1",
+            lineName = "49",
+            startStop = "汉口路",
+            endStop = "上海体育馆",
+            targetStopId = "s1",
+            targetStopName = "人民广场",
+            targetOrder = 2
+        )
+        val bjStop = FavoriteStationLine(
+            id = "bj_1",
+            cityId = "001",
+            cityName = "北京",
+            lineId = "l2",
+            lineName = "1路",
+            startStop = "老山",
+            endStop = "四惠",
+            targetStopId = "s2",
+            targetStopName = "天安门西",
+            targetOrder = 3
+        )
+        val shCrossSourceStop = FavoriteStationLine(
+            id = "sh_mg",
+            cityId = "310000",
+            cityName = "上海市",
+            lineId = "l3",
+            lineName = "71",
+            startStop = "延安东路",
+            endStop = "申昆路",
+            targetStopId = "s3",
+            targetStopName = "静安寺",
+            targetOrder = 4,
+            source = DataSourceType.MYGOLBS,
+            mygolbsCityCode = "310000"
+        )
+        val bjRoute = TransitGroup(
+            id = "r_bj",
+            name = "北京上班",
+            legs = listOf(
+                TransitLeg(
+                    legIndex = 0,
+                    fromStopName = "西单",
+                    toStopName = "国贸",
+                    candidateLines = listOf(CandidateLine(cityId = "001", cityName = "北京", lineId = "l2", lineName = "1路"))
+                )
+            )
+        )
+        fakeRepository.favoritesRepo.toggleFavorite(shStop)
+        fakeRepository.favoritesRepo.toggleFavorite(bjStop)
+        fakeRepository.favoritesRepo.toggleFavorite(shCrossSourceStop)
+        fakeRepository.favoritesRepo.saveRoute(bjRoute)
+
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        assertTrue(viewModel.uiState.value.hasOtherCityFavorites)
+        assertFalse(viewModel.uiState.value.favoritesCurrentCityOnly)
+        assertEquals(4, viewModel.uiState.value.favoriteRows.size)
+
+        viewModel.onEvent(BusHomeEvent.SetFavoritesCurrentCityOnly(true))
+        testScheduler.runCurrent()
+
+        assertTrue(fakeRepository.settings.favoritesCurrentCityOnly.value)
+        assertTrue(viewModel.uiState.value.favoritesCurrentCityOnly)
+        assertEquals(
+            setOf(FavoriteItem.stopKey("sh_1"), FavoriteItem.stopKey("sh_mg")),
+            viewModel.uiState.value.favoriteRows.map { it.key }.toSet()
+        )
+
+        viewModel.onEvent(BusHomeEvent.SetFavoritesCurrentCityOnly(false))
+        testScheduler.runCurrent()
+
+        assertFalse(fakeRepository.settings.favoritesCurrentCityOnly.value)
+        assertEquals(4, viewModel.uiState.value.favoriteRows.size)
+    }
+
+    @Test
+    fun testToggleFavoritesExpanded_flipsSessionState() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        assertFalse(viewModel.uiState.value.isFavoritesExpanded)
+        viewModel.onEvent(BusHomeEvent.ToggleFavoritesExpanded)
+        assertTrue(viewModel.uiState.value.isFavoritesExpanded)
+        viewModel.onEvent(BusHomeEvent.ToggleFavoritesExpanded)
+        assertFalse(viewModel.uiState.value.isFavoritesExpanded)
+    }
 }

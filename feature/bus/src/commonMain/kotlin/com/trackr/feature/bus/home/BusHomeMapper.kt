@@ -10,8 +10,10 @@ import com.trackr.core.model.FavoriteStationLine
 import com.trackr.core.model.LegPhase
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.NearbyStopLineStatus
+import com.trackr.core.model.ProvinceCityCatalog
 import com.trackr.core.model.TrackingSession
 import com.trackr.core.model.TrackingTarget
+import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitGroup
 import com.trackr.core.model.WatchedLine
 import com.trackr.core.model.displayLineName
@@ -30,8 +32,14 @@ internal object BusHomeMapper {
     fun derive(old: BusHomeUiState, new: BusHomeUiState): BusHomeUiState {
         val cards = reuseList(old.trackingCards, trackingCards(new.trackingSessions), TrackingCardUi::key)
         val rows = reuseList(old.favoriteRows, favoriteRows(new), FavoriteRowUi::key)
+        val hasOtherCity = new.favoriteItems.any { !matchesCity(it, new.currentCity) }
         val nearby = reuseList(old.nearbyCards, nearbyCards(new), NearbyStopUi::key)
-        return new.copy(trackingCards = cards, favoriteRows = rows, nearbyCards = nearby)
+        return new.copy(
+            trackingCards = cards,
+            favoriteRows = rows,
+            hasOtherCityFavorites = hasOtherCity,
+            nearbyCards = nearby
+        )
     }
 
     // ---- 追踪卡 ----
@@ -181,7 +189,7 @@ internal object BusHomeMapper {
         val groupId = state.selectedGroupId
         val colorOf = state.favoriteGroups.mapNotNull { group -> group.color?.let { group.id to it } }.toMap()
         return state.favoriteItems
-            .filter { groupId == null || it.groupId == groupId }
+            .filter { (!state.favoritesCurrentCityOnly || matchesCity(it, state.currentCity)) && (groupId == null || it.groupId == groupId) }
             .map { item ->
                 val color = item.groupId?.let(colorOf::get)
                 when (item) {
@@ -190,6 +198,63 @@ internal object BusHomeMapper {
                     is FavoriteItem.Station -> stationRow(item, state.favoritesRealtime[item.key]).copy(groupColor = color)
                 }
             }
+    }
+
+    /** 判断一条收藏是否属于 [currentCity]（兼容车来了 / 掌上公交 / 朗斯跨数据源的城市 ID 与城市名） */
+    fun matchesCity(item: FavoriteItem, currentCity: TransitCity): Boolean = when (item) {
+        is FavoriteItem.Stop -> matchesCity(
+            cityId = item.stop.cityId,
+            cityName = item.stop.cityName,
+            mygolbsCityCode = item.stop.mygolbsCityCode,
+            currentCity = currentCity
+        )
+        is FavoriteItem.Station -> matchesCity(
+            cityId = item.station.cityId,
+            cityName = item.station.cityName,
+            mygolbsCityCode = item.station.mygolbsCityCode,
+            currentCity = currentCity
+        )
+        is FavoriteItem.Route -> {
+            val primary = item.route.legs.firstNotNullOfOrNull { it.primaryLine }
+            if (primary == null) {
+                true
+            } else {
+                matchesCity(
+                    cityId = primary.cityId,
+                    cityName = primary.cityName,
+                    mygolbsCityCode = primary.mygolbsCityCode,
+                    currentCity = currentCity
+                )
+            }
+        }
+    }
+
+    private fun matchesCity(
+        cityId: String,
+        cityName: String,
+        mygolbsCityCode: String?,
+        currentCity: TransitCity
+    ): Boolean {
+        val id = cityId.trim()
+        val name = cityName.trim()
+        val mgCode = mygolbsCityCode?.trim().orEmpty()
+        if (id.isEmpty() && name.isEmpty() && mgCode.isEmpty()) return true
+
+        val curId = currentCity.cityId.trim()
+        val curMg = currentCity.mygolbsCityCode?.trim().orEmpty()
+        val curLenz = currentCity.lenzAreaCode?.trim().orEmpty()
+        if (id.isNotEmpty() && (id == curId || (curMg.isNotEmpty() && id == curMg) || (curLenz.isNotEmpty() && id == curLenz))) {
+            return true
+        }
+        if (mgCode.isNotEmpty() && (mgCode == curMg || (curId.isNotEmpty() && mgCode == curId))) {
+            return true
+        }
+        val cleanItem = ProvinceCityCatalog.cleanCityName(name)
+        val cleanCurrent = ProvinceCityCatalog.cleanCityName(currentCity.cityName)
+        if (cleanItem.isNotEmpty() && cleanCurrent.isNotEmpty()) {
+            return cleanItem == cleanCurrent
+        }
+        return false
     }
 
     private fun stopRow(item: FavoriteItem.Stop, realtime: NearbyStop?): FavoriteRowUi.Stop {

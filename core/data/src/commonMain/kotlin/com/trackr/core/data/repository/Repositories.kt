@@ -81,6 +81,9 @@ interface SettingsRepository {
      */
     val sortLinesByArrival: StateFlow<Boolean>
 
+    /** 首页收藏栏仅显示当前城市的收藏（issue #61），默认关（显示全部城市） */
+    val favoritesCurrentCityOnly: StateFlow<Boolean>
+
     /** 检查更新时也收测试版（beta 通道），默认关；只有 Android 有应用内更新 */
     val betaUpdates: StateFlow<Boolean>
     val nearbyStopsCount: StateFlow<Int>
@@ -125,6 +128,7 @@ interface SettingsRepository {
     fun setAutoStopAfterBoarding(enabled: Boolean)
     fun setVoiceAlerts(enabled: Boolean)
     fun setSortLinesByArrival(enabled: Boolean)
+    fun setFavoritesCurrentCityOnly(enabled: Boolean)
     fun setBetaUpdates(enabled: Boolean)
 }
 

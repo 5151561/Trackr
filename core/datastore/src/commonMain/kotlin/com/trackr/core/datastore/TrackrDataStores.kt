@@ -61,6 +61,9 @@ object SettingsKeys {
     val VOICE_ALERTS = booleanPreferencesKey("voice_alerts")
     val SORT_LINES_BY_ARRIVAL = booleanPreferencesKey("sort_lines_by_arrival")
 
+    /** 首页收藏栏仅显示当前城市的收藏（issue #61）；没有 = 关（显示全部城市） */
+    val FAVORITES_CURRENT_CITY_ONLY = booleanPreferencesKey("favorites_current_city_only")
+
     /** 检查更新也收测试版（beta 通道）；没有 = 关 */
     val BETA_UPDATES = booleanPreferencesKey("beta_updates")
 

@@ -5,6 +5,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -16,6 +17,8 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -23,10 +26,15 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -38,6 +46,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.trackr.core.designsystem.resources.Res
 import com.trackr.core.designsystem.resources.action_edit
+import com.trackr.core.designsystem.resources.ic_arrow_drop_down
 import com.trackr.core.designsystem.resources.ic_chevron_right
 import com.trackr.core.designsystem.resources.ic_place
 import com.trackr.core.designsystem.theme.TrackrTheme
@@ -45,33 +54,56 @@ import com.trackr.core.designsystem.theme.groupAccentColor
 import com.trackr.core.designsystem.theme.item
 import com.trackr.feature.bus.resources.Res as BusRes
 import com.trackr.feature.bus.resources.bus_favorites_all
+import com.trackr.feature.bus.resources.bus_favorites_all_cities
+import com.trackr.feature.bus.resources.bus_favorites_city_empty
+import com.trackr.feature.bus.resources.bus_favorites_collapse
+import com.trackr.feature.bus.resources.bus_favorites_current_city_only
 import com.trackr.feature.bus.resources.bus_favorites_empty
+import com.trackr.feature.bus.resources.bus_favorites_expand
+import com.trackr.feature.bus.resources.bus_favorites_group_city_empty
 import com.trackr.feature.bus.resources.bus_favorites_group_empty
+import com.trackr.feature.bus.resources.bus_favorites_show_all_cities
 import com.trackr.feature.bus.resources.bus_favorites_title
 import com.trackr.feature.bus.resources.bus_station_icon
 import com.trackr.feature.bus.resources.bus_station_loading
 import com.trackr.feature.bus.resources.bus_station_not_found
 import com.trackr.ui.components.arrival.ArrivalTrailing
 import com.trackr.ui.components.arrival.LineBadge
+import com.trackr.ui.icons.TrackrIcons
 import org.jetbrains.compose.resources.stringResource
 import org.jetbrains.compose.resources.vectorResource
 
+/** 收藏栏折叠时默认显示的行数（issue #61）；超过此数量才折叠并显示底部「展开全部 / 收起」 */
+internal const val COLLAPSED_FAVORITES_LIMIT = 4
+
 /**
  * 「收藏」：车和路线一个列表（§4.3：key = `stop_x` / `route_x`，contentType 两种）；
- * 有分组时上面一排 chips（全部 + 各分组），右上角「编辑」。
+ * 有分组时上面一排 chips（全部 + 各分组），右上角「全部城市 / 仅本市」筛选（有跨城收藏或已开启时出现）+「编辑」；
+ * 超过 [COLLAPSED_FAVORITES_LIMIT] 条时默认折叠，底部点「展开全部 / 收起」（issue #61）。
  */
 internal fun LazyListScope.favoritesSection(state: BusHomeUiState, onEvent: (BusHomeEvent) -> Unit) {
     val hasAny = state.favoriteItems.isNotEmpty() || state.favoriteGroups.isNotEmpty()
+    val showCityFilter = state.favoritesCurrentCityOnly || state.hasOtherCityFavorites
 
     item(key = "fav_header", contentType = "section_header") {
         SectionHeader(
             title = stringResource(BusRes.string.bus_favorites_title),
-            trailing = if (hasAny) {
+            trailing = if (hasAny || showCityFilter) {
                 {
-                    TextButton(
-                        onClick = { onEvent(BusHomeEvent.EditFavorites) },
-                        modifier = Modifier.testTag(BusHomeTags.EDIT_FAVORITES)
-                    ) { Text(stringResource(Res.string.action_edit)) }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (showCityFilter) {
+                            FavoritesCityFilterToggle(
+                                currentCityOnly = state.favoritesCurrentCityOnly,
+                                onChange = { onEvent(BusHomeEvent.SetFavoritesCurrentCityOnly(it)) }
+                            )
+                        }
+                        if (hasAny) {
+                            TextButton(
+                                onClick = { onEvent(BusHomeEvent.EditFavorites) },
+                                modifier = Modifier.testTag(BusHomeTags.EDIT_FAVORITES)
+                            ) { Text(stringResource(Res.string.action_edit)) }
+                        }
+                    }
                 }
             } else null
         )
@@ -85,17 +117,40 @@ internal fun LazyListScope.favoritesSection(state: BusHomeUiState, onEvent: (Bus
 
     if (state.favoriteRows.isEmpty()) {
         item(key = "fav_empty", contentType = "empty_hint") {
+            val filteredOutByCity = state.favoritesCurrentCityOnly && state.favoriteItems.isNotEmpty() && (
+                state.selectedGroupId == null || state.favoriteItems.any { it.groupId == state.selectedGroupId }
+                )
+            val text = when {
+                state.favoriteItems.isEmpty() -> stringResource(BusRes.string.bus_favorites_empty)
+                filteredOutByCity && state.selectedGroupId == null -> stringResource(BusRes.string.bus_favorites_city_empty)
+                filteredOutByCity -> stringResource(BusRes.string.bus_favorites_group_city_empty)
+                else -> stringResource(BusRes.string.bus_favorites_group_empty)
+            }
             EmptyHint(
-                text = if (state.favoriteItems.isEmpty()) {
-                    stringResource(BusRes.string.bus_favorites_empty)
-                } else {
-                    stringResource(BusRes.string.bus_favorites_group_empty)
-                }
+                text = text,
+                action = if (filteredOutByCity) {
+                    {
+                        TextButton(
+                            onClick = { onEvent(BusHomeEvent.SetFavoritesCurrentCityOnly(false)) },
+                            modifier = Modifier.testTag(BusHomeTags.FAVORITES_SHOW_ALL_CITIES)
+                        ) {
+                            Text(stringResource(BusRes.string.bus_favorites_show_all_cities))
+                        }
+                    }
+                } else null
             )
         }
     } else {
+        val totalCount = state.favoriteRows.size
+        val canCollapse = totalCount > COLLAPSED_FAVORITES_LIMIT
+        val visibleRows = if (canCollapse && !state.isFavoritesExpanded) {
+            state.favoriteRows.take(COLLAPSED_FAVORITES_LIMIT)
+        } else {
+            state.favoriteRows
+        }
+
         items(
-            items = state.favoriteRows,
+            items = visibleRows,
             key = { it.key },
             contentType = {
                 when (it) {
@@ -110,6 +165,117 @@ internal fun LazyListScope.favoritesSection(state: BusHomeUiState, onEvent: (Bus
                 is FavoriteRowUi.Route -> FavoriteRouteRow(row, onClick = { onEvent(BusHomeEvent.OpenRoute(row.routeId)) })
                 is FavoriteRowUi.Station -> FavoriteStationRow(row, onClick = { onEvent(BusHomeEvent.OpenStop(row.open)) })
             }
+        }
+
+        if (canCollapse) {
+            item(key = "fav_expand_toggle", contentType = "fav_expand_toggle") {
+                FavoritesExpandToggle(
+                    expanded = state.isFavoritesExpanded,
+                    hiddenCount = totalCount - COLLAPSED_FAVORITES_LIMIT,
+                    onClick = { onEvent(BusHomeEvent.ToggleFavoritesExpanded) }
+                )
+            }
+        }
+    }
+}
+
+/** 收藏栏按城市筛选下拉（issue #61）：和下方「附近」的 `LineSortToggle` 同款轻量小字 + 下拉菜单 */
+@Composable
+private fun FavoritesCityFilterToggle(
+    currentCityOnly: Boolean,
+    onChange: (Boolean) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val allCitiesLabel = stringResource(BusRes.string.bus_favorites_all_cities)
+    val currentCityLabel = stringResource(BusRes.string.bus_favorites_current_city_only)
+    Box {
+        TextButton(
+            onClick = { expanded = true },
+            contentPadding = PaddingValues(start = 8.dp, end = 2.dp),
+            modifier = Modifier.testTag(BusHomeTags.FAVORITES_CITY_FILTER_TRIGGER)
+        ) {
+            Text(
+                text = if (currentCityOnly) currentCityLabel else allCitiesLabel,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (currentCityOnly) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Icon(
+                imageVector = vectorResource(Res.drawable.ic_arrow_drop_down),
+                contentDescription = null,
+                tint = if (currentCityOnly) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            CityFilterOption(
+                label = allCitiesLabel,
+                selected = !currentCityOnly,
+                tag = BusHomeTags.FAVORITES_CITY_FILTER_ALL
+            ) {
+                expanded = false
+                if (currentCityOnly) onChange(false)
+            }
+            CityFilterOption(
+                label = currentCityLabel,
+                selected = currentCityOnly,
+                tag = BusHomeTags.FAVORITES_CITY_FILTER_CURRENT
+            ) {
+                expanded = false
+                if (!currentCityOnly) onChange(true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun CityFilterOption(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+    DropdownMenuItem(
+        text = { Text(label) },
+        onClick = onClick,
+        trailingIcon = if (selected) {
+            { Icon(TrackrIcons.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary) }
+        } else {
+            null
+        },
+        modifier = Modifier.testTag(tag)
+    )
+}
+
+/** 收藏栏底部「展开全部（还有 N 条） ⌄」/「收起 ⌃」轻按钮 */
+@Composable
+private fun FavoritesExpandToggle(
+    expanded: Boolean,
+    hiddenCount: Int,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = TrackrTheme.dimens.screenPadding),
+        contentAlignment = Alignment.Center
+    ) {
+        TextButton(
+            onClick = onClick,
+            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+            modifier = Modifier.testTag(BusHomeTags.FAVORITES_EXPAND_TOGGLE)
+        ) {
+            Text(
+                text = if (expanded) {
+                    stringResource(BusRes.string.bus_favorites_collapse)
+                } else {
+                    stringResource(BusRes.string.bus_favorites_expand, hiddenCount)
+                },
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Icon(
+                imageVector = vectorResource(Res.drawable.ic_arrow_drop_down),
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(20.dp)
+                    .rotate(if (expanded) 180f else 0f)
+            )
         }
     }
 }
