@@ -47,6 +47,7 @@ import kotlin.test.assertTrue
 private class CountingStopRepository(
     private val delegate: FakeRealtimeRepository
 ) : RealtimeRepository by delegate {
+    val stopDetailCities = mutableListOf<TransitCity>()
     val stopDetailPhysicalIds = mutableListOf<String?>()
     var gate: CompletableDeferred<Unit>? = null
 
@@ -61,6 +62,7 @@ private class CountingStopRepository(
         userLat: Double?,
         userLng: Double?
     ): Result<List<NearbyStop>> {
+        stopDetailCities += city
         stopDetailPhysicalIds += physicalStId
         gate?.await()
         return delegate.getStopDetail(city, stopId, stopName, physicalStId, namesakeStId, stationLat, stationLng, userLat, userLng)
@@ -1021,5 +1023,32 @@ class StopDetailViewModelTest {
         testScheduler.runCurrent()
         assertFalse(viewModel.uiState.value.isPullRefreshing)
         assertEquals(2, repo.stopDetailPhysicalIds.size)
+    }
+
+    /**
+     * Issue #62：首页城市切到 A（如上海 034），从收藏夹点进 B 城市（如掌上公交玉林 cityId="" 或深圳 051）的站点时，
+     * 站点查询能从已收藏站点或 mg: 站点 ID 还原出目标城市名，不会误用 A 城市或传空城市名导致查询失败。
+     */
+    @Test
+    fun testCrossCityMygolbsStop_restoresCityNameFromStopIdOrFavorite() = runTest(main.dispatcher) {
+        val repo = CountingStopRepository(fakeRepository)
+        val viewModel = StopDetailViewModel(
+            cityId = "",
+            stopId = "mg:玉林市:文化广场",
+            initialStopName = "文化广场",
+            settings = settings,
+            favorites = favorites,
+            realtime = repo,
+            userLocationStore = userLocationStore,
+            trackingRepository = useRealTracking(),
+            trackingController = controller,
+            transitCodeLauncher = launcher,
+            enableAutoPolling = false
+        )
+        testScheduler.runCurrent()
+
+        assertEquals(1, repo.stopDetailCities.size)
+        assertEquals("", repo.stopDetailCities.single().cityId)
+        assertEquals("玉林市", repo.stopDetailCities.single().cityName)
     }
 }

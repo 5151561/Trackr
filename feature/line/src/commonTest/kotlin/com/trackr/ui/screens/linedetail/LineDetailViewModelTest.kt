@@ -63,6 +63,8 @@ private class LineFakes(city: TransitCity, groups: List<FavoriteGroup> = emptyLi
 private class CountingLineRepository(
     private val delegate: FakeRealtimeRepository
 ) : RealtimeRepository by delegate {
+    val lineDetailCities = mutableListOf<TransitCity>()
+    val timetableCities = mutableListOf<TransitCity>()
     val lineDetailTargetOrders = mutableListOf<Int?>()
     val lineIds = mutableListOf<String>()
     val stationIds = mutableListOf<String?>()
@@ -82,6 +84,7 @@ private class CountingLineRepository(
         lineNameHint: String,
         directionHint: Int
     ): Result<BusLineDetail> {
+        lineDetailCities += city
         lineDetailTargetOrders += targetOrder
         lineIds += lineId
         stationIds += stationId
@@ -90,6 +93,15 @@ private class CountingLineRepository(
         val result = delegate.getLineDetail(city, lineId, targetOrder, stationId, wgsLat, wgsLng, source, lineNameHint, directionHint)
         lineGate?.await()
         return result
+    }
+
+    override suspend fun getTimetable(
+        city: TransitCity,
+        line: BusLineDirection,
+        atTimeHHMM: String?
+    ): Result<LineTimetable> {
+        timetableCities += city
+        return delegate.getTimetable(city, line, atTimeHHMM)
     }
 }
 
@@ -173,12 +185,13 @@ class LineDetailViewModelTest {
         cache: LineStopsCache = FakeLineStopsCache(),
         reminders: com.trackr.data.repository.IScheduledReminderRepository = FakeScheduledReminderRepository(),
         announcer: FakeAnnouncer = FakeAnnouncer(),
+        cityId: String = "034",
         lineId: String = "line_001",
         boardStopName: String = "",
         alightStopName: String = ""
     ): LineDetailViewModel {
         return LineDetailViewModel(
-            cityId = "034",
+            cityId = cityId,
             initialLineId = lineId,
             initialTargetOrder = targetOrder,
             initialStationId = stationId,
@@ -1465,5 +1478,61 @@ class LineDetailViewModelTest {
 
         assertEquals("上海体育馆", viewModel.uiState.value.selectedStop?.name)
         assertEquals("line_001", viewModel.uiState.value.static?.line?.lineId)
+    }
+
+    /**
+     * Issue #62：首页城市切到 A（如上海 034），从收藏夹点进 B 城市（如深圳 051）的线路时，
+     * 线路详情请求、换向、时刻表、站表缓存与收藏状态均使用该线路所属的 cityId，而不是全局选中的 A 城市。
+     */
+    @Test
+    fun crossCityLine_usesLineCityIdInsteadOfSelectedCity() = runTest(main.dispatcher) {
+        // 全局选中城市为上海 034，但打开的是深圳 051 的收藏线路
+        val counting = CountingLineRepository(fakeRepository.realtime)
+        val cache = FakeLineStopsCache()
+        fakeRepository.realtime.lineDetailsMap["line_001"] = BusLineDetail(
+            line = forwardDirection,
+            reverseDirection = reverseDirection,
+            stops = stops,
+            buses = buses,
+            targetOrder = 2
+        )
+        fakeRepository.realtime.lineDetailsMap["line_002"] = BusLineDetail(
+            line = reverseDirection,
+            reverseDirection = forwardDirection,
+            stops = stops.reversed().mapIndexed { idx, s -> s.copy(order = idx + 1) },
+            buses = emptyList(),
+            targetOrder = 2
+        )
+
+        val viewModel = createViewModel(
+            cityId = "051",
+            targetOrder = 2,
+            realtime = counting,
+            cache = cache
+        )
+        testScheduler.runCurrent()
+
+        // 1) 初次请求与写缓存用的都是 051，不是 selectedCity 的 034
+        assertEquals(listOf("051"), counting.lineDetailCities.map { it.cityId })
+        assertTrue(cache.writes.single().first.contains("|051|"))
+        assertFalse(viewModel.uiState.value.isFavorite)
+
+        // 2) 收藏与取消收藏按 051 生成 id，与首页收藏夹里的 051_line_001_2 一致
+        viewModel.toggleFavoriteStop()
+        testScheduler.runCurrent()
+        assertTrue(viewModel.uiState.value.isFavorite)
+        val savedFav = fakeRepository.favorites.value.single()
+        assertEquals("051_line_001_2", savedFav.id)
+        assertEquals("051", savedFav.cityId)
+
+        // 3) 拉取时刻表也传 051
+        viewModel.loadTimetable()
+        testScheduler.runCurrent()
+        assertEquals("051", counting.timetableCities.last().cityId)
+
+        // 4) 换向请求也传 051
+        viewModel.switchOppositeDirection()
+        testScheduler.runCurrent()
+        assertTrue(counting.lineDetailCities.all { it.cityId == "051" })
     }
 }

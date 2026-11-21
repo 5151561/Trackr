@@ -347,8 +347,47 @@ class LineDetailViewModel(
         _uiState.update { it.copy(trackingSession = state) }
     }
 
+    /**
+     * 这条线路所属的城市：当前所选城市是同一个城市时用所选城市（带完整城市名与编码），
+     * 否则（如首页切到了别的城市后，从收藏或通知点进另一城市的线路，issue #62）用入口的 [cityId] 和线路自身携带的掌上公交信息构造，
+     * 避免拿错误的城市编码去请求或生成错误的收藏 id。
+     */
+    private fun effectiveCity(line: BusLineDirection? = currentDetail?.line): TransitCity {
+        val selected = settings.selectedCity.value
+        val lineMgCode = line?.mygolbsCityCode?.takeIf { it.isNotBlank() }
+        val lineMgName = line?.mygolbsCityName?.takeIf { it.isNotBlank() }
+        val isSameAsSelected = when {
+            cityId.isNotBlank() && selected.cityId.isNotBlank() -> selected.cityId == cityId
+            cityId.isNotBlank() && !selected.mygolbsCityCode.isNullOrBlank() -> selected.mygolbsCityCode == cityId
+            lineMgCode != null && !selected.mygolbsCityCode.isNullOrBlank() -> selected.mygolbsCityCode == lineMgCode
+            lineMgName != null && selected.cityName.isNotBlank() ->
+                com.trackr.core.model.ProvinceCityCatalog.cleanCityName(selected.cityName) ==
+                    com.trackr.core.model.ProvinceCityCatalog.cleanCityName(lineMgName)
+            else -> cityId.isBlank()
+        }
+        if (isSameAsSelected) {
+            return if (lineMgCode != null && selected.mygolbsCityCode.isNullOrBlank()) {
+                selected.copy(mygolbsCityCode = lineMgCode)
+            } else {
+                selected
+            }
+        }
+        val parsedRef = (line?.lineId ?: currentLineId)
+            .takeIf { it.startsWith("mg:") }
+            ?.removePrefix("mg:")
+            ?.split(":")
+            ?.takeIf { it.size >= 4 }
+        val mgCode = lineMgCode ?: parsedRef?.get(0)?.takeIf { it.isNotBlank() && it != "0" }
+        val mgName = lineMgName ?: parsedRef?.get(1)?.takeIf { it.isNotBlank() }.orEmpty()
+        return TransitCity(
+            cityId = cityId,
+            cityName = mgName,
+            mygolbsCityCode = mgCode
+        )
+    }
+
     private suspend fun showCachedStops() {
-        val city = settings.selectedCity.value
+        val city = effectiveCity()
         val key = LineStopsCache.keyOf(currentSource, city.cityId, city.mygolbsCityCode.orEmpty(), currentLineId)
         val cached = lineStopsCache.read(key) ?: return
         val static = LineStatic(cached.line, cached.reverseDirection, cached.stops)
@@ -461,8 +500,8 @@ class LineDetailViewModel(
         }
     }
 
-    /** 当前所选城市名（保存定时提醒时写进提醒） */
-    fun selectedCityName(): String = settings.selectedCity.value.cityName
+    /** 当前线路所属城市名（保存定时提醒时写进提醒） */
+    fun selectedCityName(): String = effectiveCity().cityName
 
     /**
      * 加载当前线路详情与实时车辆（在 viewModelScope 中发起）
@@ -486,7 +525,7 @@ class LineDetailViewModel(
                 _uiState.update { it.copy(isRefreshing = true, errorMessage = null) }
             }
 
-            val currentCity = settings.selectedCity.value
+            val currentCity = effectiveCity()
             val targetOrder = targetOrderOverride
                 ?: _uiState.value.selectedStop?.order
                 ?: initialTargetOrder
@@ -639,7 +678,7 @@ class LineDetailViewModel(
     private fun writeStopsCache(static: LineStatic) {
         if (static.stops.isEmpty() || static == lastCachedStatic) return
         lastCachedStatic = static
-        val city = settings.selectedCity.value
+        val city = effectiveCity(static.line)
         val key = LineStopsCache.keyOf(static.line.source, city.cityId, city.mygolbsCityCode.orEmpty(), static.line.lineId)
         viewModelScope.launch {
             lineStopsCache.write(key, static.line, static.reverseDirection, static.stops)
@@ -662,7 +701,7 @@ class LineDetailViewModel(
 
         val lineId = detail.line.lineId
         val timetable = timetableCache[lineId]
-            ?: realtime.getTimetable(settings.selectedCity.value, detail.line)
+            ?: realtime.getTimetable(effectiveCity(detail.line), detail.line)
                 .getOrNull()
                 ?.also { timetableCache[lineId] = it }
 
@@ -833,7 +872,7 @@ class LineDetailViewModel(
                 publishTrackingState()
                 currentSource = reverse.source
 
-                val currentCity = settings.selectedCity.value
+                val currentCity = effectiveCity(reverse)
                 val reverseResult = realtime.getLineDetail(
                     city = currentCity,
                     lineId = reverse.lineId,
@@ -876,7 +915,7 @@ class LineDetailViewModel(
     private fun favoriteIdOf(state: LineDetailUiState): String? {
         val static = state.static ?: return null
         val stop = state.selectedStop ?: return null
-        return "${settings.selectedCity.value.cityId}_${static.line.lineId}_${stop.order}"
+        return "${effectiveCity(static.line).cityId}_${static.line.lineId}_${stop.order}"
     }
 
     /**
@@ -887,7 +926,7 @@ class LineDetailViewModel(
         val static = state.static ?: return
         val stop = state.selectedStop ?: return
         val line = static.line
-        val city = settings.selectedCity.value
+        val city = effectiveCity(line)
 
         val favItem = FavoriteStationLine(
             id = "${city.cityId}_${line.lineId}_${stop.order}",
@@ -907,7 +946,7 @@ class LineDetailViewModel(
             wgsLat = stop.wgsLat,
             wgsLng = stop.wgsLng,
             source = line.source,
-            mygolbsCityCode = line.mygolbsCityCode
+            mygolbsCityCode = line.mygolbsCityCode.ifBlank { city.mygolbsCityCode.orEmpty() }
         )
 
         viewModelScope.launch {
@@ -961,7 +1000,7 @@ class LineDetailViewModel(
     fun loadTimetable() {
         val detail = currentDetail ?: return
         viewModelScope.launch {
-            val city = settings.selectedCity.value
+            val city = effectiveCity(detail.line)
             realtime.getTimetable(city, detail.line)
                 .onSuccess { tb ->
                     _uiState.update { it.copy(timetable = tb, isTimetableSheetOpen = true) }

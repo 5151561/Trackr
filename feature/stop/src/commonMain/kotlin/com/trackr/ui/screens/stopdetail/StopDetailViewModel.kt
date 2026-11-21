@@ -252,18 +252,12 @@ class StopDetailViewModel(
                 _uiState.update { it.copy(isRefreshing = true, errorMessage = null) }
             }
 
-            val currentCity = settings.selectedCity.value
-            val city = if (currentCity.cityId == cityId) {
-                currentCity
-            } else {
-                TransitCity(cityId = cityId, cityName = "")
-            }
-
             val userLoc = userLocationStore.userLocation.value
             val currentSelected = _uiState.value.stops.getOrNull(_uiState.value.selectedStopIndex)
             val queryPhysicalStId = currentSelected?.physicalStId?.takeIf { it.isNotBlank() } ?: physicalStId.takeIf { it.isNotBlank() }
             val queryNamesakeStId = currentSelected?.namesakeStId?.takeIf { it.isNotBlank() } ?: namesakeStId.takeIf { it.isNotBlank() }
             val queryStopId = currentSelected?.stopId?.takeIf { it.isNotBlank() } ?: stopId.takeIf { it.isNotBlank() }
+            val city = effectiveCity(queryStopId, queryPhysicalStId, queryNamesakeStId)
 
             val result = realtime.getStopDetail(
                 city = city,
@@ -331,6 +325,44 @@ class StopDetailViewModel(
         }
     }
 
+    /**
+     * 这个站点所属的城市：当前所选城市是同一个城市时用所选城市，否则从已收藏的站或掌上公交 `mg:` 站点 ID 里还原城市名与编码（issue #62）。
+     */
+    private fun effectiveCity(
+        queryStopId: String? = stopId.takeIf { it.isNotBlank() },
+        queryPhysicalStId: String? = physicalStId.takeIf { it.isNotBlank() },
+        queryNamesakeStId: String? = namesakeStId.takeIf { it.isNotBlank() }
+    ): TransitCity {
+        val currentCity = settings.selectedCity.value
+        val favStation = matchedStation(_uiState.value)
+        val mgCityName = listOfNotNull(queryStopId, queryPhysicalStId, queryNamesakeStId)
+            .firstNotNullOfOrNull { id ->
+                id.takeIf { it.startsWith("mg:") }
+                    ?.removePrefix("mg:")
+                    ?.split(":")
+                    ?.takeIf { it.size >= 2 }
+                    ?.get(0)
+                    ?.takeIf { it.isNotBlank() }
+            }
+        val isSameAsSelected = when {
+            cityId.isNotBlank() && currentCity.cityId.isNotBlank() -> currentCity.cityId == cityId
+            cityId.isNotBlank() && !currentCity.mygolbsCityCode.isNullOrBlank() -> currentCity.mygolbsCityCode == cityId
+            favStation != null && favStation.cityName.isNotBlank() && currentCity.cityName.isNotBlank() ->
+                com.trackr.core.model.ProvinceCityCatalog.cleanCityName(favStation.cityName) ==
+                    com.trackr.core.model.ProvinceCityCatalog.cleanCityName(currentCity.cityName)
+            mgCityName != null && currentCity.cityName.isNotBlank() ->
+                com.trackr.core.model.ProvinceCityCatalog.cleanCityName(mgCityName) ==
+                    com.trackr.core.model.ProvinceCityCatalog.cleanCityName(currentCity.cityName)
+            else -> cityId.isBlank()
+        }
+        if (isSameAsSelected) return currentCity
+        return TransitCity(
+            cityId = cityId,
+            cityName = favStation?.cityName?.takeIf { it.isNotBlank() } ?: mgCityName.orEmpty(),
+            mygolbsCityCode = favStation?.mygolbsCityCode?.takeIf { it.isNotBlank() }
+        )
+    }
+
     /** 打开时给的站台在结果里的位置；认不出为 null */
     private fun initialPlatformIndex(stops: List<NearbyStop>): Int? {
         val idx = stops.indexOfFirst { stop ->
@@ -365,12 +397,11 @@ class StopDetailViewModel(
 
     fun toggleFavorite(stop: NearbyStop, lineStatus: NearbyStopLineStatus) {
         viewModelScope.launch {
-            val city = settings.selectedCity.value
-            val cityName = if (city.cityId == cityId) city.cityName else ""
+            val city = effectiveCity(stop.stopId, stop.physicalStId, stop.namesakeStId)
             val favItem = FavoriteStationLine(
                 id = favoriteIdOf(cityId, lineStatus),
                 cityId = cityId,
-                cityName = cityName,
+                cityName = city.cityName.ifBlank { lineStatus.line.mygolbsCityName },
                 lineId = lineStatus.line.lineId,
                 // 数据源偶尔只给线路号不给名字：收藏里存兜底后的名字，首页徽标才不会空白（issue #20）
                 lineName = lineStatus.line.displayLineName,
@@ -381,7 +412,8 @@ class StopDetailViewModel(
                 targetStopId = lineStatus.targetStopId.ifBlank { stop.stopId },
                 targetStopName = lineStatus.targetStopName.ifBlank { stop.name },
                 targetOrder = lineStatus.targetOrder,
-                source = lineStatus.line.source
+                source = lineStatus.line.source,
+                mygolbsCityCode = lineStatus.line.mygolbsCityCode.ifBlank { city.mygolbsCityCode.orEmpty() }
             )
             favorites.toggleFavorite(favItem)
         }
@@ -430,16 +462,16 @@ class StopDetailViewModel(
     private fun stationFromCurrent(state: StopDetailUiState, base: FavoriteStation?): FavoriteStation? {
         val stop = state.stops.getOrNull(state.selectedStopIndex) ?: return null
         val id = base?.id ?: stationIdOf(state) ?: return null
-        val city = settings.selectedCity.value
+        val city = effectiveCity(stop.stopId, stop.physicalStId, stop.namesakeStId)
         val label = if (state.stops.size > 1) state.platformLabels.getOrNull(state.selectedStopIndex).orEmpty() else ""
         val lat = stop.wgsLat.takeIf { it > 0.0 } ?: stationLat
         val lng = stop.wgsLng.takeIf { it > 0.0 } ?: stationLng
         val mygolbsCode = stop.lines.firstNotNullOfOrNull { s -> s.line.mygolbsCityCode.takeIf { it.isNotBlank() } }
-            ?: city.mygolbsCityCode?.takeIf { city.cityId == cityId }.orEmpty()
+            ?: city.mygolbsCityCode.orEmpty()
         val fresh = FavoriteStation(
             id = id,
             cityId = cityId,
-            cityName = if (city.cityId == cityId) city.cityName else base?.cityName.orEmpty(),
+            cityName = city.cityName.ifBlank { base?.cityName.orEmpty() },
             stopName = state.stopName,
             stopId = stop.stopId,
             physicalStId = stop.physicalStId.orEmpty(),
@@ -532,7 +564,7 @@ class StopDetailViewModel(
         val stop = currentStop() ?: return null
         val statuses = selectedStatuses()
         if (statuses.isEmpty()) return null
-        val city = settings.selectedCity.value
+        val city = effectiveCity(stop.stopId, stop.physicalStId, stop.namesakeStId)
         return TrackingTarget.WatchTogether(
             cityId = cityId,
             stopId = stop.stopId,
@@ -548,12 +580,13 @@ class StopDetailViewModel(
                     stopIdOnLine = s.targetStopId
                 )
             },
-            cityName = if (city.cityId == cityId) city.cityName else "",
+            cityName = city.cityName,
             physicalStId = stop.physicalStId?.takeIf { it.isNotBlank() },
             namesakeStId = stop.namesakeStId?.takeIf { it.isNotBlank() },
             stopLat = stop.wgsLat,
             stopLng = stop.wgsLng,
-            mygolbsCityCode = statuses.firstNotNullOfOrNull { s -> s.line.mygolbsCityCode.takeIf { it.isNotBlank() } }.orEmpty()
+            mygolbsCityCode = statuses.firstNotNullOfOrNull { s -> s.line.mygolbsCityCode.takeIf { it.isNotBlank() } }
+                ?: city.mygolbsCityCode.orEmpty()
         )
     }
 
