@@ -2,7 +2,7 @@
   "versionCode": 21,
   "versionName": "0.1.13",
   "minSupportedVersionCode": 1,
-  "changelog": "chore(release): 0.1.13（versionCode 21）",
+  "changelog": "## 更新内容\n\n### 新增\n\n- 新增朗斯通信「掌上出行」数据源（Android & iOS），支持更多县域公交实时查询与时刻表（#54）\n- 单车跟随支持「追这辆车（下车提醒）」，并新增「语音播报提醒」开关（#52）\n- 首页收藏栏超过 4 条自动折叠，支持按「全部城市 / 仅本市」筛选（#61）\n- 站点页与首页附近站支持切换线路排序方式（#56）\n- 「我的 → 关于」新增「接收测试版」更新通道开关\n- 「我的」增加「后台定位（始终允许）」权限入口与上车判定记录导出（#49）\n\n### 改进\n\n- 优化县级城市自动定位、国标区划归组与切换体验（#57）\n- 统一判上车规则，核对位移与车距防误判，追踪轮询跟随定位、页面 3 秒刷新，后台启动定位回前台自动重提权（#49）\n\n### 修复\n\n- 修复收藏站点跳转线路详情时站点 ID 传参错误的问题\n- 修复车来了线路详情距候车站距离读取不准的问题（#60）\n- 修复切换城市后首页仍停留在上一个城市线路的问题\n- 修复跟车视图没有时速数据时仍显示时速栏的问题（#58）\n- 修复乘车码桌面静态快捷方式在部分设备上无法打开的问题（#50）\n\n## 下载\n\n- Android 64 位设备：`trackr-0.1.13-arm64-v8a.apk`\n- Android 32 位设备：`trackr-0.1.13-armeabi-v7a.apk`\n- iOS（未签名，需自行签名后安装）：`trackr-0.1.13-unsigned.ipa`\n\nAndroid 覆盖安装即可，收藏与设置保留。iOS 包未签名，需使用 AltStore / Sideloadly 等工具重签后再安装；重签时主 App 与 `TrackrWidgets` 需配置同一个 App Group。",
   "downloadUrl": "https://github.com/5151561/Trackr/releases/tag/v0.1.13",
   "downloadUrls": {
     "arm64-v8a": "https://github.com/5151561/Trackr/releases/download/v0.1.13/trackr-0.1.13-arm64-v8a.apk",
