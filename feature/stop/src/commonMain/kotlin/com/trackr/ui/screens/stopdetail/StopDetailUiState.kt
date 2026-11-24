@@ -1,6 +1,7 @@
 package com.trackr.ui.screens.stopdetail
 
 import com.trackr.core.domain.arrival.ArrivalDisplay
+import com.trackr.core.domain.platform.ExternalMapApp
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.TransitCodeProvider
@@ -38,6 +39,8 @@ data class StopDetailUiState(
     val boardChoice: BoardChoiceUi? = null,
     val preferredTransitCodeProvider: TransitCodeProvider = TransitCodeProvider.ASK_ALWAYS,
     val isTransitCodeSheetOpen: Boolean = false,
+    /** 「导航到此站」装了两家以上地图时要选哪家（候选列表）；null = 没在选 */
+    val mapChooserApps: List<ExternalMapApp>? = null,
     /** 乘车码圆钮显不显示（「我的」里的开关，和首页、线路页同一个） */
     val showTransitCodeButton: Boolean = true,
     /** 线路按到站先后排（issue #56）；关时按数据源顺序。和首页附近站同一个开关，切了会记住 */
@@ -179,4 +182,9 @@ sealed interface StopDetailEvent {
     data object OpenTransitCode : StopDetailEvent
     data object DismissTransitCodeSheet : StopDetailEvent
     data class PickTransitCode(val provider: TransitCodeProvider, val saveAsDefault: Boolean) : StopDetailEvent
+
+    /** 「导航到此站」：装了一家直接跳，两家以上先弹选择，都没装走系统 geo: */
+    data object OpenExternalMap : StopDetailEvent
+    data object DismissMapChooser : StopDetailEvent
+    data class PickExternalMap(val app: ExternalMapApp) : StopDetailEvent
 }

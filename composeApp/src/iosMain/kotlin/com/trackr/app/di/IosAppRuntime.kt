@@ -166,6 +166,7 @@ internal class IosAppRuntime(val module: Module, val resolveFavorite: (String) -
                             single<TransitCodeLauncher> { IosTransitCodeLauncher }
                             single<Announcer> { announcer }
                             single<SystemSettingsLauncher> { IosSystemSettingsLauncher }
+                            single<ExternalMapNavigator> { IosExternalMapNavigator }
                             single<AppSigningInfo> { IosAppSigningInfo }
                             single { AppVersionInfo(
                                 (NSBundle.mainBundle.objectForInfoDictionaryKey("CFBundleVersion") as? String)?.toIntOrNull() ?: 1,

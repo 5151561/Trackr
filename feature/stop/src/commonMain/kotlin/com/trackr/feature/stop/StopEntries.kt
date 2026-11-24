@@ -75,7 +75,8 @@ val stopModule = module {
             userLocationStore = get(),
             trackingRepository = get(),
             trackingController = get(),
-            transitCodeLauncher = get()
+            transitCodeLauncher = get(),
+            externalMapNavigator = get()
         )
     }
 }

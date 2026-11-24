@@ -60,4 +60,19 @@ class CoordTransformTest {
         assertEquals("1.0,2.0,3.0", CoordTransform.wgs84PairToGcj02Pair("1.0,2.0,3.0"))
         assertEquals("0.0,0.0", CoordTransform.wgs84PairToGcj02Pair("0.0,0.0"))
     }
+
+    @Test
+    fun `GCJ02转BD09落在已知参考值上`() {
+        // 参考值按百度坐标转换的公开公式离线算得（上海人民广场一带）
+        val (bdLat, bdLng) = CoordTransform.gcj02ToBd09(31.2304, 121.4737)
+        assertEquals(31.236334819793708, bdLat, 1e-6)
+        assertEquals(121.48023740342614, bdLng, 1e-6)
+    }
+
+    @Test
+    fun `GCJ02转BD09偏移恒正且在量级内`() {
+        val (bdLat, bdLng) = CoordTransform.gcj02ToBd09(39.915, 116.404)
+        assertTrue(bdLat - 39.915 in 0.005..0.008, "纬度偏移异常: ${bdLat - 39.915}")
+        assertTrue(bdLng - 116.404 in 0.005..0.009, "经度偏移异常: ${bdLng - 116.404}")
+    }
 }

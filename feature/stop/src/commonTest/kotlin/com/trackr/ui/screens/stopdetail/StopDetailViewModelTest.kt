@@ -4,6 +4,7 @@ import com.trackr.core.data.repository.DefaultTrackingRepository
 import com.trackr.core.data.repository.InMemoryTrackingSessionStore
 import com.trackr.core.data.repository.RealtimeRepository
 import com.trackr.core.domain.arrival.ArrivalTone
+import com.trackr.core.domain.platform.ExternalMapApp
 import com.trackr.core.domain.tracking.WatchTogetherRoute
 import com.trackr.core.model.BoardChoice
 import com.trackr.core.model.BoardOption
@@ -23,6 +24,7 @@ import com.trackr.core.testing.FakeFavoritesRepository
 import com.trackr.core.testing.FakeRealtimeRepository
 import com.trackr.core.testing.FakeSettingsRepository
 import com.trackr.core.testing.FakeTrackingController
+import com.trackr.core.testing.FakeExternalMapNavigator
 import com.trackr.core.testing.FakeTransitCodeLauncher
 import com.trackr.core.testing.FakeUserLocationStore
 import com.trackr.core.testing.MainDispatcherHolder
@@ -79,6 +81,7 @@ class StopDetailViewModelTest {
     private lateinit var fakeRepository: FakeRealtimeRepository
     private lateinit var controller: FakeTrackingController
     private lateinit var launcher: FakeTransitCodeLauncher
+    private lateinit var mapNavigator: FakeExternalMapNavigator
     private var trackingRepository: DefaultTrackingRepository? = null
     private val userLocationStore = FakeUserLocationStore()
     private val defaultCity = TransitCity(cityId = "034", cityName = "上海")
@@ -159,6 +162,7 @@ class StopDetailViewModelTest {
         fakeRepository.stopDetailResult = Result.success(listOf(sampleStop1, sampleStop2))
         controller = FakeTrackingController()
         launcher = FakeTransitCodeLauncher()
+        mapNavigator = FakeExternalMapNavigator()
         trackingRepository = null
     }
 
@@ -185,14 +189,14 @@ class StopDetailViewModelTest {
             StopDetailViewModel(
                 cityId = "034", stopId = "stop_001", initialStopName = "人民广场",
                 settings = settings, favorites = favorites, realtime = realtime, userLocationStore = userLocationStore,
-                trackingRepository = tracking, trackingController = controller, transitCodeLauncher = launcher,
+                trackingRepository = tracking, trackingController = controller, transitCodeLauncher = launcher, externalMapNavigator = mapNavigator,
                 enableAutoPolling = enableAutoPolling
             )
         } else {
             StopDetailViewModel(
                 cityId = "034", stopId = "stop_001", initialStopName = "人民广场",
                 settings = settings, favorites = favorites, realtime = realtime, userLocationStore = userLocationStore,
-                trackingRepository = tracking, trackingController = controller, transitCodeLauncher = launcher,
+                trackingRepository = tracking, trackingController = controller, transitCodeLauncher = launcher, externalMapNavigator = mapNavigator,
                 enableAutoPolling = enableAutoPolling, clockMillis = clockMillis
             )
         }
@@ -359,7 +363,7 @@ class StopDetailViewModelTest {
         val viewModel = StopDetailViewModel(
             cityId = "034", stopId = "stop_002", initialStopName = "人民广场", physicalStId = "phy_02",
             settings = settings, favorites = favorites, realtime = fakeRepository, userLocationStore = userLocationStore,
-            trackingRepository = useRealTracking(), trackingController = controller, transitCodeLauncher = launcher,
+            trackingRepository = useRealTracking(), trackingController = controller, transitCodeLauncher = launcher, externalMapNavigator = mapNavigator,
             enableAutoPolling = false
         )
         testScheduler.runCurrent()
@@ -1042,7 +1046,7 @@ class StopDetailViewModelTest {
             userLocationStore = userLocationStore,
             trackingRepository = useRealTracking(),
             trackingController = controller,
-            transitCodeLauncher = launcher,
+            transitCodeLauncher = launcher, externalMapNavigator = mapNavigator,
             enableAutoPolling = false
         )
         testScheduler.runCurrent()
@@ -1050,5 +1054,60 @@ class StopDetailViewModelTest {
         assertEquals(1, repo.stopDetailCities.size)
         assertEquals("", repo.stopDetailCities.single().cityId)
         assertEquals("玉林市", repo.stopDetailCities.single().cityName)
+    }
+
+    // ================================================================ 外部地图导航
+
+    @Test
+    fun navigate_singleMapInstalled_opensDirectly() = runTest(main.dispatcher) {
+        mapNavigator = FakeExternalMapNavigator(installed = listOf(ExternalMapApp.BAIDU))
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.onEvent(StopDetailEvent.OpenExternalMap)
+
+        assertEquals(listOf(ExternalMapApp.BAIDU), mapNavigator.opened)
+        assertNull(viewModel.uiState.value.mapChooserApps)
+        assertEquals(0, mapNavigator.systemOpenCount)
+    }
+
+    @Test
+    fun navigate_multipleMapsInstalled_chooserThenPick() = runTest(main.dispatcher) {
+        mapNavigator = FakeExternalMapNavigator(installed = listOf(ExternalMapApp.AMAP, ExternalMapApp.TENCENT))
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.onEvent(StopDetailEvent.OpenExternalMap)
+        assertEquals(listOf(ExternalMapApp.AMAP, ExternalMapApp.TENCENT), viewModel.uiState.value.mapChooserApps)
+        assertTrue(mapNavigator.opened.isEmpty())
+
+        viewModel.onEvent(StopDetailEvent.PickExternalMap(ExternalMapApp.TENCENT))
+        assertEquals(listOf(ExternalMapApp.TENCENT), mapNavigator.opened)
+        assertNull(viewModel.uiState.value.mapChooserApps)
+    }
+
+    @Test
+    fun navigate_noMapInstalled_fallsBackToSystem() = runTest(main.dispatcher) {
+        mapNavigator = FakeExternalMapNavigator(installed = emptyList())
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.onEvent(StopDetailEvent.OpenExternalMap)
+
+        assertEquals(1, mapNavigator.systemOpenCount)
+        assertTrue(mapNavigator.opened.isEmpty())
+    }
+
+    @Test
+    fun navigate_noCoordinates_tellsUserAndOpensNothing() = runTest(main.dispatcher) {
+        fakeRepository.stopDetailResult = Result.success(listOf(sampleStop1.copy(wgsLat = 0.0, wgsLng = 0.0)))
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.onEvent(StopDetailEvent.OpenExternalMap)
+
+        assertEquals("这个站暂时没有坐标，没法导航", viewModel.userMessages.first())
+        assertTrue(mapNavigator.opened.isEmpty())
+        assertEquals(0, mapNavigator.systemOpenCount)
     }
 }
