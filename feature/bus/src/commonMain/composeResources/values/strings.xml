@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- feature/bus 的页面文案（第 28 步从代码里搬出来）。 -->
+<resources>
+    <string name="bus_city_current">当前</string>
+    <string name="bus_city_located">定位</string>
+    <string name="bus_city_title">切换城市</string>
+    <string name="bus_city_subtitle">按 省 / 直辖市 分级快速查找全国 480+ 城市</string>
+    <string name="bus_city_search_hint">搜索城市中文名或拼音（如：玉林 / yulin）</string>
+    <string name="bus_city_search">搜索</string>
+    <string name="bus_city_clear">清除</string>
+    <string name="bus_city_match_count">找到 %1$s 个相关城市</string>
+    <string name="bus_city_located_name">定位: %1$s</string>
+    <string name="bus_city_selected_name">已选: %1$s</string>
+    <string name="bus_city_province_count">%1$s · 共 %2$s 城</string>
+    <string name="bus_home_switch_city">换城市</string>
+    <string name="bus_home_settings">设置</string>
+    <string name="bus_home_search_hint">搜线路、车站</string>
+    <!-- 定位失败的三种原因（issue #34）：文案要指清楚该去哪开，别都写「定位不可用」 -->
+    <!-- 定位失败时附近站不会空着，会按上次的位置兜底查，所以别写「取不到」 -->
+    <string name="bus_home_location_permission_missing">没有定位权限，附近用的是上次位置</string>
+    <string name="bus_home_location_service_disabled">手机定位服务未开启，附近用的是上次位置</string>
+    <string name="bus_home_location_unavailable">定位不可用，已保留当前位置</string>
+    <string name="bus_home_location_action_grant">去授权</string>
+    <string name="bus_home_location_action_enable">去开启</string>
+    <string name="bus_favorites_title">收藏</string>
+    <string name="bus_favorites_empty">在线路页点 ☆，常坐的车会出现在这里</string>
+    <!-- 收藏的站（issue #47） -->
+    <string name="bus_station_loading">正在查车…</string>
+    <string name="bus_station_not_found">这个站暂时查不到，可能临时改道</string>
+    <string name="bus_station_icon">收藏的站</string>
+    <string name="bus_favorites_group_empty">这个分组还没有收藏</string>
+    <string name="bus_favorites_city_empty">当前城市还没有收藏</string>
+    <string name="bus_favorites_group_city_empty">这个分组在当前城市还没有收藏</string>
+    <string name="bus_favorites_show_all_cities">显示全部城市</string>
+    <string name="bus_favorites_all_cities">全部城市</string>
+    <string name="bus_favorites_current_city_only">仅本市</string>
+    <string name="bus_favorites_expand">展开全部（还有 %1$s 条）</string>
+    <string name="bus_favorites_collapse">收起</string>
+    <string name="bus_favorites_all">全部</string>
+    <string name="bus_nearby_title">附近</string>
+    <string name="bus_nearby_empty">附近 1 公里内没找到公交站</string>
+    <string name="bus_city_lines_title">本城线路</string>
+    <string name="bus_city_lines_count">共 %1$s 条</string>
+    <string name="bus_city_lines_empty">这座城市的线路暂时取不到，可能服务器不在线</string>
+    <string name="bus_nearby_stop_detail">站点详情</string>
+    <string name="bus_nearby_loading">正在查车…</string>
+    <!-- 长辈版首页（第 32 步） -->
+    <string name="bus_elder_search_hint">找线路、车站</string>
+    <string name="bus_elder_favorites_title">我常坐的车</string>
+    <string name="bus_elder_favorites_empty">点一辆车，再点「收藏」，它就会放到最上面。</string>
+    <string name="bus_elder_nearby_title">离你最近</string>
+    <string name="bus_elder_stop_tracking">不用叫了</string>
+    <string name="bus_elder_read_aloud">读给我听</string>
+    <string name="bus_elder_stop_tracking_confirm">不再提醒这班车了吗？</string>
+    <string name="bus_elder_keep_tracking">继续提醒</string>
+    <string name="bus_elder_open_stop">看这个站的车</string>
+    <!-- 长辈版到站整屏提醒（第 34 步） -->
+    <string name="bus_elder_arrived_title">车到站了！</string>
+    <string name="bus_elder_arrived_go">快去%1$s上车</string>
+    <string name="bus_elder_arrived_transit_code">出示乘车码</string>
+</resources>

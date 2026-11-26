@@ -1,0 +1,435 @@
+package com.trackr.ui.screens.me
+
+import com.trackr.core.domain.platform.BoardingTraceLog
+import com.trackr.core.domain.platform.LocationSource
+import com.trackr.core.model.CustomSourceConfig
+import com.trackr.core.model.EngineMode
+import com.trackr.core.model.RailMode
+import com.trackr.core.model.ThemeMode
+import com.trackr.core.model.ScheduledReminder
+import com.trackr.core.model.TransitCodeProvider
+import com.trackr.core.model.UiMode
+import com.trackr.core.testing.FakeAmapKeyRepository
+import com.trackr.core.testing.FakeLocationSource
+import com.trackr.core.testing.FakeSettingsRepository
+import com.trackr.core.testing.MainDispatcherHolder
+import com.trackr.data.repository.FakeScheduledReminderRepository
+import com.trackr.ui.platform.LiveUpdateAccess
+import com.trackr.ui.platform.LiveUpdateStatus
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.runTest
+import kotlin.test.AfterTest
+import kotlin.test.BeforeTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class MeViewModelTest {
+
+    private val main = MainDispatcherHolder()
+
+    private lateinit var settings: FakeSettingsRepository
+    private lateinit var reminders: FakeScheduledReminderRepository
+    private lateinit var amapKeys: FakeAmapKeyRepository
+    private lateinit var notices: MeNotices
+    private lateinit var liveUpdate: FakeLiveUpdateAccess
+
+    @BeforeTest
+    fun setup() {
+        main.install()
+        settings = FakeSettingsRepository()
+        reminders = FakeScheduledReminderRepository()
+        amapKeys = FakeAmapKeyRepository()
+        notices = MeNotices()
+        liveUpdate = FakeLiveUpdateAccess()
+    }
+
+    @AfterTest
+    fun tearDown() {
+        main.reset()
+    }
+
+    private fun createViewModel(
+        liveUpdateAccess: LiveUpdateAccess? = liveUpdate,
+        versionName: String? = "0.0.3",
+        boardingTrace: BoardingTraceLog? = null,
+        locationSource: LocationSource? = null
+    ) = MeViewModel(
+        settings = settings,
+        reminderRepository = reminders,
+        amapKeys = amapKeys,
+        notices = notices,
+        liveUpdateAccess = liveUpdateAccess,
+        versionName = versionName,
+        boardingTrace = boardingTrace,
+        locationSource = locationSource
+    )
+
+    /** 假的判定记录：[shareResult] 是分享面板开没开成 */
+    private class FakeBoardingTraceLog(var shareResult: Boolean) : BoardingTraceLog {
+        var shares = 0
+        override fun record(line: String) = Unit
+        override suspend fun share(): Boolean {
+            shares++
+            return shareResult
+        }
+    }
+
+    @Test
+    fun exportBoardingTrace_rowOnlyWhenPlatformHasLog_andTellsUserWhenEmpty() = runTest(main.dispatcher) {
+        // 平台没有判定记录（iOS）：不显示那一行
+        assertFalse(createViewModel().uiState.value.canExportBoardingTrace)
+
+        val trace = FakeBoardingTraceLog(shareResult = false)
+        val viewModel = createViewModel(boardingTrace = trace)
+        assertTrue(viewModel.uiState.value.canExportBoardingTrace)
+
+        // 还没有记录：提示一句
+        viewModel.onEvent(MeEvent.ExportBoardingTrace)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, trace.shares)
+        assertEquals(listOf(NO_BOARDING_TRACE_MESSAGE), viewModel.uiState.value.userMessages.map { it.text })
+
+        // 分享面板开了：不再提示
+        viewModel.onEvent(MeEvent.MessageShown(viewModel.uiState.value.userMessages.single().id))
+        trace.shareResult = true
+        viewModel.onEvent(MeEvent.ExportBoardingTrace)
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, trace.shares)
+        assertTrue(viewModel.uiState.value.userMessages.isEmpty())
+    }
+
+    @Test
+    fun initialState_reflectsRepositories() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        val state = viewModel.uiState.value
+
+        assertEquals(settings.customSource.value, state.customSource)
+        assertEquals(TransitCodeProvider.ASK_ALWAYS, state.preferredTransitCode)
+        assertEquals(2, state.alertThresholdStops)
+        assertTrue(state.reminders.isEmpty())
+        assertNull(state.remindersSubtitle)
+        assertTrue(state.isLiveNotificationEnabled)
+        assertTrue(state.showOnLockScreen)
+        // 首页「乘车码」按钮默认显示
+        assertTrue(state.showTransitCodeButton)
+        assertEquals("没填，不显示「路线」页", state.amapKeyStatus)
+        assertEquals("0.0.3", state.versionName)
+        // 没存过界面模式 = 标准版，开关关着
+        assertFalse(state.elderMode)
+    }
+
+    @Test
+    fun elderSwitch_writesUiMode_andStateFollows() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+
+        viewModel.onEvent(MeEvent.SetElderMode(true))
+        testScheduler.advanceUntilIdle()
+        assertEquals(UiMode.Elder, settings.uiMode.value)
+        assertTrue(viewModel.uiState.value.elderMode)
+
+        viewModel.onEvent(MeEvent.SetElderMode(false))
+        testScheduler.advanceUntilIdle()
+        assertEquals(UiMode.Standard, settings.uiMode.value)
+        assertFalse(viewModel.uiState.value.elderMode)
+    }
+
+    @Test
+    fun railMode_defaultsToHorizontal_andFollowsSetting() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        assertEquals(RailMode.Horizontal, viewModel.uiState.value.railMode)
+
+        viewModel.onEvent(MeEvent.SetRailMode(RailMode.Vertical))
+        testScheduler.advanceUntilIdle()
+        assertEquals(RailMode.Vertical, settings.railMode.value)
+        assertEquals(RailMode.Vertical, viewModel.uiState.value.railMode)
+
+        viewModel.onEvent(MeEvent.SetRailMode(RailMode.Horizontal))
+        testScheduler.advanceUntilIdle()
+        assertEquals(RailMode.Horizontal, viewModel.uiState.value.railMode)
+    }
+
+    @Test
+    fun themeMode_readsSavedChoice_andFollowsChanges() = runTest(main.dispatcher) {
+        settings.setThemeMode(ThemeMode.Dark)
+        val viewModel = createViewModel()
+        assertEquals(ThemeMode.Dark, viewModel.uiState.value.themeMode)
+
+        for (mode in listOf(ThemeMode.Light, ThemeMode.System, ThemeMode.Dark)) {
+            viewModel.onEvent(MeEvent.SetThemeMode(mode))
+            testScheduler.advanceUntilIdle()
+            assertEquals(mode, settings.themeMode.value)
+            assertEquals(mode, viewModel.uiState.value.themeMode)
+        }
+    }
+
+    @Test
+    fun elderMode_setElsewhere_showsOn() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        // 比如字号提示里点了「打开长辈版」
+        settings.setUiMode(UiMode.Elder)
+        testScheduler.advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.elderMode)
+    }
+
+    @Test
+    fun dataSource_customConfig_savedAndStateFollows() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        // 不内置任何数据源：只有用户自行接入一种
+        assertEquals(listOf(EngineMode.CUSTOM), EngineMode.entries.toList())
+
+        val config = CustomSourceConfig(baseUrl = "https://my-source.test/trackr", token = "t")
+        viewModel.onEvent(MeEvent.SetCustomSource(config))
+        testScheduler.advanceUntilIdle()
+        assertEquals(config, settings.customSource.value)
+        assertEquals(config, viewModel.uiState.value.customSource)
+        assertEquals("my-source.test", customSourceLabel(viewModel.uiState.value.customSource))
+        assertEquals("未接入", customSourceLabel(CustomSourceConfig()))
+    }
+
+    @Test
+    fun transitCode_updatesRepository() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+
+        viewModel.onEvent(MeEvent.SetTransitCode(TransitCodeProvider.ALIPAY))
+        testScheduler.advanceUntilIdle()
+        assertEquals(TransitCodeProvider.ALIPAY, settings.preferredTransitCodeProvider.value)
+        assertEquals(TransitCodeProvider.ALIPAY, viewModel.uiState.value.preferredTransitCode)
+
+        viewModel.onEvent(MeEvent.SetTransitCode(TransitCodeProvider.UNIONPAY))
+        testScheduler.advanceUntilIdle()
+        assertEquals(TransitCodeProvider.UNIONPAY, viewModel.uiState.value.preferredTransitCode)
+    }
+
+    @Test
+    fun transitCodeButton_switchWritesSetting_andStateFollows() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        // 默认显示
+        assertTrue(viewModel.uiState.value.showTransitCodeButton)
+
+        viewModel.onEvent(MeEvent.SetShowTransitCodeButton(false))
+        testScheduler.advanceUntilIdle()
+        assertFalse(settings.showTransitCodeButton.value)
+        assertFalse(viewModel.uiState.value.showTransitCodeButton)
+
+        viewModel.onEvent(MeEvent.SetShowTransitCodeButton(true))
+        testScheduler.advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.showTransitCodeButton)
+    }
+
+    @Test
+    fun voiceAlerts_switchWritesSetting_andDefaultsOff() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+        assertFalse(viewModel.uiState.value.voiceAlerts)
+
+        viewModel.onEvent(MeEvent.SetVoiceAlerts(true))
+        testScheduler.runCurrent()
+        assertTrue(settings.voiceAlerts.value)
+        assertTrue(viewModel.uiState.value.voiceAlerts)
+    }
+
+    @Test
+    fun autoStopAfterBoarding_switchWritesSetting_andDefaultsOn() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        // 默认开：这本来才是该有的行为（issue #32）
+        assertTrue(viewModel.uiState.value.autoStopAfterBoarding)
+
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(false))
+        testScheduler.advanceUntilIdle()
+        assertFalse(settings.autoStopAfterBoarding.value)
+        assertFalse(viewModel.uiState.value.autoStopAfterBoarding)
+
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(true))
+        testScheduler.advanceUntilIdle()
+        assertTrue(settings.autoStopAfterBoarding.value)
+        assertTrue(viewModel.uiState.value.autoStopAfterBoarding)
+    }
+
+    @Test
+    fun backgroundLocation_reflectsPermission_hidesWhenAutoStopOff_andRefreshesOnResume() = runTest(main.dispatcher) {
+        val location = FakeLocationSource(precisePermission = true).apply { backgroundPermission = false }
+        val viewModel = createViewModel(locationSource = location)
+        assertEquals(false, viewModel.uiState.value.backgroundLocationGranted)
+
+        // 关掉「上车后自动结束追踪」后隐藏这一行
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(false))
+        testScheduler.advanceUntilIdle()
+        assertNull(viewModel.uiState.value.backgroundLocationGranted)
+
+        // 重新打开，并在系统设置授予「始终允许」后回到页面刷新为 true
+        viewModel.onEvent(MeEvent.SetAutoStopAfterBoarding(true))
+        testScheduler.advanceUntilIdle()
+        assertEquals(false, viewModel.uiState.value.backgroundLocationGranted)
+
+        location.backgroundPermission = true
+        viewModel.onScreenResumed()
+        testScheduler.advanceUntilIdle()
+        assertEquals(true, viewModel.uiState.value.backgroundLocationGranted)
+    }
+
+    @Test
+    fun alertThreshold_isGlobalSetting_choicesOneToThree() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        assertEquals(listOf(1, 2, 3), ALERT_THRESHOLD_CHOICES)
+
+        viewModel.onEvent(MeEvent.SetAlertThresholdStops(3))
+        testScheduler.advanceUntilIdle()
+        assertEquals(3, settings.alertThresholdStops.value)
+        assertEquals(3, viewModel.uiState.value.alertThresholdStops)
+
+        viewModel.onEvent(MeEvent.SetAlertThresholdStops(1))
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, viewModel.uiState.value.alertThresholdStops)
+    }
+
+    @Test
+    fun reminders_rowShowsEarliestEnabled_andToggleWritesRepository() = runTest(main.dispatcher) {
+        reminders.saveReminder(reminder("late", hour = 18, minute = 30, lineName = "20路"))
+        reminders.saveReminder(reminder("early", hour = 7, minute = 50, lineName = "325"))
+        val viewModel = createViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(2, viewModel.uiState.value.reminders.size)
+        assertEquals("工作日 07:50 · 325", viewModel.uiState.value.remindersSubtitle)
+
+        // 关掉早的那条：副标题换成下一条开着的
+        viewModel.onEvent(MeEvent.ToggleReminder("early", false))
+        testScheduler.advanceUntilIdle()
+        assertFalse(reminders.getReminderById("early")!!.enabled)
+        assertEquals("工作日 18:30 · 20路", viewModel.uiState.value.remindersSubtitle)
+
+        viewModel.onEvent(MeEvent.ToggleReminder("late", false))
+        testScheduler.advanceUntilIdle()
+        assertEquals("2 个都关着", viewModel.uiState.value.remindersSubtitle)
+    }
+
+    @Test
+    fun liveNotification_andLockScreen_toggle() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+
+        viewModel.onEvent(MeEvent.SetShowOnLockScreen(false))
+        testScheduler.advanceUntilIdle()
+        assertFalse(settings.showOnLockScreen.value)
+        assertFalse(viewModel.uiState.value.showOnLockScreen)
+
+        viewModel.onEvent(MeEvent.SetLiveNotificationEnabled(false))
+        testScheduler.advanceUntilIdle()
+        assertFalse(settings.isLiveNotificationEnabled.value)
+        assertFalse(viewModel.uiState.value.isLiveNotificationEnabled)
+
+        viewModel.onEvent(MeEvent.SetLiveNotificationEnabled(true))
+        viewModel.onEvent(MeEvent.SetShowOnLockScreen(true))
+        testScheduler.advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.isLiveNotificationEnabled)
+        assertTrue(viewModel.uiState.value.showOnLockScreen)
+    }
+
+    @Test
+    fun liveUpdateRow_hiddenWhenLiveNotificationOff_orNoPlatformSupport() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.advanceUntilIdle()
+        assertEquals(LiveUpdateStatus(supported = true, allowed = false), viewModel.uiState.value.liveUpdate)
+
+        // 和原来一样：实时通知关着时不显示胶囊权限
+        viewModel.onEvent(MeEvent.SetLiveNotificationEnabled(false))
+        testScheduler.advanceUntilIdle()
+        assertNull(viewModel.uiState.value.liveUpdate)
+
+        // iOS：没有这项
+        val ios = createViewModel(liveUpdateAccess = null)
+        testScheduler.advanceUntilIdle()
+        assertNull(ios.uiState.value.liveUpdate)
+    }
+
+    @Test
+    fun liveUpdate_openSettings_andRecheckOnResume() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.onEvent(MeEvent.OpenLiveUpdateSettings)
+        assertEquals(1, liveUpdate.openCount)
+
+        // 用户在系统设置里开了，回到前台重查
+        liveUpdate.current = LiveUpdateStatus(supported = true, allowed = true)
+        viewModel.onScreenResumed()
+        testScheduler.advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.liveUpdate!!.allowed)
+    }
+
+    @Test
+    fun amapKeyStatus_followsRepository() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+
+        amapKeys.setWebKey("w".repeat(32))
+        testScheduler.advanceUntilIdle()
+        assertEquals("只有 Web 服务 Key：能算路线，不显示地图", viewModel.uiState.value.amapKeyStatus)
+
+        amapKeys.setAndroidKey("a".repeat(32))
+        testScheduler.advanceUntilIdle()
+        assertEquals("已填，路线页显示地图", viewModel.uiState.value.amapKeyStatus)
+    }
+
+    @Test
+    fun noticesFromChildPages_showOnceThenConsumed() = runTest(main.dispatcher) {
+        val viewModel = createViewModel()
+        notices.post("提醒已保存：工作日 07:50 · 325")
+        testScheduler.advanceUntilIdle()
+
+        val message = viewModel.uiState.value.userMessages.single()
+        assertEquals("提醒已保存：工作日 07:50 · 325", message.text)
+
+        viewModel.onEvent(MeEvent.MessageShown(message.id))
+        testScheduler.advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.userMessages.isEmpty())
+    }
+
+    @Test
+    fun reminderTexts_shortForms() {
+        assertEquals("仅一次", shortRepeatText(emptySet()))
+        assertEquals("工作日", shortRepeatText(setOf(1, 2, 3, 4, 5)))
+        assertEquals("每天", shortRepeatText((1..7).toSet()))
+        assertEquals("周末", shortRepeatText(setOf(6, 7)))
+        assertEquals("周一、三", shortRepeatText(setOf(3, 1)))
+        assertEquals("工作日 07:05 · 325", reminderSummary(reminder("a", hour = 7, minute = 5, lineName = "325")))
+    }
+
+    @Test
+    fun amapKeyStatusText_coversThreeStates() {
+        assertEquals("没填，不显示「路线」页", amapKeyStatusText(hasMapKey = false, canShowMap = false))
+        assertEquals("只有 Web 服务 Key：能算路线，不显示地图", amapKeyStatusText(hasMapKey = true, canShowMap = false))
+        assertEquals("已填，路线页显示地图", amapKeyStatusText(hasMapKey = true, canShowMap = true))
+    }
+
+    private fun reminder(id: String, hour: Int, minute: Int, lineName: String) = ScheduledReminder(
+        id = id,
+        hour = hour,
+        minute = minute,
+        cityId = "034",
+        cityName = "上海",
+        lineId = "line_$id",
+        lineName = lineName,
+        direction = 0,
+        endStopName = "人民广场",
+        targetStopId = "stop_05",
+        targetStopName = "南京东路",
+        targetOrder = 5
+    )
+}
+
+/** 状态栏胶囊的 Fake：默认小米、没开权限 */
+class FakeLiveUpdateAccess(
+    var current: LiveUpdateStatus = LiveUpdateStatus(supported = true, allowed = false)
+) : LiveUpdateAccess {
+    var openCount: Int = 0
+        private set
+
+    override fun status(): LiveUpdateStatus = current
+
+    override fun openSettings() {
+        openCount++
+    }
+}

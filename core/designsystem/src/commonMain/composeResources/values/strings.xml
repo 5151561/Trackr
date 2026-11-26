@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 设计系统的通用文案。页面文案在第 28 步进各 feature 的 composeResources。 -->
+<resources>
+    <string name="action_retry">重试</string>
+    <string name="action_close">关闭</string>
+    <string name="action_back">返回</string>
+    <string name="state_loading">加载中…</string>
+    <string name="data_source_custom">自定义数据源</string>
+    <string name="action_relocate">重新定位</string>
+    <string name="action_edit">编辑</string>
+    <string name="action_end">结束</string>
+    <string name="action_done">完成</string>
+    <string name="action_delete">删除</string>
+    <string name="action_cancel">取消</string>
+    <string name="group_none">不分组</string>
+    <string name="action_save">保存</string>
+    <string name="transit_code">乘车码</string>
+    <string name="action_unfavorite">取消收藏</string>
+    <string name="action_favorite">收藏</string>
+    <string name="action_end_tracking">结束追踪</string>
+    <string name="action_clear">清空</string>
+    <string name="action_copy">复制</string>
+    <string name="action_confirm">确定</string>
+    <string name="more_actions">更多操作</string>
+    <string name="action_start_tracking">开始追踪</string>
+    <string name="action_boarded">我上车了</string>
+    <string name="action_add">添加</string>
+    <!-- 收藏分组颜色（issue #38） -->
+    <string name="group_color_none">不设颜色</string>
+    <string name="group_color_red">红色</string>
+    <string name="group_color_orange">橙色</string>
+    <string name="group_color_yellow">黄色</string>
+    <string name="group_color_green">绿色</string>
+    <string name="group_color_teal">青色</string>
+    <string name="group_color_blue">蓝色</string>
+    <string name="group_color_purple">紫色</string>
+    <string name="group_color_pink">粉色</string>
+</resources>

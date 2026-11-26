@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>追客 · Trackr 截图物料库</title>
+  <style>
+    :root {
+      --bg: #F4F6F9;
+      --card: #FFFFFF;
+      --text: #1C1B1F;
+      --subtext: #49454F;
+      --primary: #006874;
+      --primary-container: #97F0FF;
+      --on-primary-container: #001F24;
+      --secondary: #4A6267;
+      --border: #CAC4D0;
+      --shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111415;
+        --card: #1A1C1E;
+        --text: #E1E3E4;
+        --subtext: #C4C7C8;
+        --primary: #4FD8EB;
+        --primary-container: #004F58;
+        --on-primary-container: #97F0FF;
+        --secondary: #B1CBD0;
+        --border: #444748;
+        --shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 20px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    header {
+      margin-bottom: 32px;
+      text-align: center;
+    }
+    header h1 {
+      font-size: 2.2rem;
+      margin: 0 0 8px 0;
+      font-weight: 800;
+      background: linear-gradient(135deg, #006874, #4FD8EB);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    header p {
+      font-size: 1.05rem;
+      color: var(--subtext);
+      margin: 0;
+    }
+    .badge-bar {
+      margin-top: 14px;
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      background: var(--primary-container);
+      color: var(--on-primary-container);
+    }
+    
+    /* 截图展示栅格 */
+    .screenshots-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 24px;
+      margin-bottom: 48px;
+    }
+    .screen-card {
+      background: var(--card);
+      border-radius: 20px;
+      padding: 16px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .screen-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+    }
+    .screen-preview {
+      width: 100%;
+      aspect-ratio: 1081 / 2401;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #000;
+      position: relative;
+      border: 1px solid rgba(0,0,0,0.1);
+    }
+    .screen-preview img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .screen-info {
+      margin-top: 14px;
+      flex-grow: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    .screen-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      margin: 0 0 6px 0;
+    }
+    .screen-desc {
+      font-size: 0.88rem;
+      color: var(--subtext);
+      margin: 0 0 12px 0;
+      flex-grow: 1;
+    }
+    .btn-download {
+      display: inline-block;
+      text-align: center;
+      padding: 8px 14px;
+      border-radius: 10px;
+      background: var(--primary);
+      color: #fff;
+      text-decoration: none;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: opacity 0.2s;
+    }
+    .btn-download:hover {
+      opacity: 0.9;
+    }
+
+    /* 推广文案板块 */
+    .copy-section {
+      background: var(--card);
+      border-radius: 20px;
+      padding: 28px;
+      box-shadow: var(--shadow);
+      border: 1px solid var(--border);
+      margin-top: 32px;
+    }
+    .copy-section h2 {
+      margin-top: 0;
+      font-size: 1.5rem;
+      margin-bottom: 20px;
+    }
+    .tabs {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+    .tab-btn {
+      background: none;
+      border: none;
+      padding: 8px 16px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--subtext);
+      cursor: pointer;
+      border-radius: 8px;
+    }
+    .tab-btn.active {
+      color: var(--primary);
+      background: var(--primary-container);
+    }
+    .copy-box {
+      background: var(--bg);
+      border-radius: 12px;
+      padding: 16px;
+      font-family: inherit;
+      white-space: pre-wrap;
+      font-size: 0.92rem;
+      line-height: 1.6;
+      border: 1px solid var(--border);
+      position: relative;
+    }
+    .copy-action {
+      position: absolute;
+      top: 12px;
+      right: 12px;
+      padding: 6px 12px;
+      font-size: 0.8rem;
+      border-radius: 6px;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>追客 · Trackr 截图物料库</h1>
+      <p>Android 实时公交到站追踪 · Material 3 Expressive · Kotlin Multiplatform</p>
+      <div class="badge-bar">
+        <span class="badge">1081 × 2401 渲染</span>
+        <span class="badge">Material 3 Expressive</span>
+        <span class="badge">KMP + Compose Multiplatform</span>
+        <span class="badge">深浅两套共 11 张</span>
+      </div>
+    </header>
+
+    <div class="screenshots-grid">
+      <!-- 1. 公交首页 -->
+      <div class="screen-card">
+        <div class="screen-preview">
+          <img src="01_home_screen_light.png" alt="公交首页">
+        </div>
+        <div class="screen-info">
+          <h3 class="screen-title">01. 公交首页</h3>
+          <p class="screen-desc">追踪卡片给出下一班倒计时和剩余站数；下方是收藏的上车站与附近站点线路到站。</p>
+          <a class="btn-download" href="01_home_screen_light.png" download>下载原图 (PNG)</a>
+        </div>
+      </div>
+
+      <!-- 2. 线路详情 -->
+      <div class="screen-card">
+        <div class="screen-preview">
+          <img src="02_line_detail_horizontal.png" alt="线路详情">
+        </div>
+        <div class="screen-info">
+          <h3 class="screen-title">02. 线路详情</h3>
+          <p class="screen-desc">竖向时间轴走向条标出候车站和在途车辆；底栏可换向、看时刻表或开始追踪。</p>
+          <a class="btn-download" href="02_line_detail_horizontal.png" download>下载原图 (PNG)</a>
+        </div>
+      </div>
+
+      <!-- 3. 在途车辆 -->
+      <div class="screen-card">
+        <div class="screen-preview">
+          <img src="04_fleet_radar_bus_list.png" alt="在途车辆">
+        </div>
+        <div class="screen-info">
+          <h3 class="screen-title">03. 在途车辆</h3>
+          <p class="screen-desc">全线车辆按距候车站排序，显示车牌、实时车速和预计到达时间。</p>
+          <a class="btn-download" href="04_fleet_radar_bus_list.png" download>下载原图 (PNG)</a>
+        </div>
+      </div>
+
+      <!-- 4. 站点详情 -->
+      <div class="screen-card">
+        <div class="screen-preview">
+          <img src="05_stop_detail_hub.png" alt="站点详情">
+        </div>
+        <div class="screen-info">
+          <h3 class="screen-title">04. 站点详情</h3>
+          <p class="screen-desc">多物理站台切换、地铁换乘标签、途经线路的综合到站看板。</p>
+          <a class="btn-download" href="05_stop_detail_hub.png" download>下载原图 (PNG)</a>
+        </div>
+      </div>
+
+      <!-- 5. 搜索 -->
+      <div class="screen-card">
+        <div class="screen-preview">
+          <img src="06_search_screen.png" alt="搜索">
+        </div>
+        <div class="screen-info">
+          <h3 class="screen-title">05. 搜索</h3>
+          <p class="screen-desc">拼音和汉字模糊匹配，线路按方向一行显示「始发 → 终点」，区分主线与区间车。</p>
+          <a class="btn-download" href="06_search_screen.png" download>下载原图 (PNG)</a>
+        </div>
+      </div>
+
+      <!-- 6. 我的 -->
+      <div class="screen-card">
+        <div class="screen-preview">
+          <img src="09_more_screen_light.png" alt="我的">
+        </div>
+        <div class="screen-info">
+          <h3 class="screen-title">06. 我的</h3>
+          <p class="screen-desc">显示、出行、通知、地图、关于五组设置；长辈版和高德 Key 都在这里。</p>
+          <a class="btn-download" href="09_more_screen_light.png" download>下载原图 (PNG)</a>
+        </div>
+      </div>
+
+      <!-- 7. 深色首页 -->
+      <div class="screen-card">
+        <div class="screen-preview">
+          <img src="08_home_screen_dark.png" alt="深色首页">
+        </div>
+        <div class="screen-info">
+          <h3 class="screen-title">07. 深色首页</h3>
+          <p class="screen-desc">跟随系统的深色主题，暗光下候车不刺眼。</p>
+          <a class="btn-download" href="08_home_screen_dark.png" download>下载原图 (PNG)</a>
+        </div>
+      </div>
+
+      <!-- 8. 深色线路 -->
+      <div class="screen-card">
+        <div class="screen-preview">
+          <img src="07_line_detail_dark.png" alt="深色线路">
+        </div>
+        <div class="screen-info">
+          <h3 class="screen-title">08. 深色线路</h3>
+          <p class="screen-desc">深色模式下的线路详情与走向条。</p>
+          <a class="btn-download" href="07_line_detail_dark.png" download>下载原图 (PNG)</a>
+        </div>
+      </div>
+
+      <!-- 9. 我的 · 深色 -->
+      <div class="screen-card">
+        <div class="screen-preview">
+          <img src="10_more_screen_dark.png" alt="我的 · 深色">
+        </div>
+        <div class="screen-info">
+          <h3 class="screen-title">09. 我的 · 深色</h3>
+          <p class="screen-desc">深色模式下的设置分组。</p>
+          <a class="btn-download" href="10_more_screen_dark.png" download>下载原图 (PNG)</a>
+        </div>
+      </div>
+
+      <!-- 10. 关于 -->
+      <div class="screen-card">
+        <div class="screen-preview">
+          <img src="11_about_screen_light.png" alt="关于">
+        </div>
+        <div class="screen-info">
+          <h3 class="screen-title">10. 关于</h3>
+          <p class="screen-desc">版本号、检查更新和开源信息。</p>
+          <a class="btn-download" href="11_about_screen_light.png" download>下载原图 (PNG)</a>
+        </div>
+      </div>
+
+      <!-- 11. 关于 · 深色 -->
+      <div class="screen-card">
+        <div class="screen-preview">
+          <img src="12_about_screen_dark.png" alt="关于 · 深色">
+        </div>
+        <div class="screen-info">
+          <h3 class="screen-title">11. 关于 · 深色</h3>
+          <p class="screen-desc">深色模式下的关于页。</p>
+          <a class="btn-download" href="12_about_screen_dark.png" download>下载原图 (PNG)</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- 推广贴文案草稿 -->
+    <div class="copy-section">
+      <h2>🚀 推广贴文案草稿 (点击一键复制)</h2>
+      <div class="tabs">
+        <button class="tab-btn active" onclick="showTab('coolapk')">酷安 / 社区贴</button>
+        <button class="tab-btn" onclick="showTab('v2ex')">V2EX 开发者分享</button>
+        <button class="tab-btn" onclick="showTab('xiaohongshu')">小红书 / 朋友圈</button>
+        <button class="tab-btn" onclick="showTab('jike')">即刻 / X (Twitter)</button>
+      </div>
+
+      <!-- 酷安文案 -->
+      <div id="tab-coolapk" class="copy-box">
+<button class="copy-action" onclick="copyContent('tab-coolapk')">复制</button>
+【自制开源】给公交出行做了一款纯粹、优雅的实时到站追踪器 —— Trackr (BusOnRoad)
+
+每次出门等公交，官方 App 广告多、臃肿卡顿？
+我花时间用 Jetpack Compose 和最新的 Material Design 3 Expressive 规范，重新做了一款干净、直观的实时公交追踪应用。
+
+✨ 核心亮点：
+1. 【颜值即正义】完整遵循 Material 3 Expressive 规范，动态取色、悬浮胶囊工具栏、平滑弹簧动效，支持深浅模式。
+2. 【竖向时间轴走向】沿站序从上往下排，候车站、途经车辆和已过站一眼看清。
+3. 【实时车队雷达】一眼看清整条线路上所有在途车辆，车牌号、车速、舒适拥挤度、剩余站数全掌握。
+4. 【常驻追踪】首页追踪卡片和通知栏常驻显示下一班，到站前自动提醒，不用反复掏手机刷新。
+5. 【纯粹无广告】代码开源，无开屏广告、无无意义推送，只做纯粹的交通工具。
+
+欢迎尝鲜体验与提出建议，项目已在 GitHub 开源！
+      </div>
+
+      <!-- V2EX 文案 -->
+      <div id="tab-v2ex" class="copy-box" style="display:none;">
+<button class="copy-action" onclick="copyContent('tab-v2ex')">复制</button>
+[分享] 用 Jetpack Compose + Navigation 3 写了一款 Material 3 Expressive 风格的实时公交追踪器 Trackr
+
+各位 V 友，平时通勤坐公交，市面上主流实时公交 App 的广告和信息流越来越重，经常只是想看下一班车还有几分钟，却被开屏卡顿折磨。
+
+于是我写了 Trackr (BusOnRoad)，目标是做一款极简、高响应、体验现代的通勤利器。
+
+🛠 技术栈细节：
+- UI：Compose Multiplatform，页面写在 commonMain，Material 3 Expressive 规范
+- 导航：AndroidX Navigation 3，类型安全页面键、每个页签独立返回栈
+- 架构：MAD 分层 + 单向数据流，ViewModel 暴露 StateFlow，页面无状态
+- 依赖注入：Koin；网络：Ktor；存储：Room + DataStore
+- 测试：JUnit + Robolectric，全部在 JVM 上跑，不需要真机
+
+开源地址：https://github.com/5151561/Trackr-
+欢迎 PR、Issue 和 Star！
+      </div>
+
+      <!-- 小红书文案 -->
+      <div id="tab-xiaohongshu" class="copy-box" style="display:none;">
+<button class="copy-action" onclick="copyContent('tab-xiaohongshu')">复制</button>
+通勤党狂喜！终于挖到神仙颜值的实时公交 App 了 🚌✨
+
+真的受够了传统公交 App 满屏广告和劣质排版！
+被安利的这个宝藏 App「Trackr」，不仅零广告极简，而且界面完全是原生 Material Design 3 风格，美到像系统自带的一样！
+
+🌟 超戳我的几个细节：
+1. 线路走向是竖向时间轴，从候车站往终点排，像地铁图一样清楚！
+2. 哪辆车到了哪一站、车牌、车速、还有几分钟到，全都写在站名旁边。
+3. 置顶常驻追踪卡片，车快到站时会自动提醒，再也不用在大风里一直傻傻盯着路口张望了！
+4. 夜间模式质感绝了，通勤幸福感直线拉满～
+
+#宝藏App #Android玩机 #手机桌面 #通勤必备 #实用工具 #UI设计
+      </div>
+
+      <!-- 即刻文案 -->
+      <div id="tab-jike" class="copy-box" style="display:none;">
+<button class="copy-action" onclick="copyContent('tab-jike')">复制</button>
+独立开发作品 · 实时公交追踪应用「Trackr」
+
+如果把公交实时查询做成原生系统级体验会怎样？
+用最新的 Compose M3 Expressive 重新思考了公交出行的交互：
+- 首屏追踪卡片，下一班还有几分钟一眼看到
+- 竖向时间轴走向条，候车站和途经车辆同时可见
+- 纯粹透明，无开屏广告
+
+开源发布在 GitHub，欢迎体验交流～
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function showTab(tabName) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.copy-box').forEach(box => box.style.display = 'none');
+      
+      const activeBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.getAttribute('onclick').includes(tabName));
+      if (activeBtn) activeBtn.classList.add('active');
+      
+      const activeBox = document.getElementById('tab-' + tabName);
+      if (activeBox) activeBox.style.display = 'block';
+    }
+
+    function copyContent(id) {
+      const box = document.getElementById(id);
+      const text = box.innerText.replace('复制', '').trim();
+      navigator.clipboard.writeText(text).then(() => {
+        alert('文案已复制到剪贴板！');
+      }).catch(err => {
+        console.error('复制失败: ', err);
+      });
+    }
+  </script>
+</body>
+</html>

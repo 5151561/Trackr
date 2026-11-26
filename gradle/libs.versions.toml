@@ -1,0 +1,165 @@
+[versions]
+agp = "9.5.0"
+kotlinPlugin = "2.4.21"
+ksp = "2.3.13"
+hilt = "2.60.1"
+hiltNavigationCompose = "1.3.0"
+composeBom = "2026.09.00"
+material3Expressive = "1.5.0-alpha27"
+graphicsShapes = "1.1.0"
+coreKtx = "1.19.0"
+activityCompose = "1.13.0"
+material = "1.14.0"
+lifecycle = "2.11.0"
+nav3 = "1.2.0"
+kotlinxSerializationJson = "1.9.0"
+okhttp = "5.4.0"
+datastore = "1.2.1"
+junit = "4.13.2"
+orgJson = "20240303"
+coroutines = "1.10.2"
+robolectric = "4.14.1"
+# 桌面小组件（第 26 步迁 Glance）；周期刷新用 WorkManager
+glance = "1.2.0"
+work = "2.12.0"
+# 第 27 步：Baseline Profile + Macrobenchmark（benchmark 1.5 起插件支持 AGP 9 新 DSL，Macrobenchmark 用 UiAutomator 2.4）
+benchmark = "1.5.0"
+profileinstaller = "1.4.1"
+uiautomator = "2.4.0"
+androidxTestExtJunit = "1.3.0"
+turbine = "1.2.0"
+jacoco = "0.8.12"
+# 高德 3dmap 一体化包：11.2.100 起其 .so 的 PT_LOAD 段才按 16 KB 对齐（0x4000），
+# 10.0.x / 11.1.x 均为 4 KB（0x1000），在 16 KB 页大小的 Android 设备上会加载失败。
+amap3dBundle = "11.3.100_loc11.3.101_sea9.8.1"
+# 以下为重构计划（docs/design/refactor_plan_mad.md）后续步骤预留，第 1 步只登记、暂不应用。
+# Compose Multiplatform 1.12.2 对应 Jetpack Compose 1.12.1（= composeBom 2026.09.00）。
+composeMultiplatform = "1.12.2"
+# CMP 1.12.2 配套的 Material3（基于 Jetpack Material3 1.5.0-alpha22，含 MaterialExpressiveTheme）。
+composeMultiplatformMaterial3 = "1.12.0-alpha03"
+# CMP 版 Navigation 3 与 lifecycle-viewmodel-navigation3（第 16 步 :core:navigation 用）；
+# Android 上分别解析成 androidx navigation3-ui 1.2.0（= nav3）、lifecycle-viewmodel-navigation3 2.11.0（= lifecycle）。
+navigation3Multiplatform = "1.2.0"
+lifecycleMultiplatform = "2.11.0"
+koin = "4.2.2"
+ktor = "3.6.1"
+room = "2.8.5"
+sqlite = "2.7.1"
+kotlinxDatetime = "0.8.0"
+# commonMain 里的非挂起锁（SingleFlightCache / LRU）；Ktor、coroutines 也依赖它
+atomicfu = "0.33.0"
+# DataStore 的 Okio 存储（:core:datastore 的追踪会话 JSON 文件用）
+okio = "3.18.2"
+
+materialKolor = "5.0.1"
+
+[libraries]
+material-kolor = { module = "com.materialkolor:material-kolor", version.ref = "materialKolor" }
+amap-search = { group = "com.amap.api", name = "3dmap-location-search", version.ref = "amap3dBundle" }
+androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
+androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
+google-material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+androidx-compose-ui = { group = "androidx.compose.ui", name = "ui" }
+androidx-compose-material-icons-core = { group = "androidx.compose.material", name = "material-icons-core" }
+androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3", version.ref = "material3Expressive" }
+androidx-graphics-shapes = { group = "androidx.graphics", name = "graphics-shapes", version.ref = "graphicsShapes" }
+androidx-compose-ui-tooling-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview" }
+androidx-compose-ui-tooling = { group = "androidx.compose.ui", name = "ui-tooling" }
+androidx-lifecycle-viewmodel-compose = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
+androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
+androidx-lifecycle-service = { group = "androidx.lifecycle", name = "lifecycle-service", version.ref = "lifecycle" }
+androidx-lifecycle-process = { group = "androidx.lifecycle", name = "lifecycle-process", version.ref = "lifecycle" }
+kotlinx-serialization-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-core", version.ref = "kotlinxSerializationJson" }
+kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
+androidx-navigation3-runtime = { group = "androidx.navigation3", name = "navigation3-runtime", version.ref = "nav3" }
+androidx-navigation3-ui = { group = "androidx.navigation3", name = "navigation3-ui", version.ref = "nav3" }
+androidx-lifecycle-viewmodel-navigation3 = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-navigation3", version.ref = "lifecycle" }
+androidx-datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+okhttp = { group = "com.squareup.okhttp3", name = "okhttp", version.ref = "okhttp" }
+junit = { group = "junit", name = "junit", version.ref = "junit" }
+org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
+kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+androidx-glance-appwidget = { group = "androidx.glance", name = "glance-appwidget", version.ref = "glance" }
+androidx-glance-appwidget-testing = { group = "androidx.glance", name = "glance-appwidget-testing", version.ref = "glance" }
+androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "work" }
+androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
+androidx-benchmark-macro-junit4 = { group = "androidx.benchmark", name = "benchmark-macro-junit4", version.ref = "benchmark" }
+androidx-test-uiautomator = { group = "androidx.test.uiautomator", name = "uiautomator", version.ref = "uiautomator" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
+turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
+androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
+androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-test-manifest" }
+
+# ---- build-logic（约定插件）编译用，compileOnly ----
+android-gradlePlugin = { group = "com.android.tools.build", name = "gradle", version.ref = "agp" }
+kotlin-gradlePlugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlinPlugin" }
+compose-compiler-gradlePlugin = { group = "org.jetbrains.kotlin", name = "compose-compiler-gradle-plugin", version.ref = "kotlinPlugin" }
+
+# ---- Compose Multiplatform（第 5 步起，KMP 模块的 commonMain 用；Android 上解析成对应的 androidx 库）----
+compose-mp-runtime = { group = "org.jetbrains.compose.runtime", name = "runtime", version.ref = "composeMultiplatform" }
+compose-mp-foundation = { group = "org.jetbrains.compose.foundation", name = "foundation", version.ref = "composeMultiplatform" }
+compose-mp-ui = { group = "org.jetbrains.compose.ui", name = "ui", version.ref = "composeMultiplatform" }
+compose-mp-ui-tooling-preview = { group = "org.jetbrains.compose.ui", name = "ui-tooling-preview", version.ref = "composeMultiplatform" }
+compose-mp-material3 = { group = "org.jetbrains.compose.material3", name = "material3", version.ref = "composeMultiplatformMaterial3" }
+compose-mp-components-resources = { group = "org.jetbrains.compose.components", name = "components-resources", version.ref = "composeMultiplatform" }
+compose-mp-runtime-saveable = { group = "org.jetbrains.compose.runtime", name = "runtime-saveable", version.ref = "composeMultiplatform" }
+compose-mp-animation = { group = "org.jetbrains.compose.animation", name = "animation", version.ref = "composeMultiplatform" }
+jetbrains-navigation3-ui = { group = "org.jetbrains.androidx.navigation3", name = "navigation3-ui", version.ref = "navigation3Multiplatform" }
+jetbrains-lifecycle-viewmodel-navigation3 = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-viewmodel-navigation3", version.ref = "lifecycleMultiplatform" }
+# 第 17 步：feature 的 ViewModel 进 commonMain（KMP 版 lifecycle；Android 上解析成同版本的 androidx 库）
+jetbrains-lifecycle-viewmodel = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-viewmodel", version.ref = "lifecycleMultiplatform" }
+jetbrains-lifecycle-viewmodel-compose = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycleMultiplatform" }
+jetbrains-lifecycle-runtime-compose = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycleMultiplatform" }
+# 第 23 步：页内输入存 SavedStateHandle（重构计划 §3.8）
+jetbrains-lifecycle-viewmodel-savedstate = { group = "org.jetbrains.androidx.lifecycle", name = "lifecycle-viewmodel-savedstate", version.ref = "lifecycleMultiplatform" }
+
+# ---- 预留：重构计划后续步骤使用，暂不应用 ----
+# Koin（第 3 步起）
+koin-bom = { group = "io.insert-koin", name = "koin-bom", version.ref = "koin" }
+koin-core = { group = "io.insert-koin", name = "koin-core" }
+koin-android = { group = "io.insert-koin", name = "koin-android" }
+koin-compose = { group = "io.insert-koin", name = "koin-compose" }
+koin-compose-viewmodel = { group = "io.insert-koin", name = "koin-compose-viewmodel" }
+koin-test = { group = "io.insert-koin", name = "koin-test" }
+# Ktor（第 8 步起应用）
+ktor-client-core = { group = "io.ktor", name = "ktor-client-core", version.ref = "ktor" }
+ktor-client-okhttp = { group = "io.ktor", name = "ktor-client-okhttp", version.ref = "ktor" }
+ktor-client-darwin = { group = "io.ktor", name = "ktor-client-darwin", version.ref = "ktor" }
+ktor-client-content-negotiation = { group = "io.ktor", name = "ktor-client-content-negotiation", version.ref = "ktor" }
+ktor-serialization-kotlinx-json = { group = "io.ktor", name = "ktor-serialization-kotlinx-json", version.ref = "ktor" }
+ktor-client-mock = { group = "io.ktor", name = "ktor-client-mock", version.ref = "ktor" }
+# Room KMP + DataStore KMP（第 9 步）
+androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
+androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
+androidx-sqlite-bundled = { group = "androidx.sqlite", name = "sqlite-bundled", version.ref = "sqlite" }
+androidx-datastore-preferences-core = { group = "androidx.datastore", name = "datastore-preferences-core", version.ref = "datastore" }
+androidx-datastore-core-okio = { group = "androidx.datastore", name = "datastore-core-okio", version.ref = "datastore" }
+okio = { group = "com.squareup.okio", name = "okio", version.ref = "okio" }
+# kotlinx-datetime（第 6、7 步）
+kotlinx-datetime = { group = "org.jetbrains.kotlinx", name = "kotlinx-datetime", version.ref = "kotlinxDatetime" }
+# atomicfu（第 8 步）
+atomicfu = { group = "org.jetbrains.kotlinx", name = "atomicfu", version.ref = "atomicfu" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-test = { id = "com.android.test", version.ref = "agp" }
+androidx-baselineprofile = { id = "androidx.baselineprofile", version.ref = "benchmark" }
+kotlin-plugin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlinPlugin" }
+kotlin-plugin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlinPlugin" }
+# 约定插件（build-logic/convention），没有版本号
+trackr-android-application = { id = "trackr.android.application" }
+trackr-android-test = { id = "trackr.android.test" }
+trackr-kmp-library = { id = "trackr.kmp.library" }
+trackr-kmp-compose = { id = "trackr.kmp.compose" }
+trackr-kmp-feature = { id = "trackr.kmp.feature" }
+# ---- 预留：KMP / CMP 插件由约定插件应用（第 5 步起），根工程只 apply false 放进类路径 ----
+kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlinPlugin" }
+android-kotlin-multiplatform-library = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
+compose-multiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+androidx-room = { id = "androidx.room", version.ref = "room" }

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ 云备份与设备迁移规则（两段一样，和 backup_rules.xml 一样，BackupRulesTest 核对）。
+  参与备份：Room 库 databases/trackr.db、设置 datastore/trackr_settings.preferences_pb、旧 SharedPreferences（除 Key 文件）。
+  排除：高德 Key（新旧两个文件）、追踪会话。本机存储开关的代数随备份恢复，避免恢复后整表重新导入。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="sharedpref" path="trackr_amap_keys.xml" />
+        <exclude domain="file" path="datastore/trackr_amap_keys.preferences_pb" />
+        <exclude domain="file" path="datastore/tracking_session.json" />
+        <exclude domain="file" path="store_switch" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="trackr_amap_keys.xml" />
+        <exclude domain="file" path="datastore/trackr_amap_keys.preferences_pb" />
+        <exclude domain="file" path="datastore/tracking_session.json" />
+        <exclude domain="file" path="store_switch" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Trackr</string>
+    <string name="widget_name">Transit Stop Widget</string>
+    <string name="widget_desc">Track upcoming bus arrivals and remaining stops right on your home screen</string>
+    <string name="shortcut_alipay_transit_code_short">Alipay Code</string>
+    <string name="shortcut_alipay_transit_code_long">Open Alipay Transit Code</string>
+    <string name="shortcut_unionpay_transit_code_short">UnionPay Code</string>
+    <string name="shortcut_unionpay_transit_code_long">Open UnionPay Transit Code</string>
+    <string name="transit_code_quick_access">Transit Code</string>
+</resources>

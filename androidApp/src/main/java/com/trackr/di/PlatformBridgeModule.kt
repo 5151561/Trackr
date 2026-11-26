@@ -1,0 +1,245 @@
+package com.trackr.di
+
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import androidx.core.app.NotificationManagerCompat
+import com.trackr.BuildConfig
+import com.trackr.core.data.local.LocalMigrationFlags
+import com.trackr.core.data.local.StoreMigrationFlags
+import com.trackr.core.data.repository.AmapKeyDefaults
+import com.trackr.core.data.repository.UserLocationStore
+import com.trackr.core.domain.platform.Announcer
+import com.trackr.core.domain.platform.AppSigningInfo
+import com.trackr.core.domain.platform.AppVersionInfo
+import com.trackr.core.domain.platform.BoardingTraceLog
+import com.trackr.core.domain.platform.SystemSettingsLauncher
+import com.trackr.core.domain.platform.TransitCodeLauncher
+import com.trackr.core.model.TransitCodeProvider
+import com.trackr.data.diagnostics.AndroidBoardingTraceLog
+import com.trackr.data.repository.ITransitRepository
+import com.trackr.platform.speech.AndroidTtsAnnouncer
+import com.trackr.service.ArrivalAlertNotifier
+import com.trackr.service.LiveProgressNotifier
+import com.trackr.service.vendor.LiveUpdatePromotion
+import com.trackr.service.vendor.OppoFluidCloudAdapter
+import com.trackr.service.vendor.XiaomiFocusAdapter
+import com.trackr.ui.platform.LiveUpdateAccess
+import com.trackr.ui.platform.LiveUpdateSettings
+import com.trackr.ui.platform.LiveUpdateStatus
+import com.trackr.ui.platform.NotificationHealth
+import com.trackr.ui.platform.NotificationHealthAccess
+import com.trackr.util.SignatureUtils
+import com.trackr.util.TransitCodeHelper
+import kotlinx.coroutines.flow.StateFlow
+import org.koin.android.ext.koin.androidContext
+import org.koin.core.module.Module
+import org.koin.dsl.module
+import org.koin.dsl.onClose
+
+/**
+ * 第 17 步：功能模块看不到 `:androidApp`，页面和 ViewModel 要用的 Android 能力经接口注入，
+ * 这里给出 Android 实现（都原样转调原来的工具对象）。
+ */
+val platformBridgeModule: Module = module {
+    single<TransitCodeLauncher> { AndroidTransitCodeLauncher(androidContext()) }
+    // 定位提示里的「去授权 / 去开启」：跳应用详情页或系统位置信息页（issue #34）
+    single<SystemSettingsLauncher> { AndroidSystemSettingsLauncher(androidContext()) }
+    single<AppSigningInfo> { AndroidAppSigningInfo(androidContext()) }
+    // 「读给我听」（第 33 步）：进程级一个，第一次读才建引擎；Koin 关闭时释放
+    single<Announcer> { AndroidTtsAnnouncer(androidContext(), get(AppScopeQualifier)) } onClose {
+        (it as? AndroidTtsAnnouncer)?.shutdown()
+    }
+    single<LiveUpdateSettings> { AndroidLiveUpdateSettings }
+    // 「我的」页「状态栏胶囊」那一行（第 25 步）
+    single<LiveUpdateAccess> { AndroidLiveUpdateAccess(androidContext(), get()) }
+    // 「我的」页的通知可靠性体检：通知权限 / 到站强提醒渠道 / 追踪进度渠道
+    single<NotificationHealthAccess> { AndroidNotificationHealthAccess(androidContext()) }
+    single<UserLocationStore> { TransitUserLocationStore(get()) }
+    // 判上车的判定记录（issue #49）：追踪服务写、「我的」页导出
+    single<BoardingTraceLog> { AndroidBoardingTraceLog(androidContext(), get(AppScopeQualifier)) }
+    // 收藏分组一次性数据修复的版本号（原来在 viewModelModule 里给 FavoritesGroupViewModel 现建）
+    single<LocalMigrationFlags> { StoreMigrationFlags(get()) }
+    factory { androidAppVersion(androidContext()) }
+    // 构建时注入的高德 Key（和 StorageBackend 里给 AmapKeyRepository 的是同一组值）；「更多」页 Key 对话框判断「已配置」用
+    single { AmapKeyDefaults(androidKey = BuildConfig.AMAP_ANDROID_KEY, webKey = BuildConfig.AMAP_WEB_KEY, hasAndroidMapSdk = true) }
+}
+
+/** 乘车码：转调 [TransitCodeHelper]（Intent 都带 NEW_TASK，用 applicationContext 打开和原来一样） */
+class AndroidTransitCodeLauncher(context: Context) : TransitCodeLauncher {
+    private val appContext: Context = context.applicationContext ?: context
+
+    override fun open(provider: TransitCodeProvider): Boolean =
+        TransitCodeHelper.openTransitCode(appContext, provider)
+
+    override fun isInstalled(provider: TransitCodeProvider): Boolean = when (provider) {
+        TransitCodeProvider.ALIPAY -> TransitCodeHelper.isAlipayInstalled(appContext)
+        TransitCodeProvider.UNIONPAY -> TransitCodeHelper.isUnionPayInstalled(appContext)
+        TransitCodeProvider.ASK_ALWAYS -> false
+    }
+}
+
+/**
+ * 定位提示里的「去授权 / 去开启」：用 applicationContext 带 NEW_TASK 打开系统页。
+ *
+ * 权限和系统总开关是两层，提示里必须指向对应那一层：没授权去应用详情页，总开关关着去位置信息页。
+ * 打不开（没这个 Activity，多是 ROM 裁掉了）返回 false，页面就不做任何事。
+ */
+class AndroidSystemSettingsLauncher(context: Context) : SystemSettingsLauncher {
+    private val appContext: Context = context.applicationContext ?: context
+
+    override fun openLocationSettings(): Boolean = open(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+
+    override fun openAppSettings(): Boolean = open(
+        action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+        data = Uri.fromParts("package", appContext.packageName, null)
+    )
+
+    private fun open(action: String, data: Uri? = null): Boolean = try {
+        appContext.startActivity(
+            Intent(action).apply {
+                data?.let { this.data = it }
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+        )
+        true
+    } catch (_: Exception) {
+        false
+    }
+}
+
+/** 包名 + 签名 SHA-1：转调 [SignatureUtils]（取不到时为空串，和原来一样） */
+class AndroidAppSigningInfo(context: Context) : AppSigningInfo {
+    private val appContext: Context = context.applicationContext ?: context
+
+    override val appId: String get() = SignatureUtils.getPackageName(appContext)
+
+    override fun certificateSha1(): String = SignatureUtils.getSigningCertificateSha1(appContext)
+}
+
+/** 实时活动的设备判断与设置跳转：转调三个厂商适配对象 */
+object AndroidLiveUpdateSettings : LiveUpdateSettings {
+    override fun isPromotionSupported(): Boolean = LiveUpdatePromotion.isPromotionSupported()
+    override fun canPromote(context: Context): Boolean = LiveUpdatePromotion.canPromote(context)
+    override fun openPromotionSettings(context: Context): Boolean = LiveUpdatePromotion.openPromotionSettings(context)
+    override fun openAppNotificationSettings(context: Context): Boolean =
+        LiveUpdatePromotion.openAppNotificationSettings(context)
+    override fun isXiaomiFocusSupported(context: Context): Boolean = XiaomiFocusAdapter.isFocusSupported(context)
+    override fun canShowXiaomiFocus(context: Context): Boolean = XiaomiFocusAdapter.canShowFocus(context)
+    override fun openXiaomiNotificationSettings(context: Context) = XiaomiFocusAdapter.openNotificationSettings(context)
+    override fun isColorOs(): Boolean = OppoFluidCloudAdapter.isColorOs()
+    override fun openFluidCloudSettings(context: Context): Boolean = OppoFluidCloudAdapter.openFluidCloudSettings(context)
+}
+
+/**
+ * 「我的」页「实时活动通知」那一行（原来叫「状态栏胶囊」）：判断和跳转经 [LiveUpdateSettings]，用 applicationContext（
+ * 厂商适配对象打开设置页时都带 NEW_TASK）。
+ *
+ * 只判断「这台机器有没有 / 用户开没开」，不判断各家叫什么名字——界面上统一叫「实时活动通知」。
+ * 小米要先看焦点通知协议版本：MIUI 13/14 没有这个功能，不能因为 `Build.BRAND` 是 xiaomi 就说支持。
+ */
+class AndroidLiveUpdateAccess(
+    context: Context,
+    private val settings: LiveUpdateSettings
+) : LiveUpdateAccess {
+    private val appContext: Context = context.applicationContext ?: context
+
+    /** 澎湃OS 1 起才有焦点通知（3 起叫超级岛）；MIUI 全系为 false */
+    private fun xiaomiFocusSupported(): Boolean = settings.isXiaomiFocusSupported(appContext)
+
+    private val supported: Boolean
+        get() = xiaomiFocusSupported() || settings.isPromotionSupported() || settings.isColorOs()
+
+    private fun allowed(): Boolean = when {
+        xiaomiFocusSupported() -> settings.canShowXiaomiFocus(appContext)
+        settings.isPromotionSupported() -> settings.canPromote(appContext)
+        else -> false
+    }
+
+    override fun status(): LiveUpdateStatus {
+        if (!supported) return LiveUpdateStatus(supported = false, allowed = false)
+        return LiveUpdateStatus(supported = true, allowed = allowed())
+    }
+
+    override fun openSettings() {
+        when {
+            !supported -> settings.openAppNotificationSettings(appContext)
+            !allowed() -> if (xiaomiFocusSupported()) {
+                settings.openXiaomiNotificationSettings(appContext)
+            } else {
+                settings.openPromotionSettings(appContext)
+            }
+            xiaomiFocusSupported() -> settings.openXiaomiNotificationSettings(appContext)
+            settings.isColorOs() -> settings.openFluidCloudSettings(appContext)
+            else -> settings.openAppNotificationSettings(appContext)
+        }
+    }
+}
+
+/**
+ * 「我的」页的通知可靠性体检：只查系统真给得出的三件事——通知总开关、到站强提醒渠道的重要级别、
+ * 追踪进度渠道有没有被关。锁屏通知开关和「横幅」子开关没有公开 API，不在这里猜。
+ */
+class AndroidNotificationHealthAccess(context: Context) : NotificationHealthAccess {
+    private val appContext: Context = context.applicationContext ?: context
+
+    override fun status(): NotificationHealth {
+        val enabled = runCatching {
+            NotificationManagerCompat.from(appContext).areNotificationsEnabled()
+        }.getOrDefault(true)
+        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+        val alert = manager?.getNotificationChannel(ArrivalAlertNotifier.CHANNEL_ID_ALERT)
+        val live = manager?.getNotificationChannel(LiveProgressNotifier.CHANNEL_ID_LIVE_PROGRESS)
+        return NotificationHealth(
+            notificationsEnabled = enabled,
+            // 没有渠道（还没追过一次）不算异常：第一次追踪时会按 IMPORTANCE_HIGH 建出来
+            alertChannelAudible = alert == null || alert.importance >= NotificationManager.IMPORTANCE_HIGH,
+            liveChannelOff = live != null && live.importance == NotificationManager.IMPORTANCE_NONE
+        )
+    }
+
+    override fun openAlertChannelSettings() {
+        val intent = Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).apply {
+            putExtra(Settings.EXTRA_APP_PACKAGE, appContext.packageName)
+            putExtra(Settings.EXTRA_CHANNEL_ID, ArrivalAlertNotifier.CHANNEL_ID_ALERT)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        val opened = runCatching { appContext.startActivity(intent) }.isSuccess
+        if (!opened) LiveUpdatePromotion.openAppNotificationSettings(appContext)
+    }
+}
+
+/** 首页定位写入的最近坐标：仍存在 [ITransitRepository] 里，这里只是把那两个成员露给功能模块 */
+class TransitUserLocationStore(private val repository: ITransitRepository) : UserLocationStore {
+    override val userLocation: StateFlow<Pair<Double, Double>?> get() = repository.userLocation
+
+    override fun updateUserLocation(lat: Double, lng: Double) = repository.updateUserLocation(lat, lng)
+}
+
+/** 当前安装包的版本号（原 `AboutViewModel.getDefaultAppVersion`，读不到时 1 / 0.0.1） */
+fun androidAppVersion(context: Context): AppVersionInfo {
+    val (code, name) = runCatching {
+        val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.getPackageInfo(
+                context.packageName,
+                PackageManager.PackageInfoFlags.of(0)
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getPackageInfo(context.packageName, 0)
+        }
+        val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.longVersionCode.toInt()
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.versionCode
+        }
+        val versionName = packageInfo.versionName ?: "0.0.1"
+        versionCode to versionName
+    }.getOrDefault(1 to "0.0.1")
+    return AppVersionInfo(code, name)
+}

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 第 26 步：周期刷新改由 WorkManager 每 30 分钟跑一次（BusStopWidgetWorker），这里不再让系统定时 onUpdate。
+     文件名和 initialLayout 不变：Glance 首次画出前桌面先显示它 -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="110dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="0"
+    android:resizeMode="horizontal|vertical"
+    android:initialLayout="@layout/widget_bus_stop"
+    android:description="@string/widget_desc"
+    android:widgetCategory="home_screen" />

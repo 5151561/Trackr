@@ -1,0 +1,28 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <!-- 虚线轨道 (置于底层) -->
+    <path
+        android:strokeColor="#DADCE0"
+        android:strokeWidth="26.4"
+        android:strokeLineCap="round"
+        android:pathData="M 365.0,630.5 L 377.1,605.7 M 387.2,586.6 L 401.0,562.7 M 412.4,544.4 L 428.0,521.6 M 441.0,504.3 L 458.5,483.0 M 473.0,467.0 L 492.6,447.5 M 508.6,433.1 L 530.1,415.8 M 547.6,403.2 L 570.9,388.3 M 589.7,377.7 L 614.5,365.6 M 634.4,357.2 L 660.4,347.8 M 681.1,341.6 L 707.9,335.0 M 729.0,330.8 L 731.0,330.5" />
+    <!-- 蓝球 (起点端) -->
+    <path
+        android:fillColor="#4285F4"
+        android:pathData="M 365.0,545.3 a 85.2,85.2 0 1,0 0,170.4 a 85.2,85.2 0 1,0 0,-170.4" />
+    <!-- 红球 (上升冲刺) -->
+    <path
+        android:fillColor="#EA4335"
+        android:pathData="M 467.0,418.7 a 64.8,64.8 0 1,0 0,129.6 a 64.8,64.8 0 1,0 0,-129.6" />
+    <!-- 黄球 (波峰跃升) -->
+    <path
+        android:fillColor="#FBBC05"
+        android:pathData="M 578.0,341.3 a 49.2,49.2 0 1,0 0,98.4 a 49.2,49.2 0 1,0 0,-98.4" />
+    <!-- 绿球 (目标到站) -->
+    <path
+        android:fillColor="#34A853"
+        android:pathData="M 680.0,308.3 a 37.2,37.2 0 1,0 0,74.4 a 37.2,37.2 0 1,0 0,-74.4" />
+</vector>
