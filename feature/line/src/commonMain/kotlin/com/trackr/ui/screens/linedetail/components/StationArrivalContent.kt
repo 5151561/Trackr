@@ -51,7 +51,6 @@ import com.trackr.core.model.BusStop
 import com.trackr.core.model.LiveBus
 import com.trackr.core.model.sanitizePlateOrFleetNo
 import com.trackr.feature.line.resources.Res as LineRes
-import com.trackr.feature.line.resources.line_distance_to_station
 import com.trackr.feature.line.resources.line_station_buses_on_line
 import com.trackr.feature.line.resources.line_station_collapse_card
 import com.trackr.feature.line.resources.line_station_expand_card
@@ -205,8 +204,8 @@ fun StationArrivalContent(
 
         ArrivalHeadline(arrival = arrival, color = arrivalToneColor(arrival.tone))
 
-        // 小字：「还有 2 站」·车牌·预计到达·车速（各自一段，信息多时换行）
-        val busFacts = upcomingBus?.let { busFacts(it) }.orEmpty()
+        // 小字：「还有 2 站」· 距离 · 车牌 · 车速（各自一段，信息多时换行；#68）
+        val busFacts = remember(upcomingBus) { upcomingBus?.let(::busFacts).orEmpty() }
         if (arrival.detail.isNotBlank() || busFacts.isNotEmpty()) {
             Spacer(modifier = Modifier.height(4.dp))
             FlowRow(
@@ -381,16 +380,16 @@ internal fun stationArrivalState(static: LineStatic, live: LineLive?, targetOrde
     )
 }
 
-/** 最近那辆车的车牌、距本站距离、预计到达、车速（拿不到的不显示） */
-@Composable
-private fun busFacts(bus: LiveBus): List<String> {
+/**
+ * 最近那辆车的距离、车牌、车速（拿不到的不显示；#68）。
+ *
+ * 主卡大字已经展示预估到站时间，这里不再重复预计到达时间；距离优先于车牌且不带「距本站」前缀，减少换行。
+ */
+internal fun busFacts(bus: LiveBus): List<String> {
     val distanceText = RouteProjectionMath.formatDistanceText(bus.distanceToTargetMeters)
     return listOfNotNull(
+        distanceText.takeIf { it.isNotBlank() },
         sanitizePlateOrFleetNo(bus.plateOrFleetNo).takeIf { it.isNotBlank() },
-        distanceText.takeIf { it.isNotBlank() }?.let {
-            stringResource(LineRes.string.line_distance_to_station, it)
-        },
-        bus.expectedArrivalTimeText?.takeIf { it.isNotBlank() }?.let { "$it 到" },
         bus.speedKmh.takeIf { it > 0 }?.let { "${it.toInt()} km/h" }
     )
 }

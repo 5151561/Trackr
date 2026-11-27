@@ -17,6 +17,7 @@ import com.trackr.core.model.LineOperatingState
 import com.trackr.core.model.LiveBus
 import com.trackr.ui.screens.linedetail.components.StationArrivalContent
 import com.trackr.ui.screens.linedetail.components.StationArrivalTags
+import com.trackr.ui.screens.linedetail.components.busFacts
 import kotlinx.datetime.LocalTime
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -116,24 +117,30 @@ class StationArrivalContentTest {
     }
 
     @Test
-    fun upcomingBus_withDistance_showsDistanceToStation() {
+    fun upcomingBus_withDistance_showsCompactDistanceBeforePlate() {
+        val bus = LiveBus(
+            busId = "b1",
+            plateOrFleetNo = "沪A·D8866",
+            order = 4,
+            etaSeconds = 120,
+            distanceToTargetMeters = 320,
+            expectedArrivalTimeText = "约2分钟"
+        )
+        // #68：距离在车牌前，去掉「距本站」前缀和重复的预计到站时间
+        assertEquals(listOf("320米", "沪A·D8866"), busFacts(bus))
+
         val detail = BusLineDetail(
             line = lineDirection,
             stops = stops,
-            buses = listOf(
-                LiveBus(
-                    busId = "b1",
-                    plateOrFleetNo = "沪A·D8866",
-                    order = 4,
-                    etaSeconds = 120,
-                    distanceToTargetMeters = 320
-                )
-            ),
+            buses = listOf(bus),
             operatingState = LineOperatingState.RUNNING
         )
         setContent(detail, stops[1])
 
-        composeTestRule.onNodeWithText("距本站 320米").assertIsDisplayed()
+        composeTestRule.onNodeWithText("320米").assertIsDisplayed()
+        composeTestRule.onNodeWithText("沪A·D8866").assertIsDisplayed()
+        composeTestRule.onNodeWithText("距本站", substring = true).assertDoesNotExist()
+        composeTestRule.onNodeWithText("约2分钟 到").assertDoesNotExist()
     }
 
     @Test
@@ -154,6 +161,7 @@ class StationArrivalContentTest {
         )
         setContent(detail, stops[1])
 
+        composeTestRule.onNodeWithText("320米").assertDoesNotExist()
         composeTestRule.onNodeWithText("距本站", substring = true).assertDoesNotExist()
     }
 
@@ -281,7 +289,7 @@ class StationArrivalContentTest {
         composeTestRule.onNodeWithText("4").assertIsDisplayed()
         composeTestRule.onNodeWithText("还有 2 站").assertIsDisplayed()
         composeTestRule.onNodeWithText("沪A·D8866").assertIsDisplayed()
-        composeTestRule.onNodeWithText("12:04 到").assertIsDisplayed()
+        composeTestRule.onNodeWithText("12:04 到").assertDoesNotExist()
         composeTestRule.onNodeWithText("下一辆 12 分钟 · 4 站").assertIsDisplayed()
         composeTestRule.onNodeWithText("全线 2 辆车在途 · 查看").assertIsDisplayed()
     }
