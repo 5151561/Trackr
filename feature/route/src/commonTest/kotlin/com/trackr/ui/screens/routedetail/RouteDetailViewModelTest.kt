@@ -8,6 +8,7 @@ import com.trackr.core.data.route.RouteAlignmentService
 import com.trackr.core.data.route.RouteGroupSaver
 import com.trackr.core.model.BusLineDetail
 import com.trackr.core.model.BusLineDirection
+import com.trackr.core.model.BusStop
 import com.trackr.core.model.CandidateLine
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.LiveBus
@@ -302,5 +303,90 @@ class RouteDetailViewModelTest {
         testScheduler.advanceUntilIdle()
         assertTrue(viewModel.groups.value.any { it.id == "planned_temp" })
         assertNull(viewModel.temporaryTrackingGroup.value)
+    }
+
+    @Test
+    fun updateLegAlightStop_updatesSelectedLegOnlyAndKeepsSubsequentLegsIntact() = runTest(main.dispatcher) {
+        // #63：修改第 1 程的中途下车站，只更新第 1 程下车站和站序，不影响第 2 程换乘安排
+        val leg1Stops = listOf(
+            BusStop(stopId = "s1", name = "起点站", order = 1),
+            BusStop(stopId = "s2", name = "深大北门", order = 2, wgsLat = 22.540, wgsLng = 113.934),
+            BusStop(stopId = "s3", name = "科技园", order = 3, wgsLat = 22.541, wgsLng = 113.945),
+            BusStop(stopId = "s4", name = "高新园", order = 4, wgsLat = 22.542, wgsLng = 113.955),
+            BusStop(stopId = "s5", name = "大冲", order = 5, wgsLat = 22.543, wgsLng = 113.960)
+        )
+        realtime.lineDetailsMap["b320"] = BusLineDetail(
+            line = BusLineDirection(lineId = "b320", name = "320路", startStop = "起点站", endStop = "大冲"),
+            stops = leg1Stops,
+            buses = emptyList()
+        )
+        val group = TransitGroup(
+            id = "tg_alight_edit",
+            name = "家 → 公司",
+            legs = listOf(
+                TransitLeg(
+                    legIndex = 0,
+                    fromStopName = "深大北门",
+                    toStopName = "高新园",
+                    candidateLines = listOf(
+                        CandidateLine(
+                            cityId = "033",
+                            lineId = "b320",
+                            lineName = "320路",
+                            fromStopOrder = 2,
+                            toStopOrder = 4,
+                            startStopName = "深大北门",
+                            endStopName = "高新园"
+                        )
+                    )
+                ),
+                TransitLeg(
+                    legIndex = 1,
+                    fromStopName = "高新园",
+                    toStopName = "腾讯大厦",
+                    candidateLines = listOf(
+                        CandidateLine(
+                            cityId = "033",
+                            lineId = "b19",
+                            lineName = "19路",
+                            fromStopOrder = 1,
+                            toStopOrder = 5,
+                            startStopName = "高新园",
+                            endStopName = "腾讯大厦"
+                        )
+                    )
+                )
+            )
+        )
+        groupRepository.addGroup(group)
+        val viewModel = createViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.openAlightStopPicker(group, legIndex = 0)
+        testScheduler.advanceUntilIdle()
+
+        val picker = viewModel.alightStopPicker.value
+        assertNotNull(picker)
+        assertFalse(picker.isLoading)
+        // 只展示上车站（order=2）之后的站点
+        assertEquals(listOf(3, 4, 5), picker.stops.map { it.order })
+        assertEquals(4, picker.currentStopOrder)
+
+        // 改到提前一站「科技园」(order=3) 下车
+        viewModel.updateLegAlightStop(group.id, legIndex = 0, stop = leg1Stops[2])
+        testScheduler.advanceUntilIdle()
+
+        assertNull(viewModel.alightStopPicker.value)
+        val updated = groupRepository.getGroupById(group.id)
+        assertNotNull(updated)
+        assertEquals("科技园", updated.legs[0].toStopName)
+        assertEquals("s3", updated.legs[0].toStopId)
+        assertTrue(updated.legs[0].toStopLat != 0.0 && updated.legs[0].toStopLng != 0.0)
+        assertEquals(3, updated.legs[0].candidateLines[0].toStopOrder)
+        assertEquals("科技园", updated.legs[0].candidateLines[0].endStopName)
+        // 第 2 程不受影响
+        assertEquals("高新园", updated.legs[1].fromStopName)
+        assertEquals("腾讯大厦", updated.legs[1].toStopName)
+        assertEquals(5, updated.legs[1].candidateLines[0].toStopOrder)
     }
 }

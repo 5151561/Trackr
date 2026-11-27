@@ -27,6 +27,11 @@
     <string name="route_detail_board_at">%1$s 上车</string>
     <string name="route_detail_no_candidates">这一程还没有候选线路</string>
     <string name="route_detail_more_lines">还可以坐别的线</string>
+    <string name="route_detail_change_alight_stop">换下车站</string>
+    <string name="route_detail_pick_alight_title">第 %1$s 程下车站</string>
+    <string name="route_detail_pick_alight_loading">正在获取线路站点…</string>
+    <string name="route_detail_pick_alight_empty">未获取到该线路的途经站点</string>
+    <string name="route_detail_pick_alight_stop_order">第 %1$s 站</string>
     <string name="route_detail_no_realtime">暂无实时</string>
     <string name="route_selected">已选</string>
     <string name="route_unselected">未选</string>

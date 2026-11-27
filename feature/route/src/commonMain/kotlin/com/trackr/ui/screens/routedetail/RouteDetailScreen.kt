@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -27,6 +28,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -79,6 +81,7 @@ import com.trackr.core.designsystem.resources.ic_plus
 import com.trackr.core.designsystem.resources.ic_walk
 import com.trackr.core.designsystem.resources.ic_warning
 import com.trackr.core.designsystem.resources.more_actions
+import com.trackr.core.model.BusStop
 import com.trackr.core.model.CandidateLine
 import com.trackr.core.model.CandidateLineRealtimeInfo
 import com.trackr.core.model.FavoriteGroup
@@ -92,6 +95,7 @@ import com.trackr.feature.route.resources.Res as RouteRes
 import com.trackr.feature.route.resources.route_detail_add_line_hint
 import com.trackr.feature.route.resources.route_detail_add_line_title
 import com.trackr.feature.route.resources.route_detail_board_at
+import com.trackr.feature.route.resources.route_detail_change_alight_stop
 import com.trackr.feature.route.resources.route_detail_change_group
 import com.trackr.feature.route.resources.route_detail_connecting
 import com.trackr.feature.route.resources.route_detail_delete
@@ -108,6 +112,10 @@ import com.trackr.feature.route.resources.route_detail_name
 import com.trackr.feature.route.resources.route_detail_next_leg
 import com.trackr.feature.route.resources.route_detail_no_candidates
 import com.trackr.feature.route.resources.route_detail_no_realtime
+import com.trackr.feature.route.resources.route_detail_pick_alight_empty
+import com.trackr.feature.route.resources.route_detail_pick_alight_loading
+import com.trackr.feature.route.resources.route_detail_pick_alight_stop_order
+import com.trackr.feature.route.resources.route_detail_pick_alight_title
 import com.trackr.feature.route.resources.route_detail_pick_group
 import com.trackr.feature.route.resources.route_detail_rename
 import com.trackr.feature.route.resources.route_detail_reverse
@@ -132,6 +140,9 @@ sealed interface RouteDetailEvent {
     data object StopTracking : RouteDetailEvent
     data class SelectLine(val legIndex: Int, val lineId: String) : RouteDetailEvent
     data class AddLine(val legIndex: Int, val lineName: String) : RouteDetailEvent
+    data class OpenAlightStopPicker(val legIndex: Int) : RouteDetailEvent
+    data class SelectAlightStop(val legIndex: Int, val stop: BusStop) : RouteDetailEvent
+    data object DismissAlightStopPicker : RouteDetailEvent
     data class OpenLine(val candidate: CandidateLine) : RouteDetailEvent
     data class SaveTemporary(val name: String, val favoriteGroupId: String?) : RouteDetailEvent
     data object CreateReverse : RouteDetailEvent
@@ -155,7 +166,8 @@ fun RouteDetailScreen(
     message: String?,
     onMessageShown: () -> Unit,
     onEvent: (RouteDetailEvent) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    alightStopPicker: AlightStopPickerState? = null
 ) {
     var showMore by remember { mutableStateOf(false) }
     var showAddLineForLeg by remember { mutableStateOf<Int?>(null) }
@@ -295,6 +307,7 @@ fun RouteDetailScreen(
                         },
                         onSelect = { lineId -> onEvent(RouteDetailEvent.SelectLine(leg.legIndex, lineId)) },
                         onAdd = { showAddLineForLeg = leg.legIndex },
+                        onChangeAlightStop = { onEvent(RouteDetailEvent.OpenAlightStopPicker(leg.legIndex)) },
                         onOpenLine = { onEvent(RouteDetailEvent.OpenLine(it)) }
                     )
                 }
@@ -401,6 +414,14 @@ fun RouteDetailScreen(
                 showSave = false
                 onEvent(RouteDetailEvent.SaveTemporary(name, favoriteGroupId))
             }
+        )
+    }
+
+    if (alightStopPicker != null) {
+        AlightStopPickerDialog(
+            state = alightStopPicker,
+            onDismiss = { onEvent(RouteDetailEvent.DismissAlightStopPicker) },
+            onPick = { stop -> onEvent(RouteDetailEvent.SelectAlightStop(alightStopPicker.legIndex, stop)) }
         )
     }
 }
@@ -525,6 +546,7 @@ private fun LegBlock(
     fallbackEtaOf: (CandidateLine) -> String?,
     onSelect: (String) -> Unit,
     onAdd: () -> Unit,
+    onChangeAlightStop: () -> Unit,
     onOpenLine: (CandidateLine) -> Unit
 ) {
     Card(
@@ -588,11 +610,28 @@ private fun LegBlock(
                 }
 
                 Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = rideText(leg, selectedLineId),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = rideText(leg, selectedLineId),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (leg.candidateLines.isNotEmpty()) {
+                        Text(
+                            text = stringResource(RouteRes.string.route_detail_change_alight_stop),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clickable(onClick = onChangeAlightStop)
+                                .padding(start = 8.dp)
+                                .testTag("btn_change_alight_${leg.legIndex}")
+                        )
+                    }
+                }
             }
         }
     }
@@ -888,6 +927,116 @@ private fun SaveRouteDialog(
     )
 }
 
+/** 修改某一程的下车站（issue #63）：列出当前线路上车站之后的全部途经站 */
+@Composable
+private fun AlightStopPickerDialog(
+    state: AlightStopPickerState,
+    onDismiss: () -> Unit,
+    onPick: (BusStop) -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Column {
+                Text(stringResource(RouteRes.string.route_detail_pick_alight_title, state.legIndex + 1))
+                if (state.lineName.isNotBlank()) {
+                    Text(
+                        text = state.lineName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        },
+        text = {
+            when {
+                state.isLoading -> {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Text(
+                            text = stringResource(RouteRes.string.route_detail_pick_alight_loading),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                state.stops.isEmpty() -> {
+                    Text(
+                        text = state.error ?: stringResource(RouteRes.string.route_detail_pick_alight_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(vertical = 12.dp)
+                    )
+                }
+                else -> {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .testTag("list_alight_stops")
+                    ) {
+                        items(
+                            items = state.stops,
+                            key = { "${it.order}_${it.stopId}_${it.name}" }
+                        ) { stop ->
+                            val selected = (state.currentStopOrder > 0 && stop.order == state.currentStopOrder) ||
+                                stop.name == state.currentStopName
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onPick(stop) }
+                                    .heightIn(min = 48.dp)
+                                    .padding(vertical = 4.dp)
+                                    .testTag("alight_stop_${stop.order}"),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = stringResource(RouteRes.string.route_detail_pick_alight_stop_order, stop.order),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    }
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = stop.name,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+                                    color = if (selected) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (selected) {
+                                    Icon(
+                                        imageVector = vectorResource(Res.drawable.ic_check),
+                                        contentDescription = stringResource(RouteRes.string.route_selected),
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(Res.string.action_cancel)) }
+        }
+    )
+}
+
 /**
  * 路线详情 Route：从共享的 [RouteDetailViewModel] 取这条路线和实时状态，把事件翻成 ViewModel 调用 / 导航。
  */
@@ -905,6 +1054,7 @@ fun RouteDetailRoute(
     val selectedLines by viewModel.selectedLineKeys.collectAsStateWithLifecycle()
     val favoriteGroups by viewModel.favoriteGroups.collectAsStateWithLifecycle()
     val message by viewModel.trackingMessage.collectAsStateWithLifecycle()
+    val alightStopPicker by viewModel.alightStopPicker.collectAsStateWithLifecycle()
 
     val group = groups.firstOrNull { it.id == groupId }
     val back = dropUnlessResumed { navigator.popChildPage() }
@@ -954,6 +1104,13 @@ fun RouteDetailRoute(
                         )
                     )
                 }
+                is RouteDetailEvent.OpenAlightStopPicker -> group?.let {
+                    viewModel.openAlightStopPicker(it, event.legIndex)
+                }
+                is RouteDetailEvent.SelectAlightStop -> group?.let {
+                    viewModel.updateLegAlightStop(it.id, event.legIndex, event.stop)
+                }
+                RouteDetailEvent.DismissAlightStopPicker -> viewModel.dismissAlightStopPicker()
                 is RouteDetailEvent.OpenLine -> openLine(event.candidate)
                 is RouteDetailEvent.SaveTemporary -> group?.let {
                     viewModel.saveTemporaryGroup(it.id, event.name, event.favoriteGroupId)
@@ -969,6 +1126,7 @@ fun RouteDetailRoute(
                 }
             }
         },
-        modifier = modifier
+        modifier = modifier,
+        alightStopPicker = alightStopPicker
     )
 }

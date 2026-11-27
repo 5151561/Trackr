@@ -8,8 +8,11 @@ import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.data.route.RouteAlignmentService
 import com.trackr.core.domain.arrival.ArrivalState
 import com.trackr.core.domain.arrival.ArrivalText
+import com.trackr.core.domain.math.CoordTransform
+import com.trackr.core.domain.math.RouteProjectionMath
 import com.trackr.core.domain.platform.TrackingController
 import com.trackr.core.model.BusLineDetail
+import com.trackr.core.model.BusStop
 import com.trackr.core.model.CandidateLine
 import com.trackr.core.model.CandidateLineRealtimeInfo
 import com.trackr.core.model.DataSourceType
@@ -40,6 +43,18 @@ import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+/** 路线详情「修改某一程下车站」弹窗状态（issue #63） */
+data class AlightStopPickerState(
+    val groupId: String,
+    val legIndex: Int,
+    val lineName: String,
+    val currentStopName: String,
+    val currentStopOrder: Int,
+    val isLoading: Boolean = true,
+    val stops: List<BusStop> = emptyList(),
+    val error: String? = null
+)
 
 /**
  * 路线的实时到站与追踪（第 17 步从 `FavoritesGroupViewModel` 拆出，逻辑原样搬）：
@@ -137,6 +152,12 @@ class RouteDetailViewModel(
     /** 实时刷新任务：新一轮开始时取消旧的一轮，避免旧结果覆盖新结果 */
     private var etaRefreshJob: Job? = null
 
+    /** 修改下车站弹窗（issue #63） */
+    private var alightStopsJob: Job? = null
+    private var alightPickerResolvedCandidate: CandidateLine? = null
+    private val _alightStopPicker = MutableStateFlow<AlightStopPickerState?>(null)
+    val alightStopPicker: StateFlow<AlightStopPickerState?> = _alightStopPicker.asStateFlow()
+
     /** 追踪相关的一次性提示（如未能对齐真实站序时） */
     private val _trackingMessage = MutableStateFlow<String?>(null)
     val trackingMessage: StateFlow<String?> = _trackingMessage.asStateFlow()
@@ -168,6 +189,132 @@ class RouteDetailViewModel(
 
     fun selectCandidateLine(groupId: String, legIndex: Int, lineId: String) {
         _userSelectedLines.value = _userSelectedLines.value + ("${groupId}_${legIndex}" to lineId)
+    }
+
+    /**
+     * 打开某一程的「修改下车站」弹窗（issue #63）：拉取当前选中线路的完整站表，过滤出上车站之后的站点供选择。
+     */
+    fun openAlightStopPicker(group: TransitGroup, legIndex: Int) {
+        val leg = group.legs.firstOrNull { it.legIndex == legIndex } ?: return
+        val selectedId = selectedLineKeys.value["${group.id}_${leg.legIndex}"]
+        val candidate = leg.candidateLines.firstOrNull { it.lineId == selectedId } ?: leg.primaryLine
+        if (candidate == null) {
+            _trackingMessage.value = "这一程还没有候选线路，无法修改下车站"
+            return
+        }
+
+        alightStopsJob?.cancel()
+        alightPickerResolvedCandidate = candidate
+        _alightStopPicker.value = AlightStopPickerState(
+            groupId = group.id,
+            legIndex = leg.legIndex,
+            lineName = candidate.lineName,
+            currentStopName = leg.toStopName,
+            currentStopOrder = candidate.toStopOrder,
+            isLoading = true
+        )
+
+        alightStopsJob = viewModelScope.launch(ioDispatcher) {
+            val city = alignment.resolveCandidateCity(candidate, settings.selectedCity.value)
+            val resolved = if (isSyntheticLine(candidate)) {
+                alignment.findRealtimeLineMatch(
+                    city = city,
+                    lineName = candidate.lineName,
+                    fromStopName = leg.fromStopName,
+                    toStopName = leg.toStopName,
+                    preferredDirection = candidate.direction
+                ) ?: candidate
+            } else {
+                candidate
+            }
+            alightPickerResolvedCandidate = resolved
+
+            val detail = runCatching {
+                realtime.getLineDetail(
+                    city = city,
+                    lineId = resolved.lineId,
+                    targetOrder = resolved.fromStopOrder.takeIf { it > 0 },
+                    source = resolved.source,
+                    lineNameHint = resolved.lineName,
+                    directionHint = resolved.direction
+                ).getOrNull()
+            }.getOrNull()
+
+            val allStops = detail?.stops.orEmpty().sortedBy { it.order }
+            val fromOrder = resolved.fromStopOrder.takeIf { it > 0 }
+                ?: allStops.firstOrNull {
+                    RouteProjectionMath.coreStopName(it.name) == RouteProjectionMath.coreStopName(leg.fromStopName)
+                }?.order
+                ?: 0
+            val selectableStops = allStops.filter { it.order > fromOrder }.ifEmpty { allStops }
+            val currentOrder = selectableStops.firstOrNull {
+                RouteProjectionMath.coreStopName(it.name) == RouteProjectionMath.coreStopName(leg.toStopName)
+            }?.order ?: resolved.toStopOrder
+
+            _alightStopPicker.value = AlightStopPickerState(
+                groupId = group.id,
+                legIndex = leg.legIndex,
+                lineName = resolved.lineName,
+                currentStopName = leg.toStopName,
+                currentStopOrder = currentOrder,
+                isLoading = false,
+                stops = selectableStops,
+                error = if (selectableStops.isEmpty()) "未获取到该线路的途经站点，请稍后重试" else null
+            )
+        }
+    }
+
+    fun dismissAlightStopPicker() {
+        alightStopsJob?.cancel()
+        alightPickerResolvedCandidate = null
+        _alightStopPicker.value = null
+    }
+
+    /**
+     * 更新某一程的下车站（issue #63）：只改本程的 `toStopName` / `toStopOrder` 及坐标，
+     * 不改动后续换乘程的安排；改完后写回仓库并刷新 ETA。
+     */
+    fun updateLegAlightStop(groupId: String, legIndex: Int, stop: BusStop) {
+        val resolvedCandidate = alightPickerResolvedCandidate
+        dismissAlightStopPicker()
+
+        viewModelScope.launch(ioDispatcher) {
+            val group = groupRepository.getGroupById(groupId) ?: return@launch
+            val selectedId = selectedLineKeys.value["${group.id}_$legIndex"]
+            val updatedLegs = group.legs.map { leg ->
+                if (leg.legIndex != legIndex) {
+                    leg
+                } else {
+                    val targetLineId = selectedId ?: leg.primaryLine?.lineId
+                    val updatedCandidates = leg.candidateLines.map { candidate ->
+                        if (candidate.lineId == targetLineId) {
+                            val base = resolvedCandidate ?: candidate
+                            base.copy(
+                                toStopOrder = stop.order,
+                                endStopName = stop.name
+                            )
+                        } else {
+                            candidate.copy(endStopName = stop.name)
+                        }
+                    }
+                    val (gcjLat, gcjLng) = if (stop.wgsLat != 0.0 || stop.wgsLng != 0.0) {
+                        CoordTransform.wgs84ToGcj02(stop.wgsLat, stop.wgsLng)
+                    } else {
+                        leg.toStopLat to leg.toStopLng
+                    }
+                    leg.copy(
+                        toStopName = stop.name,
+                        toStopId = stop.stopId,
+                        toStopLat = gcjLat,
+                        toStopLng = gcjLng,
+                        candidateLines = updatedCandidates
+                    )
+                }
+            }
+            val updatedGroup = group.copy(legs = updatedLegs)
+            groupRepository.updateGroup(updatedGroup)
+            refreshRealtimeEta(groupRepository.groups.value)
+        }
     }
 
     fun addCandidateLineToLeg(groupId: String, legIndex: Int, candidateLine: CandidateLine) {

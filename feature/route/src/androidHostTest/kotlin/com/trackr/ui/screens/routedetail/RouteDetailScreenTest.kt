@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import com.trackr.core.designsystem.theme.TrackrTheme
+import com.trackr.core.model.BusStop
 import com.trackr.core.model.CandidateLine
 import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.GroupCategory
@@ -63,7 +64,11 @@ class RouteDetailScreenTest {
         legs = listOf(leg1, leg2)
     )
 
-    private fun setContent(target: TransitGroup = group, selected: Map<String, String> = emptyMap()) {
+    private fun setContent(
+        target: TransitGroup = group,
+        selected: Map<String, String> = emptyMap(),
+        alightStopPicker: AlightStopPickerState? = null
+    ) {
         composeTestRule.setContent {
             TrackrTheme {
                 RouteDetailScreen(
@@ -75,7 +80,8 @@ class RouteDetailScreenTest {
                     favoriteGroups = emptyList(),
                     message = null,
                     onMessageShown = {},
-                    onEvent = { events += it }
+                    onEvent = { events += it },
+                    alightStopPicker = alightStopPicker
                 )
             }
         }
@@ -130,5 +136,34 @@ class RouteDetailScreenTest {
         composeTestRule.onNodeWithText("添加").performClick()
 
         assertTrue(events.contains(RouteDetailEvent.AddLine(legIndex = 0, lineName = "71")))
+    }
+
+    @Test
+    fun changeAlightStop_opensPickerAndEmitsSelectedStop() {
+        val stopA = BusStop(stopId = "s6", name = "科技园", order = 6)
+        val stopB = BusStop(stopId = "s8", name = "高新园", order = 8)
+        setContent(
+            alightStopPicker = AlightStopPickerState(
+                groupId = group.id,
+                legIndex = 0,
+                lineName = "325",
+                currentStopName = "高新园",
+                currentStopOrder = 8,
+                isLoading = false,
+                stops = listOf(stopA, stopB)
+            )
+        )
+
+        composeTestRule.onNodeWithText("第 1 程下车站").assertIsDisplayed()
+        composeTestRule.onNodeWithTag("alight_stop_6").performClick()
+        assertTrue(events.contains(RouteDetailEvent.SelectAlightStop(legIndex = 0, stop = stopA)))
+    }
+
+    @Test
+    fun tappingChangeAlightButton_sendsOpenPickerEvent() {
+        setContent()
+
+        composeTestRule.onNodeWithTag("btn_change_alight_0").performClick()
+        assertTrue(events.contains(RouteDetailEvent.OpenAlightStopPicker(legIndex = 0)))
     }
 }
