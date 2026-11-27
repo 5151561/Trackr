@@ -520,7 +520,7 @@ class RoutePlanViewModel(
                 _planErrorMessage.value = if (!hasAmap) {
                     "未查到经过【${effectiveOrigin.name}】与【${effectiveDest.name}】的直达或换乘公交。\n试试输入具体的公交站名；在「我的」里填上高德 Key，就能按地名和地铁规划。"
                 } else {
-                    "在当前城市未找到合适的公交换乘方案，请尝试更换更精准的站名或地名。"
+                    "未找到合适的公交换乘方案，请尝试更换更精准的站名或地名。"
                 }
                 onComplete?.invoke(false)
             }

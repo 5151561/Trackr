@@ -66,18 +66,27 @@ class AmapTransitApiClient(
         /** 和 `URLEncoder.encode(value, "UTF-8")` 一样的编码 */
         private fun encode(value: String): String = formUrlEncode(value)
 
-        /** 构造输入提示 URL（city 非空时附带 citylimit=true，只返回本城结果） */
+        /**
+         * 构造输入提示 URL（#66）。
+         *
+         * 传 [city] 让高德以当前城市优先排序，但默认不加 `citylimit=true`，以便城际出行能直接搜到邻城地点；
+         * 需要严格限定本城时再显式传 [cityLimit] = true。
+         */
         fun buildInputTipsUrl(
             keyword: String,
             city: String,
             key: String,
-            location: String? = null
+            location: String? = null,
+            cityLimit: Boolean = false
         ): String {
             val sb = StringBuilder("$BASE_URL_AMAP/assistant/inputtips?keywords=")
                 .append(encode(keyword.trim()))
             val cityTrimmed = city.trim()
             if (cityTrimmed.isNotEmpty()) {
-                sb.append("&city=").append(encode(cityTrimmed)).append("&citylimit=true")
+                sb.append("&city=").append(encode(cityTrimmed))
+                if (cityLimit) {
+                    sb.append("&citylimit=true")
+                }
             }
             location?.let { formatLngLat(it) }?.let { sb.append("&location=").append(encode(it)) }
             sb.append("&key=").append(encode(key))
@@ -119,13 +128,14 @@ class AmapTransitApiClient(
         keyword: String,
         city: String = "",
         apiKey: String? = null,
-        location: String? = null
+        location: String? = null,
+        cityLimit: Boolean = false
     ): Result<List<AmapTipItem>> = suspendRunCatching {
         if (keyword.isBlank()) return@suspendRunCatching emptyList()
 
         val key = apiKey?.trim()?.ifBlank { null }
             ?: throw IllegalStateException("未配置高德 Web 服务 Key，请在设置中配置自备 Key")
-        val url = buildInputTipsUrl(keyword, city, key, location)
+        val url = buildInputTipsUrl(keyword, city, key, location, cityLimit = cityLimit)
 
         val rootJson = executeJson {
             method = HttpMethod.Get

@@ -57,13 +57,16 @@ class DefaultRoutePlanRepository(
 
     override fun isConfigured(): Boolean = gateway.isConfigured()
 
-    /** 查询输入提示：先查 LRU 缓存，再走高德（SDK 失败才走 Web），都没有结果时降级为本地站点搜索 */
+    /** 查询输入提示：先查 LRU 缓存，再走高德（本城优先排序、同时保留邻城结果，#66），都没有结果时降级为本地站点搜索 */
     override suspend fun searchTips(keyword: String, city: TransitCity, location: String?): List<AmapTipItem> {
         val cacheKey = "${city.cityId}|${city.cityName}|$keyword"
         tipsCache.get(cacheKey)?.let { return it }
 
         val amapTips = if (gateway.isConfigured()) {
-            gateway.searchTips(keyword, city.cityName, location).getOrNull().orEmpty()
+            prioritizeCurrentCityTips(
+                tips = gateway.searchTips(keyword, city.cityName, location).getOrNull().orEmpty(),
+                city = city
+            )
         } else {
             emptyList()
         }
@@ -83,8 +86,10 @@ class DefaultRoutePlanRepository(
     ): AmapTipItem {
         if (tip.location.contains(",")) return tip
         if (useAmap) {
-            val amapFound = gateway.searchTips(tip.name, city.cityName, location)
-                .getOrNull()?.firstOrNull { it.location.contains(",") }
+            val amapFound = prioritizeCurrentCityTips(
+                tips = gateway.searchTips(tip.name, city.cityName, location).getOrNull().orEmpty(),
+                city = city
+            ).firstOrNull { it.location.contains(",") }
             if (amapFound != null) return amapFound
         }
         val localFound = searchLocalStopTips(tip.name, city).firstOrNull { it.location.contains(",") }
@@ -100,8 +105,9 @@ class DefaultRoutePlanRepository(
     ): List<AmapTransitSchemeResult> {
         val effectiveOrigin = origin
         val effectiveDest = destination
+        val (originCity, destCity) = resolvePlanCities(effectiveOrigin, effectiveDest, city)
 
-        val cacheKey = buildPlanCacheKey(city, effectiveOrigin.location, effectiveDest.location)
+        val cacheKey = buildPlanCacheKey(city, originCity, destCity, effectiveOrigin.location, effectiveDest.location)
         val cached = cacheKey?.let { planCache.get(it) }
 
         var schemes: List<AmapTransitSchemeResult> = emptyList()
@@ -115,8 +121,8 @@ class DefaultRoutePlanRepository(
                     destinationLngLat = effectiveDest.location,
                     originName = effectiveOrigin.name,
                     destName = effectiveDest.name,
-                    cityName = city.cityName,
-                    cityd = resolveCrossCityCode(effectiveOrigin, effectiveDest, city)
+                    cityName = originCity,
+                    cityd = destCity
                 ).getOrNull().orEmpty()
 
                 if (schemes.isNotEmpty()) {
@@ -177,28 +183,80 @@ class DefaultRoutePlanRepository(
         }
     }
 
-    /** 算路缓存键：城市 + 6 位小数坐标 + 15 分钟时间桶；坐标非法时不缓存 */
-    private fun buildPlanCacheKey(city: TransitCity, originLngLat: String, destLngLat: String): String? {
+    /** 算路缓存键：城市 + 跨城起终点城市 + 6 位小数坐标 + 15 分钟时间桶；坐标非法时不缓存 */
+    private fun buildPlanCacheKey(
+        city: TransitCity,
+        originCity: String,
+        destCity: String?,
+        originLngLat: String,
+        destLngLat: String
+    ): String? {
         val o = AmapTransitApiClient.formatLngLat(originLngLat) ?: return null
         val d = AmapTransitApiClient.formatLngLat(destLngLat) ?: return null
         val bucket = wallClockMillis() / PLAN_CACHE_BUCKET_MS
-        return "${city.cityId}|${city.cityName}|$o|$d|$bucket"
+        return "${city.cityId}|${city.cityName}|$originCity|${destCity.orEmpty()}|$o|$d|$bucket"
     }
 
     /**
-     * 起终点跨城时返回终点城市 adcode（传给高德 cityd），同城或拿不到终点城市时返回 null。
-     * 起点有 adcode 时按地级市 adcode 比较；没有时（如"我的位置"）看终点行政区文本是否包含当前城市名。
+     * 稳定排序输入提示：当前城市的结果排前面，邻城/外城结果保留在后面（#66）。
      */
-    private fun resolveCrossCityCode(origin: AmapTipItem, dest: AmapTipItem, city: TransitCity): String? {
-        val destCityCode = AmapTransitApiClient.cityAdcodeOf(dest.adcode) ?: return null
-        val originCityCode = AmapTransitApiClient.cityAdcodeOf(origin.adcode)
-        val isCrossCity = if (originCityCode != null) {
-            originCityCode != destCityCode
-        } else {
-            val shortName = city.cityName.trim().removeSuffix("市")
-            dest.district.isNotBlank() && shortName.isNotBlank() && !dest.district.contains(shortName)
+    private fun prioritizeCurrentCityTips(tips: List<AmapTipItem>, city: TransitCity): List<AmapTipItem> {
+        if (tips.size <= 1) return tips
+        return tips.sortedBy { tip -> if (isTipInCity(tip, city)) 0 else 1 }
+    }
+
+    private fun isTipInCity(tip: AmapTipItem, city: TransitCity): Boolean {
+        val currentCityCode = city.mygolbsCityCode?.let { AmapTransitApiClient.cityAdcodeOf(it) }
+        val tipCityCode = AmapTransitApiClient.cityAdcodeOf(tip.adcode)
+        if (currentCityCode != null && tipCityCode != null) {
+            return currentCityCode == tipCityCode
         }
-        return if (isCrossCity) destCityCode else null
+        val shortName = city.cityName.trim().removeSuffix("市")
+        return shortName.isNotBlank() && tip.district.contains(shortName)
+    }
+
+    /**
+     * 计算高德公交算路的 `city`（起点城市）与 `cityd`（跨城时的终点城市，同城为 null）（#66）。
+     *
+     * - 起点有合法 adcode 时用起点的地级市 adcode，支持从相邻城市 B 出发回 A 城或去 C 城；
+     * - 起点无 adcode（如「我的位置」）时用当前所选城市；
+     * - 起终点不在同一地级市时返回终点城市编码/名称作为 `cityd`。
+     */
+    private fun resolvePlanCities(
+        origin: AmapTipItem,
+        dest: AmapTipItem,
+        city: TransitCity
+    ): Pair<String, String?> {
+        val currentCityCode = city.mygolbsCityCode?.let { AmapTransitApiClient.cityAdcodeOf(it) }
+        val originCityCode = AmapTransitApiClient.cityAdcodeOf(origin.adcode)
+        val destCityCode = AmapTransitApiClient.cityAdcodeOf(dest.adcode)
+        val originCity = originCityCode ?: city.cityName
+
+        val destCity: String? = when {
+            originCityCode != null && destCityCode != null -> {
+                if (originCityCode != destCityCode) destCityCode else null
+            }
+            originCityCode == null && destCityCode != null -> {
+                val isSameCity = if (currentCityCode != null) {
+                    currentCityCode == destCityCode
+                } else {
+                    val shortName = city.cityName.trim().removeSuffix("市")
+                    shortName.isBlank() || dest.district.isBlank() || dest.district.contains(shortName)
+                }
+                if (isSameCity) null else destCityCode
+            }
+            originCityCode != null && destCityCode == null -> {
+                val isSameCity = if (currentCityCode != null) {
+                    currentCityCode == originCityCode
+                } else {
+                    val shortName = city.cityName.trim().removeSuffix("市")
+                    shortName.isBlank() || origin.district.isBlank() || origin.district.contains(shortName)
+                }
+                if (isSameCity) null else (currentCityCode ?: city.cityName)
+            }
+            else -> null
+        }
+        return originCity to destCity
     }
 
     /** 解析高德 "lng,lat" 字符串为 GeoPoint（GCJ-02） */

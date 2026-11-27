@@ -123,7 +123,13 @@ class InMemoryRouteGroupRepository(
 
 /** 高德通道替身：记录请求，不发真实 HTTP / SDK 调用（原 FavoritesGroupViewModelTest 的私有 FakeAmapGateway） */
 class FakeAmapRouteGateway : AmapRouteGateway {
-    data class PlanCall(val originLngLat: String, val destLngLat: String, val destName: String, val cityd: String?)
+    data class PlanCall(
+        val originLngLat: String,
+        val destLngLat: String,
+        val destName: String,
+        val cityd: String?,
+        val cityName: String = ""
+    )
 
     var configured = true
     val tipQueries = mutableListOf<String>()
@@ -153,7 +159,7 @@ class FakeAmapRouteGateway : AmapRouteGateway {
         cityName: String,
         cityd: String?
     ): Result<List<AmapTransitSchemeResult>> {
-        val call = PlanCall(originLngLat, destinationLngLat, destName, cityd)
+        val call = PlanCall(originLngLat, destinationLngLat, destName, cityd, cityName)
         planCalls += call
         if (planDelayMs > 0) delay(planDelayMs)
         return Result.success(planResult(call))

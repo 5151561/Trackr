@@ -338,12 +338,16 @@ class AmapTransitApiClientTest {
     }
 
     @Test
-    fun buildInputTipsUrl_limitsToCity() {
-        val url = AmapTransitApiClient.buildInputTipsUrl("人民广场", "上海", "k", location = "121.47,31.23")
-        assertTrue(url.contains("&citylimit=true"))
-        assertTrue(url.contains("&location=121.470000%2C31.230000"))
+    fun buildInputTipsUrl_allowsCrossCityByDefault_andSupportsCityLimit() {
+        val defaultUrl = AmapTransitApiClient.buildInputTipsUrl("昆山南站", "上海", "k", location = "121.47,31.23")
+        assertTrue(defaultUrl.contains("&city=%E4%B8%8A%E6%B5%B7"))
+        assertFalse(defaultUrl.contains("citylimit=true"))
+        assertTrue(defaultUrl.contains("&location=121.470000%2C31.230000"))
 
-        val noCity = AmapTransitApiClient.buildInputTipsUrl("人民广场", "", "k")
+        val limitedUrl = AmapTransitApiClient.buildInputTipsUrl("人民广场", "上海", "k", cityLimit = true)
+        assertTrue(limitedUrl.contains("&citylimit=true"))
+
+        val noCity = AmapTransitApiClient.buildInputTipsUrl("人民广场", "", "k", cityLimit = true)
         assertFalse(noCity.contains("citylimit"))
     }
 

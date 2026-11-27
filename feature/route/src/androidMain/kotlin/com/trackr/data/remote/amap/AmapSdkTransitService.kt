@@ -34,12 +34,14 @@ class AmapSdkTransitService(
     /**
      * POI 输入关键字联想与提示
      * @param location 当前位置 "lng,lat"（GCJ-02），用于让结果按距离排序；可为空
+     * @param cityLimit 是否严格限定只在 [city] 内返回；默认 false 以支持城际公交搜邻城地点（#66）
      */
     suspend fun searchPoiTips(
         keyword: String,
         city: String = "",
         customApiKey: String? = null,
-        location: String? = null
+        location: String? = null,
+        cityLimit: Boolean = false
     ): Result<List<AmapTipItem>> = withContext(Dispatchers.IO) {
         runCatching {
             val kw = keyword.trim()
@@ -53,8 +55,8 @@ class AmapSdkTransitService(
 
             val cityTrimmed = city.trim()
             val query = InputtipsQuery(kw, cityTrimmed)
-            // 只返回当前城市的结果，避免跨城同名 POI 导致算路空结果再触发回落
-            query.cityLimit = cityTrimmed.isNotEmpty()
+            // 传 city 让高德以本城优先，默认不锁死 cityLimit，避免城际出行搜不到相邻城市地点（#66）
+            query.cityLimit = cityLimit && cityTrimmed.isNotEmpty()
             parseLatLonPoint(location)?.let { query.location = it }
             val inputtips = Inputtips(context, query)
             val tips = inputtips.requestInputtips() ?: return@runCatching emptyList()

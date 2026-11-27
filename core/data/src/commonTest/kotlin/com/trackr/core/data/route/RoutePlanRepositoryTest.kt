@@ -128,4 +128,65 @@ class RoutePlanRepositoryTest {
         repo.searchTips("断桥", hangzhou, null)
         assertEquals(listOf("西湖", "西湖", "断桥", "断桥"), gateway.tipQueries)
     }
+
+    @Test
+    fun searchTips_prioritizesCurrentCity_whileKeepingIntercityTips() = runTest {
+        val gateway = FakeAmapRouteGateway().apply {
+            tipsProvider = {
+                listOf(
+                    AmapTipItem(name = "昆山南站", district = "江苏省苏州市昆山市", location = "120.95,31.35", adcode = "320583"),
+                    AmapTipItem(name = "上海虹桥站", district = "上海市闵行区", location = "121.32,31.19", adcode = "310112"),
+                    AmapTipItem(name = "嘉善南站", district = "浙江省嘉兴市嘉善县", location = "120.93,30.79", adcode = "330421")
+                )
+            }
+        }
+        val repo = repository(gateway)
+        val sh = shanghai.copy(mygolbsCityCode = "310100")
+
+        val tips = repo.searchTips("南站", sh, null)
+        // #66：本城排第一，同时保留相邻城市的结果
+        assertEquals(listOf("上海虹桥站", "昆山南站", "嘉善南站"), tips.map { it.name })
+    }
+
+    @Test
+    fun planTransit_intercity_resolvesOriginCityAndCitydCorrectly() = runTest {
+        val gateway = FakeAmapRouteGateway().apply { planResult = { listOf(scheme("城际")) } }
+        val repo = repository(gateway)
+        val sh = shanghai.copy(mygolbsCityCode = "310100")
+
+        val shOrigin = AmapTipItem(name = "虹桥站", district = "上海市闵行区", location = "121.32,31.19", adcode = "310112")
+        val ksDest = AmapTipItem(name = "昆山南站", district = "江苏省苏州市昆山市", location = "120.95,31.35", adcode = "320583")
+        val jxDest = AmapTipItem(name = "嘉善南站", district = "浙江省嘉兴市嘉善县", location = "120.93,30.79", adcode = "330421")
+        val myLoc = AmapTipItem(name = "我的位置", district = "上海", location = "121.47,31.23", adcode = "")
+
+        // A → B（上海 → 昆山/苏州）
+        repo.planTransit(shOrigin, ksDest, sh, useAmap = true)
+        assertEquals("310100", gateway.planCalls.last().cityName)
+        assertEquals("320500", gateway.planCalls.last().cityd)
+
+        // B → A（昆山/苏州 → 上海，即使首页当前城市是上海，起点城市仍应传苏州 320500）
+        repo.planTransit(ksDest, shOrigin, sh, useAmap = true)
+        assertEquals("320500", gateway.planCalls.last().cityName)
+        assertEquals("310100", gateway.planCalls.last().cityd)
+
+        // B → C（昆山/苏州 → 嘉善/嘉兴）
+        repo.planTransit(ksDest, jxDest, sh, useAmap = true)
+        assertEquals("320500", gateway.planCalls.last().cityName)
+        assertEquals("330400", gateway.planCalls.last().cityd)
+
+        // 我的位置(上海) → 昆山/苏州
+        repo.planTransit(myLoc, ksDest, sh, useAmap = true)
+        assertEquals("上海", gateway.planCalls.last().cityName)
+        assertEquals("320500", gateway.planCalls.last().cityd)
+
+        // 昆山/苏州 → 我的位置(上海)
+        repo.planTransit(ksDest, myLoc, sh, useAmap = true)
+        assertEquals("320500", gateway.planCalls.last().cityName)
+        assertEquals("310100", gateway.planCalls.last().cityd)
+
+        // 同城（上海 → 上海）：cityd 为 null
+        repo.planTransit(shOrigin, shOrigin.copy(location = "121.47,31.23"), sh, useAmap = true)
+        assertEquals("310100", gateway.planCalls.last().cityName)
+        assertEquals(null, gateway.planCalls.last().cityd)
+    }
 }
