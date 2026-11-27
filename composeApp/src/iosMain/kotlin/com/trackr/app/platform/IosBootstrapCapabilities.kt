@@ -82,7 +82,7 @@ object IosExternalMapNavigator : ExternalMapNavigator {
     override fun open(app: ExternalMapApp, wgsLat: Double, wgsLng: Double, name: String): Boolean = false
 
     override fun openSystem(wgsLat: Double, wgsLng: Double, name: String): Boolean {
-        val url = NSURL.URLWithString("https://maps.apple.com/?daddr=$wgsLat,$wgsLng") ?: return false
+        val url = NSURL.URLWithString("https://maps.apple.com/?daddr=$wgsLat,$wgsLng&dirflg=w") ?: return false
         if (!UIApplication.sharedApplication.canOpenURL(url)) return false
         UIApplication.sharedApplication.openURL(url, options = emptyMap<Any?, Any>(), completionHandler = null)
         return true

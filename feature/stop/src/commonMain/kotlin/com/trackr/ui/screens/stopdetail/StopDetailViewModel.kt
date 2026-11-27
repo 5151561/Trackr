@@ -202,7 +202,10 @@ class StopDetailViewModel(
             StopDetailEvent.DismissTransitCodeSheet -> _uiState.update { it.copy(isTransitCodeSheetOpen = false) }
             is StopDetailEvent.PickTransitCode -> pickTransitCode(event.provider, event.saveAsDefault)
             StopDetailEvent.OpenExternalMap -> openExternalMap()
-            StopDetailEvent.DismissMapChooser -> _uiState.update { it.copy(mapChooserApps = null) }
+            StopDetailEvent.DismissMapChooser -> {
+                pendingMapTarget = null
+                _uiState.update { it.copy(mapChooserApps = null) }
+            }
             is StopDetailEvent.PickExternalMap -> pickExternalMap(event.app)
         }
     }

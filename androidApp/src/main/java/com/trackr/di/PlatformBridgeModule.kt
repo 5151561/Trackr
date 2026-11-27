@@ -260,7 +260,7 @@ class AndroidExternalMapNavigator(context: Context) : ExternalMapNavigator {
     override fun installedApps(): List<ExternalMapApp> = ExternalMapApp.entries.filter { isInstalled(it) }
 
     override fun open(app: ExternalMapApp, wgsLat: Double, wgsLng: Double, name: String): Boolean =
-        launch(ExternalMapUris.uriFor(app, wgsLat, wgsLng, name))
+        launch(ExternalMapUris.uriFor(app, wgsLat, wgsLng, name), packageName = packageNameOf(app))
 
     override fun openSystem(wgsLat: Double, wgsLng: Double, name: String): Boolean =
         launch(ExternalMapUris.systemGeoUri(wgsLat, wgsLng, name))
@@ -272,10 +272,10 @@ class AndroidExternalMapNavigator(context: Context) : ExternalMapNavigator {
         false
     }
 
-    private fun launch(uri: String): Boolean = try {
-        appContext.startActivity(
-            Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        )
+    private fun launch(uri: String, packageName: String? = null): Boolean = try {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (packageName != null) intent.setPackage(packageName)
+        appContext.startActivity(intent)
         true
     } catch (_: Exception) {
         false

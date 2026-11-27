@@ -20,7 +20,7 @@ class ExternalMapUrisTest {
         assertTrue(uri.startsWith("androidamap://route/plan/"), uri)
         assertTrue(uri.contains("dlat=${ExternalMapUris.formatCoord(gcjLat)}"), uri)
         assertTrue(uri.contains("dlon=${ExternalMapUris.formatCoord(gcjLng)}"), uri)
-        assertTrue(uri.contains("&dev=0&t=0"), uri)
+        assertTrue(uri.contains("&dev=0&t=2"), uri)
         // 站名不编码拼进去会被括号截断，链接里不能出现原文
         assertFalse(uri.contains("人民广场"), uri)
     }
@@ -36,6 +36,7 @@ class ExternalMapUrisTest {
             uri.contains("latlng:${ExternalMapUris.formatCoord(bdLat)},${ExternalMapUris.formatCoord(bdLng)}"),
             uri
         )
+        assertTrue(uri.contains("&mode=walking"), uri)
         // BD-09 和 GCJ-02 不是一回事，坐标串必须已经变掉
         assertFalse(uri.contains("${ExternalMapUris.formatCoord(gcjLat)},${ExternalMapUris.formatCoord(gcjLng)}"), uri)
     }
@@ -46,6 +47,7 @@ class ExternalMapUrisTest {
         val (gcjLat, gcjLng) = CoordTransform.wgs84ToGcj02(wgsLat, wgsLng)
 
         assertTrue(uri.startsWith("qqmap://map/routeplan"), uri)
+        assertTrue(uri.contains("type=walk"), uri)
         assertTrue(
             uri.contains("tocoord=${ExternalMapUris.formatCoord(gcjLat)},${ExternalMapUris.formatCoord(gcjLng)}"),
             uri

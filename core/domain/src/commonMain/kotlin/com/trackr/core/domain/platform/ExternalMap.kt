@@ -26,24 +26,24 @@ enum class ExternalMapApp(val displayName: String) {
  */
 object ExternalMapUris {
 
-    /** [app] 的导航链接；高德 t=0 是驾车、dev=0 表示坐标已是 GCJ-02 不用再偏移 */
+    /** [app] 的导航链接（默认步行去公交站）；高德 t=2 是步行、dev=0 表示坐标已是 GCJ-02 不用再偏移 */
     fun uriFor(app: ExternalMapApp, wgsLat: Double, wgsLng: Double, name: String): String = when (app) {
         ExternalMapApp.AMAP -> {
             val (lat, lng) = CoordTransform.wgs84ToGcj02(wgsLat, wgsLng)
             "androidamap://route/plan/?sourceApplication=Trackr" +
-                "&dlat=${formatCoord(lat)}&dlon=${formatCoord(lng)}&dname=${percentEncode(name)}&dev=0&t=0"
+                "&dlat=${formatCoord(lat)}&dlon=${formatCoord(lng)}&dname=${percentEncode(name)}&dev=0&t=2"
         }
 
         ExternalMapApp.BAIDU -> {
             val (gcjLat, gcjLng) = CoordTransform.wgs84ToGcj02(wgsLat, wgsLng)
             val (bdLat, bdLng) = CoordTransform.gcj02ToBd09(gcjLat, gcjLng)
             "baidumap://map/direction?destination=latlng:${formatCoord(bdLat)},${formatCoord(bdLng)}" +
-                "|name:${percentEncode(name)}&mode=driving&src=android.com.github.u5151561.trackr"
+                "|name:${percentEncode(name)}&mode=walking&src=android.com.github.u5151561.trackr"
         }
 
         ExternalMapApp.TENCENT -> {
             val (lat, lng) = CoordTransform.wgs84ToGcj02(wgsLat, wgsLng)
-            "qqmap://map/routeplan?type=drive&to=${percentEncode(name)}" +
+            "qqmap://map/routeplan?type=walk&to=${percentEncode(name)}" +
                 "&tocoord=${formatCoord(lat)},${formatCoord(lng)}&referer=trackr&policy=0"
         }
     }
