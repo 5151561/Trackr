@@ -41,6 +41,23 @@
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>
+
+        <!-- 外部地图（站点页「导航到此站」）：查装没装高德 / 百度 / 腾讯，并按 scheme 跳路线页 -->
+        <package android:name="com.autonavi.minimap" />
+        <package android:name="com.baidu.BaiduMap" />
+        <package android:name="com.tencent.map" />
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="androidamap" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="baidumap" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="qqmap" />
+        </intent>
     </queries>
 
     <application

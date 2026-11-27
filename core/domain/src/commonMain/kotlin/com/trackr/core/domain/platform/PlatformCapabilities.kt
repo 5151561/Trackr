@@ -137,6 +137,31 @@ object NoSystemSettingsLauncher : SystemSettingsLauncher {
 }
 
 /**
+ * 跳外部地图 App 导航（站点页「导航到此站」）。
+ * Android：Intent 调起高德 / 百度 / 腾讯的路线页，一家都没装时走 [openSystem] 的系统 `geo:`；
+ * iOS：没有这三家的调起，[installedApps] 恒为空，[openSystem] 打开 Apple Maps。
+ * 坐标入参一律是 WGS-84，链接拼装与坐标转换在 [ExternalMapUris]。
+ */
+interface ExternalMapNavigator {
+
+    /** 装了的外部地图（按 [ExternalMapApp] 的声明顺序）；iOS 恒为空 */
+    fun installedApps(): List<ExternalMapApp>
+
+    /** 用 [app] 打开去 ([wgsLat], [wgsLng]) 的导航；没装、被 ROM 拦下时返回 false */
+    fun open(app: ExternalMapApp, wgsLat: Double, wgsLng: Double, name: String): Boolean
+
+    /** 不点名：Android 走系统 `geo:`，iOS 打开 Apple Maps；打不开返回 false */
+    fun openSystem(wgsLat: Double, wgsLng: Double, name: String): Boolean
+}
+
+/** 没有外部地图跳转能力（测试里不关心跳转时的默认值）：什么都不打开 */
+object NoExternalMapNavigator : ExternalMapNavigator {
+    override fun installedApps(): List<ExternalMapApp> = emptyList()
+    override fun open(app: ExternalMapApp, wgsLat: Double, wgsLng: Double, name: String): Boolean = false
+    override fun openSystem(wgsLat: Double, wgsLng: Double, name: String): Boolean = false
+}
+
+/**
  * 手机定位（WGS-84）。Android：系统 LocationManager；iOS：CLLocationManager。
  * 上车 / 下车判定只认精确定位，模糊定位精度在公里级。
  */

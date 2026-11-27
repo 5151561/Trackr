@@ -17,6 +17,9 @@ import com.trackr.core.domain.platform.Announcer
 import com.trackr.core.domain.platform.AppSigningInfo
 import com.trackr.core.domain.platform.AppVersionInfo
 import com.trackr.core.domain.platform.BoardingTraceLog
+import com.trackr.core.domain.platform.ExternalMapApp
+import com.trackr.core.domain.platform.ExternalMapNavigator
+import com.trackr.core.domain.platform.ExternalMapUris
 import com.trackr.core.domain.platform.SystemSettingsLauncher
 import com.trackr.core.domain.platform.TransitCodeLauncher
 import com.trackr.core.model.TransitCodeProvider
@@ -49,6 +52,8 @@ val platformBridgeModule: Module = module {
     single<TransitCodeLauncher> { AndroidTransitCodeLauncher(androidContext()) }
     // 定位提示里的「去授权 / 去开启」：跳应用详情页或系统位置信息页（issue #34）
     single<SystemSettingsLauncher> { AndroidSystemSettingsLauncher(androidContext()) }
+    // 站点页「导航到此站」：跳外部地图 App 的路线页
+    single<ExternalMapNavigator> { AndroidExternalMapNavigator(androidContext()) }
     single<AppSigningInfo> { AndroidAppSigningInfo(androidContext()) }
     // 「读给我听」（第 33 步）：进程级一个，第一次读才建引擎；Koin 关闭时释放
     single<Announcer> { AndroidTtsAnnouncer(androidContext(), get(AppScopeQualifier)) } onClose {
@@ -242,4 +247,43 @@ fun androidAppVersion(context: Context): AppVersionInfo {
         versionCode to versionName
     }.getOrDefault(1 to "0.0.1")
     return AppVersionInfo(code, name)
+}
+
+/**
+ * 站点页「导航到此站」：Intent 调起高德 / 百度 / 腾讯的路线页（链接由 [ExternalMapUris] 拼，坐标在那里转好）。
+ * 查装没装靠 Manifest `<queries>` 里声明的那三个包名；跳转被 ROM 拦下时返回 false，页面提示用户。
+ * 一家都没装时 ViewModel 走 [ExternalMapNavigator.openSystem] 的 geo: 兜底，这里只管发 Intent。
+ */
+class AndroidExternalMapNavigator(context: Context) : ExternalMapNavigator {
+    private val appContext: Context = context.applicationContext ?: context
+
+    override fun installedApps(): List<ExternalMapApp> = ExternalMapApp.entries.filter { isInstalled(it) }
+
+    override fun open(app: ExternalMapApp, wgsLat: Double, wgsLng: Double, name: String): Boolean =
+        launch(ExternalMapUris.uriFor(app, wgsLat, wgsLng, name), packageName = packageNameOf(app))
+
+    override fun openSystem(wgsLat: Double, wgsLng: Double, name: String): Boolean =
+        launch(ExternalMapUris.systemGeoUri(wgsLat, wgsLng, name))
+
+    private fun isInstalled(app: ExternalMapApp): Boolean = try {
+        appContext.packageManager.getPackageInfo(packageNameOf(app), 0)
+        true
+    } catch (_: PackageManager.NameNotFoundException) {
+        false
+    }
+
+    private fun launch(uri: String, packageName: String? = null): Boolean = try {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(uri)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (packageName != null) intent.setPackage(packageName)
+        appContext.startActivity(intent)
+        true
+    } catch (_: Exception) {
+        false
+    }
+
+    private fun packageNameOf(app: ExternalMapApp): String = when (app) {
+        ExternalMapApp.AMAP -> "com.autonavi.minimap"
+        ExternalMapApp.BAIDU -> "com.baidu.BaiduMap"
+        ExternalMapApp.TENCENT -> "com.tencent.map"
+    }
 }

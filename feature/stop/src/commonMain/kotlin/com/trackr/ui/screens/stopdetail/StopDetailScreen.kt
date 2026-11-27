@@ -74,6 +74,7 @@ import com.trackr.feature.stop.resources.stop_favorite_station
 import com.trackr.feature.stop.resources.stop_unfavorite_station
 import com.trackr.feature.stop.resources.stop_first_arrives
 import com.trackr.feature.stop.resources.stop_loading
+import com.trackr.feature.stop.resources.stop_navigate_to_station
 import com.trackr.feature.stop.resources.stop_no_lines
 import com.trackr.feature.stop.resources.stop_pick_lines
 import com.trackr.feature.stop.resources.stop_select_hint
@@ -166,6 +167,16 @@ fun StopDetailScreen(
             onSelect = { provider, save -> onEvent(StopDetailEvent.PickTransitCode(provider, save)) }
         )
     }
+
+    // 「导航到此站」装了两家以上地图：先选一家再跳
+    val mapApps = state.mapChooserApps
+    if (mapApps != null) {
+        MapChooserSheet(
+            apps = mapApps,
+            onDismiss = { onEvent(StopDetailEvent.DismissMapChooser) },
+            onSelect = { app -> onEvent(StopDetailEvent.PickExternalMap(app)) }
+        )
+    }
 }
 
 // ------------------------------------------------------------------ 顶栏 / 底栏
@@ -215,6 +226,15 @@ private fun StopDetailTopBar(state: StopDetailUiState, watch: WatchTogetherUi?, 
             if (!state.selecting && state.stops.isNotEmpty()) {
                 StationFavoriteButton(isFavorite = state.isStationFavorite, onClick = { onEvent(StopDetailEvent.ToggleStationFavorite) })
             }
+            // 「导航到此站」：跳外部地图 App；选线模式里不放（和收藏星标同一条规则）
+            if (!state.selecting && state.stops.isNotEmpty()) {
+                IconButton(
+                    onClick = { onEvent(StopDetailEvent.OpenExternalMap) },
+                    modifier = Modifier.testTag(StopDetailTags.NAVIGATE)
+                ) {
+                    Icon(TrackrIcons.Navigation, contentDescription = stringResource(StopRes.string.stop_navigate_to_station))
+                }
+            }
         }
     )
 }
@@ -236,6 +256,7 @@ internal fun StationFavoriteButton(isFavorite: Boolean, onClick: () -> Unit, mod
 /** 站点页的测试 tag */
 object StopDetailTags {
     const val STATION_FAVORITE = "stop_station_favorite"
+    const val NAVIGATE = "stop_navigate"
 }
 
 @Composable

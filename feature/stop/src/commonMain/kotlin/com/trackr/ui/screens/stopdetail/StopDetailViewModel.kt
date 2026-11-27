@@ -8,6 +8,8 @@ import com.trackr.core.data.repository.SettingsRepository
 import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.data.repository.UserLocationStore
 import com.trackr.core.domain.math.RouteProjectionMath
+import com.trackr.core.domain.platform.ExternalMapApp
+import com.trackr.core.domain.platform.ExternalMapNavigator
 import com.trackr.core.domain.platform.ProcessMonotonicClock
 import com.trackr.core.domain.platform.TrackingController
 import com.trackr.core.domain.platform.TransitCodeLauncher
@@ -63,6 +65,7 @@ class StopDetailViewModel(
     private val trackingRepository: TrackingRepository,
     private val trackingController: TrackingController,
     private val transitCodeLauncher: TransitCodeLauncher,
+    private val externalMapNavigator: ExternalMapNavigator,
     private val enableAutoPolling: Boolean = true,
     /** 单调时钟（毫秒），用于判断恢复页面时数据是否过期；测试可注入 */
     private val clockMillis: () -> Long = { ProcessMonotonicClock.elapsedMillis() }
@@ -198,6 +201,12 @@ class StopDetailViewModel(
             StopDetailEvent.OpenTransitCode -> openTransitCode()
             StopDetailEvent.DismissTransitCodeSheet -> _uiState.update { it.copy(isTransitCodeSheetOpen = false) }
             is StopDetailEvent.PickTransitCode -> pickTransitCode(event.provider, event.saveAsDefault)
+            StopDetailEvent.OpenExternalMap -> openExternalMap()
+            StopDetailEvent.DismissMapChooser -> {
+                pendingMapTarget = null
+                _uiState.update { it.copy(mapChooserApps = null) }
+            }
+            is StopDetailEvent.PickExternalMap -> pickExternalMap(event.app)
         }
     }
 
@@ -669,6 +678,57 @@ class StopDetailViewModel(
         if (!transitCodeLauncher.open(provider)) {
             _userMessages.trySend("没能打开乘车码，请确认装了对应 App")
         }
+    }
+
+    // ---------------------------------------------------------------- 外部地图导航
+
+    /** 选地图时记住的目标（弹层选完还用它，免得期间切了站台跳错地方） */
+    private data class MapTarget(val lat: Double, val lng: Double, val name: String)
+
+    private var pendingMapTarget: MapTarget? = null
+
+    private fun openExternalMap() {
+        val target = currentMapTarget()
+        if (target == null) {
+            _userMessages.trySend("这个站暂时没有坐标，没法导航")
+            return
+        }
+        val installed = externalMapNavigator.installedApps()
+        when {
+            installed.size == 1 -> launchExternalMap(installed.single(), target)
+            installed.size > 1 -> {
+                pendingMapTarget = target
+                _uiState.update { it.copy(mapChooserApps = installed) }
+            }
+            else -> if (!externalMapNavigator.openSystem(target.lat, target.lng, target.name)) {
+                _userMessages.trySend("没能打开地图，请确认装了地图 App")
+            }
+        }
+    }
+
+    private fun pickExternalMap(app: ExternalMapApp) {
+        _uiState.update { it.copy(mapChooserApps = null) }
+        val target = pendingMapTarget ?: currentMapTarget() ?: return
+        pendingMapTarget = null
+        launchExternalMap(app, target)
+    }
+
+    private fun launchExternalMap(app: ExternalMapApp, target: MapTarget) {
+        if (!externalMapNavigator.open(app, target.lat, target.lng, target.name)) {
+            _userMessages.trySend("没能打开${app.displayName}，请确认装了这个 App")
+        }
+    }
+
+    /** 当前站台的坐标（WGS-84）：站台自己的一对优先，缺了用打开页面时带进来的站点坐标；都没有为 null */
+    private fun currentMapTarget(): MapTarget? {
+        val stop = currentStop()
+        val (lat, lng) = when {
+            stop != null && stop.wgsLat != 0.0 && stop.wgsLng != 0.0 -> stop.wgsLat to stop.wgsLng
+            stationLat != 0.0 && stationLng != 0.0 -> stationLat to stationLng
+            else -> return null
+        }
+        val name = stop?.name?.takeIf { it.isNotBlank() } ?: _uiState.value.stopName
+        return MapTarget(lat = lat, lng = lng, name = name)
     }
 
     // ---------------------------------------------------------------- 状态
