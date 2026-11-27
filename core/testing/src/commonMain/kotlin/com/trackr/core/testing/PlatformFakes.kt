@@ -4,6 +4,8 @@ import com.trackr.core.data.repository.TrackingRepository
 import com.trackr.core.domain.platform.Announcer
 import com.trackr.core.domain.platform.AppSigningInfo
 import com.trackr.core.domain.platform.AppUpdateInstaller
+import com.trackr.core.domain.platform.ExternalMapApp
+import com.trackr.core.domain.platform.ExternalMapNavigator
 import com.trackr.core.domain.platform.LocationSource
 import com.trackr.core.domain.platform.ReminderAlarms
 import com.trackr.core.domain.platform.SpeechInput
@@ -344,4 +346,29 @@ class FakeAppSigningInfo(
     private val sha1: String? = "AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD"
 ) : AppSigningInfo {
     override fun certificateSha1(): String? = sha1
+}
+
+/** 外部地图导航的 Fake：装了哪几家、能不能打开都可调，记下打开过哪家和系统兜底的次数，不真跳 */
+class FakeExternalMapNavigator(
+    var installed: List<ExternalMapApp> = listOf(ExternalMapApp.AMAP),
+    /** 打开失败时置 false，模拟被 ROM 拦下 */
+    var canOpen: Boolean = true
+) : ExternalMapNavigator {
+    val opened: MutableList<ExternalMapApp> = mutableListOf()
+    var systemOpenCount: Int = 0
+        private set
+
+    override fun installedApps(): List<ExternalMapApp> = installed
+
+    override fun open(app: ExternalMapApp, wgsLat: Double, wgsLng: Double, name: String): Boolean {
+        if (!canOpen || app !in installed) return false
+        opened += app
+        return true
+    }
+
+    override fun openSystem(wgsLat: Double, wgsLng: Double, name: String): Boolean {
+        if (!canOpen) return false
+        systemOpenCount++
+        return true
+    }
 }

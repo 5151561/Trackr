@@ -22,4 +22,7 @@
     <string name="stop_default_platform_accept">改成%1$s</string>
     <!-- 长辈版站点页（第 34 步） -->
     <string name="stop_elder_pick_platform">在哪个方向上车？</string>
+    <!-- 跳外部地图导航 -->
+    <string name="stop_navigate_to_station">导航到此站</string>
+    <string name="stop_choose_map">用哪个地图导航？</string>
 </resources>

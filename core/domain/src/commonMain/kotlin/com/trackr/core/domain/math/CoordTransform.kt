@@ -1,6 +1,7 @@
 package com.trackr.core.domain.math
 
 import kotlin.math.PI
+import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -53,6 +54,18 @@ object CoordTransform {
             wgsLng += lng - gLng
         }
         return wgsLat to wgsLng
+    }
+
+    /**
+     * GCJ-02 → BD-09（百度地图专用坐标系，百度的接口和调起链接都按 BD-09 解释坐标）。
+     * 偏移基本是定数（经度 +0.0065、纬度 +0.006）再叠一层小幅三角修正；这是百度坐标系
+     * 自己的定义，境外也照样偏，不存在「境外不偏移」。
+     */
+    fun gcj02ToBd09(lat: Double, lng: Double): Pair<Double, Double> {
+        val xPi = PI * 3000.0 / 180.0
+        val z = sqrt(lng * lng + lat * lat) + 0.00002 * sin(lat * xPi)
+        val theta = atan2(lat, lng) + 0.000003 * cos(lng * xPi)
+        return (z * sin(theta) + 0.006) to (z * cos(theta) + 0.0065)
     }
 
     /**

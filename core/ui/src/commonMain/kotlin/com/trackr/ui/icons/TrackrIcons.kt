@@ -33,6 +33,7 @@ object TrackrIcons {
         )
     }
     val Plus: ImageVector by lazy { icon("Plus", "M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z") }
+    val Navigation: ImageVector by lazy { icon("Navigation", "M21 3L3 10.53v.98l6.84 2.65L12.48 21h.98L21 3z") }
     val ChevronRight: ImageVector by lazy { icon("ChevronRight", "M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z") }
 
     private fun icon(name: String, pathData: String): ImageVector =

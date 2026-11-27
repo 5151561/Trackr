@@ -71,3 +71,20 @@ internal fun showPlatformNotice(message: String) {
     alert.addAction(UIAlertAction.actionWithTitle("知道了", UIAlertActionStyleDefault, null))
     presenter.presentViewController(alert, animated = true, completion = null)
 }
+
+/**
+ * 外部地图导航（站点页「导航到此站」）：iOS 没有高德 / 百度 / 腾讯那套调起，
+ * [installedApps] 恒为空，ViewModel 直接走 [openSystem] 打开 Apple Maps（坐标本来就是 WGS-84，不用转）。
+ */
+object IosExternalMapNavigator : ExternalMapNavigator {
+    override fun installedApps(): List<ExternalMapApp> = emptyList()
+
+    override fun open(app: ExternalMapApp, wgsLat: Double, wgsLng: Double, name: String): Boolean = false
+
+    override fun openSystem(wgsLat: Double, wgsLng: Double, name: String): Boolean {
+        val url = NSURL.URLWithString("https://maps.apple.com/?daddr=$wgsLat,$wgsLng") ?: return false
+        if (!UIApplication.sharedApplication.canOpenURL(url)) return false
+        UIApplication.sharedApplication.openURL(url, options = emptyMap<Any?, Any>(), completionHandler = null)
+        return true
+    }
+}

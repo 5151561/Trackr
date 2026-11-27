@@ -37,6 +37,7 @@ import com.trackr.core.model.TrackingTarget
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitSearchResult
 import com.trackr.core.testing.FakeAmapKeyRepository
+import com.trackr.core.testing.FakeExternalMapNavigator
 import com.trackr.core.testing.FakeTrackingController
 import com.trackr.core.testing.FakeTransitCodeLauncher
 import com.trackr.data.location.AndroidLocationSource
@@ -730,6 +731,7 @@ class ScreenshotGeneratorTest {
             trackingRepository = trackingRepository,
             trackingController = trackingController,
             transitCodeLauncher = FakeTransitCodeLauncher(),
+            externalMapNavigator = FakeExternalMapNavigator(),
             enableAutoPolling = false
         )
         mainDispatcherRule.testDispatcher.scheduler.advanceUntilIdle()
