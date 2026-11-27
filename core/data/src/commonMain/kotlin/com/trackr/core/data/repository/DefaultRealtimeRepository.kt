@@ -15,6 +15,7 @@ import com.trackr.core.model.LineTimetable
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.NearbyStopLineStatus
 import com.trackr.core.model.ProvinceCityCatalog
+import com.trackr.core.model.StandardCityCatalog
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitSearchResult
 import com.trackr.core.network.provider.model.LineDetailRequest
@@ -152,9 +153,10 @@ class DefaultRealtimeRepository(
             }
 
             val supportedCities = getSupportedCities().getOrDefault(emptyList())
+            val candidateCities = supportedCities.ifEmpty { StandardCityCatalog.fallbackCities() }
 
             // 2.5) 定位在县 / 县级市 / 独立县级区时，优先匹配支持列表里的同名县城（Issue #6 / #57）
-            matchCountyLevelCity(rawDistrict, resolvedName, supportedCities)?.let { county ->
+            matchCountyLevelCity(rawDistrict, resolvedName, candidateCities)?.let { county ->
                 val prov = county.province.takeIf { it.isNotBlank() && it != "其他" }
                     ?: ProvinceCityCatalog.inferProvince(county.cityName, county.mygolbsCityCode)
                 return@withContext county.copy(province = prov)
@@ -172,10 +174,10 @@ class DefaultRealtimeRepository(
 
             val cleanTarget = ProvinceCityCatalog.cleanCityName(cityName)
 
-            // 4) 在支持的城市列表中匹配（先无后缀精准匹配，再退回包含匹配，避免「唐山」先命中「唐山汉沽」）
-            val matched = supportedCities.firstOrNull { city ->
+            // 4) 在候选城市列表中匹配（先无后缀精准匹配，再退回包含匹配，避免「唐山」先命中「唐山汉沽」）
+            val matched = candidateCities.firstOrNull { city ->
                 ProvinceCityCatalog.cleanCityName(city.cityName) == cleanTarget
-            } ?: supportedCities.firstOrNull { city ->
+            } ?: candidateCities.firstOrNull { city ->
                 val cleanItem = ProvinceCityCatalog.cleanCityName(city.cityName)
                 cleanItem.contains(cleanTarget) || cleanTarget.contains(cleanItem)
             }

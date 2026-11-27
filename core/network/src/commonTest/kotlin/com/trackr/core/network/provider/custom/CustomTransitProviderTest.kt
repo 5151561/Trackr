@@ -118,6 +118,46 @@ class CustomTransitProviderTest {
     }
 
     @Test
+    fun cities_parsesStandardAdcodes_minimalObjects_andCustomObjects() = runTest {
+        val p = provider { request ->
+            when (request.encodedPath) {
+                "/trackr/v1/manifest" -> MockReply("", 404)
+                "/trackr/v1/cities" -> MockReply(
+                    """[
+                        "310100",
+                        "450981",
+                        "999999",
+                        {"adcode":"440606","cityId":"sd-1"},
+                        {"cityId":"campus","cityName":"张江园区"}
+                    ]"""
+                )
+                else -> MockReply("", 500)
+            }
+        }
+
+        val cities = p.getSupportedCities()
+        assertEquals(4, cities.size)
+
+        assertEquals("310100", cities[0].cityId)
+        assertEquals("上海", cities[0].cityName)
+        assertEquals("直辖市", cities[0].province)
+        assertEquals("310100", cities[0].mygolbsCityCode)
+
+        assertEquals("450981", cities[1].cityId)
+        assertEquals("北流", cities[1].cityName)
+        assertEquals("广西", cities[1].province)
+        assertEquals("玉林", cities[1].parentCity)
+
+        assertEquals("sd-1", cities[2].cityId)
+        assertEquals("顺德区", cities[2].cityName)
+        assertEquals("广东", cities[2].province)
+        assertEquals("佛山", cities[2].parentCity)
+
+        assertEquals("campus", cities[3].cityId)
+        assertEquals("张江园区", cities[3].cityName)
+    }
+
+    @Test
     fun httpError_surfacesAsIOException_withoutQuery() = runTest {
         val p = provider { MockReply("boom", 503) }
         val error = assertFailsWith<kotlinx.io.IOException> { p.search(city, "49") }

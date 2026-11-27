@@ -20,6 +20,7 @@ import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.EngineMode
 import com.trackr.core.model.FavoriteItem
 import com.trackr.core.model.ProvinceCityCatalog
+import com.trackr.core.model.StandardCityCatalog
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitCodeProvider
 import com.trackr.ui.components.elder.TTS_UNAVAILABLE_MESSAGE
@@ -299,18 +300,7 @@ class BusHomeViewModel(
         }
     }
 
-    private fun fallbackCities(): List<TransitCity> = listOf(
-        TransitCity(cityId = "", cityName = "上海", pinyin = "shanghai", supportSubway = true, isHot = true, mygolbsCityCode = "310100", province = "直辖市"),
-        TransitCity(cityId = "", cityName = "北京", pinyin = "beijing", supportSubway = true, isHot = true, mygolbsCityCode = "110100", province = "直辖市"),
-        TransitCity(cityId = "", cityName = "广州", pinyin = "guangzhou", supportSubway = true, isHot = true, mygolbsCityCode = "440100", province = "广东"),
-        TransitCity(cityId = "", cityName = "深圳", pinyin = "shenzhen", supportSubway = true, isHot = true, mygolbsCityCode = "440300", province = "广东"),
-        TransitCity(cityId = "", cityName = "杭州", pinyin = "hangzhou", supportSubway = true, isHot = true, mygolbsCityCode = "330100", province = "浙江"),
-        TransitCity(cityId = "", cityName = "南京", pinyin = "nanjing", supportSubway = true, isHot = true, mygolbsCityCode = "320100", province = "江苏"),
-        TransitCity(cityId = "", cityName = "武汉", pinyin = "wuhan", supportSubway = true, isHot = true, mygolbsCityCode = "420100", province = "湖北"),
-        TransitCity(cityId = "", cityName = "成都", pinyin = "chengdu", supportSubway = true, isHot = true, mygolbsCityCode = "510100", province = "四川"),
-        TransitCity(cityId = "", cityName = "重庆", pinyin = "chongqing", supportSubway = true, isHot = true, mygolbsCityCode = "500100", province = "直辖市"),
-        TransitCity(cityId = "", cityName = "玉林", pinyin = "yulin", supportSubway = false, isHot = true, mygolbsCityCode = "450900", province = "广西")
-    )
+    private fun fallbackCities(): List<TransitCity> = StandardCityCatalog.fallbackCities()
 
     private fun loadSupportedCities(forceRefresh: Boolean = false) {
         viewModelScope.launch {

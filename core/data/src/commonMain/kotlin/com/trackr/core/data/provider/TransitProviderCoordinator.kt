@@ -9,6 +9,7 @@ import com.trackr.core.model.EngineMode
 import com.trackr.core.model.LineTimetable
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.ProvinceCityCatalog
+import com.trackr.core.model.StandardCityCatalog
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitSearchResult
 import com.trackr.core.model.isPureSubwayStation
@@ -58,18 +59,23 @@ class TransitProviderCoordinator(
         }
         val raw = runCatching { provider?.getSupportedCities().orEmpty() }.getOrDefault(emptyList())
 
-        // 同名城市去重（保留第一个）
-        val seen = HashSet<String>()
-        val result = raw.filter { city ->
-            val cityKey = city.uniqueKey
-            cityKey.isNotBlank() && seen.add(cityKey)
-        }.map { city ->
-            val effectiveProv = if (city.province.isNotBlank() && city.province != "其他") {
-                city.province
+        // 先按协议标准城市表补齐名称 / 省份 / 上级地级市，再按 adcode 或 uniqueKey 去重（保留第一个）
+        val seenKeys = HashSet<String>()
+        val seenAdcodes = HashSet<String>()
+        val result = raw.map { city ->
+            val normalized = StandardCityCatalog.normalize(city)
+            val effectiveProv = if (normalized.province.isNotBlank() && normalized.province != "其他") {
+                normalized.province
             } else {
-                ProvinceCityCatalog.inferProvince(city.cityName, city.mygolbsCityCode)
+                ProvinceCityCatalog.inferProvince(normalized.cityName, normalized.mygolbsCityCode)
             }
-            city.copy(province = effectiveProv)
+            normalized.copy(province = effectiveProv)
+        }.filter { city ->
+            val cityKey = city.uniqueKey
+            if (cityKey.isBlank()) return@filter false
+            val stdAdcode = StandardCityCatalog.findByAdcode(city.mygolbsCityCode)?.adcode
+            if (stdAdcode != null && !seenAdcodes.add(stdAdcode)) return@filter false
+            seenKeys.add(cityKey)
         }
 
         // 依据区划码补全县级城市的上级地级市，使县级市 / 县能按「省 → 地级市 → 县级」归组展示和定位校验

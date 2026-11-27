@@ -8,6 +8,7 @@ import com.trackr.core.model.DataSourceType
 import com.trackr.core.model.LineTimetable
 import com.trackr.core.model.NearbyStop
 import com.trackr.core.model.ProvinceCityCatalog
+import com.trackr.core.model.StandardCityCatalog
 import com.trackr.core.model.TransitCity
 import com.trackr.core.model.TransitSearchResult
 import com.trackr.core.network.provider.ITransitProvider
@@ -28,7 +29,12 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNames
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.decodeFromJsonElement
 
 /** 用户还没在「我的 → 数据源」里填服务地址 */
 class DataSourceNotConfiguredException :
@@ -101,13 +107,38 @@ class CustomTransitProvider(
     override suspend fun getSupportedCities(): List<TransitCity> {
         if (!configProvider().isConfigured) return emptyList()
         ensureManifest()
-        return request("cities", null, ListSerializer(ProtocolCity.serializer()), get = true).map { wire ->
-            val city = wire.toDomain()
-            if (city.province.isBlank() || city.province == "其他") {
-                city.copy(province = ProvinceCityCatalog.inferProvince(city.cityName, city.mygolbsCityCode))
-            } else {
-                city
+        val array = request("cities", null, JsonArray.serializer(), get = true)
+        return array.mapNotNull(::parseProtocolCityElement)
+    }
+
+    private fun parseProtocolCityElement(element: JsonElement): TransitCity? {
+        return when (element) {
+            // 协议标准简写：直接传 6 位国标 adcode（如 "310100"、"450981"）
+            is JsonPrimitive -> {
+                if (!element.isString) return null
+                val code = element.content.trim()
+                StandardCityCatalog.findByAdcode(code)?.toTransitCity(cityId = code)
             }
+            // 标准对象（可只传 adcode + 可选 cityId）或完整自定义对象
+            is JsonObject -> {
+                val wire = protocolJson.decodeFromJsonElement<ProtocolCity>(element)
+                val std = StandardCityCatalog.findByAdcode(wire.adcode)
+                val cityName = wire.cityName.trim().ifBlank { std?.name.orEmpty() }
+                if (cityName.isBlank()) return null
+                val cityId = wire.cityId.trim().ifBlank {
+                    if (std != null) wire.adcode?.trim().orEmpty() else ""
+                }
+                val base = wire.copy(cityId = cityId, cityName = cityName).toDomain()
+                val normalized = StandardCityCatalog.normalize(base)
+                if (normalized.province.isBlank() || normalized.province == "其他") {
+                    normalized.copy(
+                        province = ProvinceCityCatalog.inferProvince(normalized.cityName, normalized.mygolbsCityCode)
+                    )
+                } else {
+                    normalized
+                }
+            }
+            else -> null
         }
     }
 
@@ -262,8 +293,8 @@ data class ProtocolCapabilities(
 @OptIn(ExperimentalSerializationApi::class)
 @Serializable
 internal data class ProtocolCity(
-    val cityId: String,
-    val cityName: String,
+    val cityId: String = "",
+    val cityName: String = "",
     val pinyin: String = "",
     val supportSubway: Boolean = false,
     val isHot: Boolean = false,

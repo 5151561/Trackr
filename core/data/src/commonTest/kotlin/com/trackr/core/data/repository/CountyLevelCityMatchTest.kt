@@ -110,6 +110,25 @@ class CountyLevelCityMatchTest {
     }
 
     @Test
+    fun resolveCityByLocation_withoutDataSource_matchesCountyFromStandardCatalog() = runTest {
+        val provider = StubGeoProvider(cities = emptyList())
+        val repo = DefaultRealtimeRepository(
+            coordinator = TransitProviderCoordinator(provider),
+            settings = FakeSettingsRepository(),
+            favoritesRepository = FakeFavoritesRepository(),
+            searchHistory = FakeSearchHistoryRepository(),
+            userLocation = { null },
+            geocoder = PlatformGeocoder { _, _ -> "玉林市" to "北流市" }
+        )
+
+        val resolved = repo.resolveCityByLocation(22.708, 110.354).getOrNull()
+        assertEquals("北流", resolved?.cityName)
+        assertEquals("450981", resolved?.mygolbsCityCode)
+        assertEquals("广西", resolved?.province)
+        assertEquals("玉林", resolved?.parentCity)
+    }
+
+    @Test
     fun resolveCityByLocation_prefersExactPrefectureOverContainsMatch() = runTest {
         val provider = StubGeoProvider(
             cities = listOf(

@@ -10,5 +10,11 @@ kotlin {
         commonMain.dependencies {
             api(libs.kotlinx.serialization.core)
         }
+        commonTest.dependencies {
+            implementation(kotlin("test"))
+        }
+        getByName("androidHostTest").dependencies {
+            implementation(kotlin("test-junit"))
+        }
     }
 }

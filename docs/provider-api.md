@@ -31,7 +31,7 @@ Trackr App ──(本协议：HTTPS + JSON)──▶ 你部署的数据源服务
 | 方法 | 路径 | 请求体 | 响应 | 必需 |
 | :--- | :--- | :--- | :--- | :--- |
 | GET | `/v1/manifest` | — | `Manifest` | 否（不实现时按默认能力） |
-| GET | `/v1/cities` | — | `TransitCity[]` | 是 |
+| GET | `/v1/cities` | — | `(string \| TransitCity)[]` | 是 |
 | POST | `/v1/search` | `{ city, keyword, userLat?, userLng? }` | `TransitSearchResult` | 是 |
 | POST | `/v1/line` | `{ city, lineId, targetOrder?, stationId?, userLat?, userLng?, lineNameHint, directionHint }` | `BusLineDetail` | 是 |
 | POST | `/v1/stop` | `{ city, stopId?, stopName?, physicalStId?, namesakeStId?, stationLat?, stationLng?, userLat?, userLng? }` | `NearbyStop[]` | 是 |
@@ -88,16 +88,24 @@ App 在每个服务地址第一次使用时读取一次 manifest 并缓存，换
 
 字段与 App 内部模型（`core/model/.../TransitModels.kt`）一一对应，省略的字段取下表默认值。
 
-### `TransitCity`
+### `TransitCity` 与标准城市表（`docs/cities-v1.json`）
+
+协议内置一份基于国家标准 **GB/T 2260** 的全国省/市/县/区标准城市表（见 [`docs/cities-v1.json`](cities-v1.json)，共 3,190 条，App 已离线内置）。数据源可以按需声明支持到**地级市**（如 `"450900"` 玉林），也可以精细到**县/县级市/独立公交市辖区**（如 `"450981"` 北流、`"440606"` 顺德区）。
+
+`GET /v1/cities` 数组中的每一项支持三种写法（可混用）：
+
+1. **标准简写（推荐）**：直接返回 6 位国标 `adcode` 字符串，如 `["310100", "450900", "450981"]`。App 自动从内置标准表补全城市名、省份、上级地级市与展示层级，并在后续请求里把 `adcode`（同时填进 `cityId`）回传给服务端。
+2. **标准码 + 自定义内部 ID**：如 `{"adcode": "450981", "cityId": "my-beiliu"}`。省略 `cityName` / `province` / `parentCity` 时同样由 App 按标准表补齐。
+3. **完整对象 / 非国标区域**：用于海外城市、企业园区班车等不在 GB/T 2260 内的区域，此时需填 `cityId` 和 `cityName`。带 `adcode` 的完整对象也会按标准表补全缺失的省份与上级地级市。
 
 | 字段 | 类型 | 默认 | 说明 |
 | :--- | :--- | :--- | :--- |
-| `cityId` | string | **必填** | 你的服务自己的城市 ID，可为空串 |
-| `cityName` | string | **必填** | 城市名，如 `"上海"` |
+| `adcode` | string? | `null` | 6 位国标行政区划码（GB/T 2260，对照 `docs/cities-v1.json`）；**推荐作为标准城市主键** |
+| `cityId` | string | `""` | 你的服务自己的城市 ID；命中标准 `adcode` 且省略时默认取 `adcode` |
+| `cityName` | string | `""` | 城市名，如 `"上海"`；命中标准 `adcode` 且省略时取标准表名称 |
 | `pinyin` | string | `""` | 用于城市搜索 |
-| `province` | string | `""` | 省份；为空时 App 按城市名 / 区划码推断 |
-| `adcode` | string? | `null` | 6 位国标行政区划码（GB/T 2260）。用于推断省份、县级市归属 |
-| `parentCity` | string? | `null` | 县级城市的上级地级市，如 `"北流"` → `"玉林"` |
+| `province` | string | `""` | 省份；为空时 App 按 `adcode` 标准表或城市名推断 |
+| `parentCity` | string? | `null` | 县级城市的上级地级市，如 `"北流"` → `"玉林"`；命中标准 `adcode` 时自动补全 |
 | `supportSubway` / `isHot` | bool | `false` | 展示用 |
 
 ### `BusLineDirection`（线路的一个方向）
@@ -183,10 +191,13 @@ App 在每个服务地址第一次使用时读取一次 manifest 并缓存，换
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" https://example.com/trackr/v1/cities
-# [{"cityId":"sh","cityName":"上海","adcode":"310100","province":"直辖市"}]
+# 最简标准写法（直接声明支持的 GB/T 2260 区划码，地级市或县级均可）：
+# ["310100","450900","450981"]
+# 或带自定义内部 ID：
+# [{"adcode":"310100","cityId":"sh"}]
 
 curl -X POST -H "Content-Type: application/json" \
-     -d '{"city":{"cityId":"sh","cityName":"上海"},"keyword":"49"}' \
+     -d '{"city":{"cityId":"sh","cityName":"上海","adcode":"310100"},"keyword":"49"}' \
      https://example.com/trackr/v1/search
 # {"keyword":"49","lines":[{"name":"49路","lineNo":"49","directions":[
 #   {"lineId":"sh-49-0","name":"49路","startStop":"A站","endStop":"B站","direction":0}]}]}

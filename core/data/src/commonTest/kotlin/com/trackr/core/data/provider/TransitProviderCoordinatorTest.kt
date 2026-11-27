@@ -73,6 +73,22 @@ class TransitProviderCoordinatorTest {
     }
 
     @Test
+    fun cities_countyAlone_stillGetsParentCityFromStandardCatalog() = runTest {
+        val provider = FakeProvider().apply {
+            cities = listOf(
+                TransitCity(cityId = "bl", cityName = "北流", mygolbsCityCode = "450981"),
+                TransitCity(cityId = "bl-dup", cityName = "北流市", mygolbsCityCode = "450981")
+            )
+        }
+        val cities = TransitProviderCoordinator(provider).getSupportedCities()
+
+        assertEquals(1, cities.size, "同一标准 adcode 去重")
+        assertEquals("北流", cities.single().cityName)
+        assertEquals("广西", cities.single().province)
+        assertEquals("玉林", cities.single().parentCity)
+    }
+
+    @Test
     fun cities_cacheResetsWhenSourceChanges() = runTest {
         val provider = FakeProvider().apply {
             cacheKeyValue = "https://a.test"
