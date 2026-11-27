@@ -32,7 +32,7 @@ jobs:
       - name: Checkout Update Branch
         uses: actions/checkout@v4
         with:
-          ref: update
+          ref: update-v2
           path: update-branch
 
       - name: Set up Python
@@ -60,5 +60,5 @@ jobs:
           else
             TARGET_TAG="${{ github.event.inputs.tag_name || github.event.release.tag_name || github.ref_name }}"
             git commit -m "chore(release): auto-update version metadata for ${TARGET_TAG}"
-            git push origin update
+            git push origin update-v2
           fi

@@ -38,16 +38,16 @@ class GithubUpdateChecker(
 
     companion object {
         val DEFAULT_ENDPOINTS = listOf(
-            "https://raw.githubusercontent.com/5151561/Trackr/update/update.json",
-            "https://fastly.jsdelivr.net/gh/5151561/Trackr@update/update.json",
-            "https://cdn.jsdelivr.net/gh/5151561/Trackr@update/update.json"
+            "https://raw.githubusercontent.com/5151561/Trackr/update-v2/update.json",
+            "https://fastly.jsdelivr.net/gh/5151561/Trackr@update-v2/update.json",
+            "https://cdn.jsdelivr.net/gh/5151561/Trackr@update-v2/update.json"
         )
 
-        /** beta 标签（`v*-beta*`）发布时由 workflow 写到 update 分支的 `update-beta.json` */
+        /** beta 标签（`v*-beta*`）发布时由 workflow 写到 update-v2 分支的 `update-beta.json` */
         val BETA_ENDPOINTS = listOf(
-            "https://raw.githubusercontent.com/5151561/Trackr/update/update-beta.json",
-            "https://fastly.jsdelivr.net/gh/5151561/Trackr@update/update-beta.json",
-            "https://cdn.jsdelivr.net/gh/5151561/Trackr@update/update-beta.json"
+            "https://raw.githubusercontent.com/5151561/Trackr/update-v2/update-beta.json",
+            "https://fastly.jsdelivr.net/gh/5151561/Trackr@update-v2/update-beta.json",
+            "https://cdn.jsdelivr.net/gh/5151561/Trackr@update-v2/update-beta.json"
         )
 
         /** 更新包下载地址允许的域名白名单（精确匹配，不含子域名） */
