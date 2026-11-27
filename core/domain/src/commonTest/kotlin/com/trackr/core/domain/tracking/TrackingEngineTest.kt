@@ -881,6 +881,62 @@ class TrackingEngineTest {
     }
 
     @Test
+    fun confirm_waitedAtStopThenBoardedUnreportedBus_boardsAlongLine() {
+        // issue #67：用户在候车站旁等过车，但坐上的那班车未出现在实时数据中（boardWatchSinceMillis=0），
+        // 几分钟后定位连续两次显示人已沿线路下游过站并继续前进，应正常判已上车并结束追踪
+        val t0 = NOW_MILLIS + 1
+        // 在站台等车（离站 10 m），上游只有很远的另一班车
+        val waiting = trackPoll(
+            beginSingle(),
+            listOf(boardingBus("b_far", order = 4, metersNorth = -2400)),
+            serviceFixNorth(10, ageMillis = 2_000),
+            t0
+        )
+        assertTrue(waiting.session.state.nearWaitStopAtMillis == t0)
+        assertEquals(0L, waiting.session.state.boardWatchSinceMillis)
+
+        // 6 分钟后用户已坐上未上报 GPS 的车，沿线路下游过站（600 m）
+        val first = trackPoll(
+            waiting.session,
+            listOf(boardingBus("b_far", order = 7, metersNorth = -1200)),
+            serviceFixNorth(600, ageMillis = 15_000),
+            t0 + 6 * 60_000
+        )
+        assertFalse(first.boarded())
+
+        // 12 秒后继续沿线往前走（720 m）：判已上车
+        val second = trackPoll(
+            first.session,
+            listOf(boardingBus("b_far", order = 7, metersNorth = -1100)),
+            serviceFixNorth(720, ageMillis = 3_000),
+            t0 + 6 * 60_000 + 12_000
+        )
+        assertTrue(second.boarded())
+    }
+
+    @Test
+    fun confirm_lastBusJustDeparted_showsConfirmingInsteadOfAllPassed() {
+        // issue #67：全线唯一一辆车刚过候车站，处于待确认上车窗口时，状态摘要不应闪出「车辆均已过站」
+        val arrived = singlePoll(
+            beginSingle(),
+            listOf(boardingBus("b1", order = 10, metersNorth = 0, arrived = true)),
+            serviceFixNorth(10, ageMillis = 25_000)
+        )
+        assertEquals("b1", arrived.session.state.boardingCandidateBusId)
+
+        // 车刚过站到 11 站，后面没有其他车，拿到第 1 个正定位（尚未到 10 秒二次确认）
+        val confirming = singlePoll(
+            arrived.session,
+            listOf(boardingBus("b1", order = 11, metersNorth = 120)),
+            serviceFixNorth(150, ageMillis = 15_000),
+            nowMillis = NOW_MILLIS + 10_000
+        )
+        assertTrue(confirming.effects.none { it is TrackingEngine.Effect.Finished })
+        assertTrue(confirming.session.state.statusSummary.contains("正在确认是否上车"))
+        assertFalse(confirming.session.state.statusSummary.contains("车辆均已过站"))
+    }
+
+    @Test
     fun engine_single_departedBus_keepsRetryingUntilFixQualifies() {
         // 车临近时人离站 800 m（没有站旁记忆）
         val approaching = singlePoll(beginSingle(),

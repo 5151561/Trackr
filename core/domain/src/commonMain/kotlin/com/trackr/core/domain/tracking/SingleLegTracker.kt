@@ -110,8 +110,13 @@ internal object SingleLegTracker {
         }
 
         var remembered = resetPositiveWhenBackAtStop(rememberNearStop(session, boarding, nowMillis), boarding)
-        // 补判：车到站 / 过站之后，人沿线过了站就是上了车——不看车的上报位置，也不管待确认还在不在
-        if (remembered.boardWatchSinceMillis != 0L &&
+        // 补判：车到站 / 过站之后（boardWatchSinceMillis），或用户 20 分钟内确实在候车站旁等过车
+        // （nearWaitStopAtMillis，覆盖上游漏报车辆 / 坐上无实时数据车辆或共线车，issue #67），
+        // 只要连续两个定位显示人沿线过了站并继续前进就是上了车——不看车的上报位置，也不管待确认还在不在
+        val canLateBoardCheck = remembered.boardWatchSinceMillis != 0L ||
+            (remembered.nearWaitStopAtMillis != 0L &&
+                nowMillis - remembered.nearWaitStopAtMillis in 0..BOARD_WATCH_MILLIS)
+        if (canLateBoardCheck &&
             BoardingDetector.isPastStopAlongLine(boarding, lineStops, session.targetOrder)
         ) {
             val confirmed = confirmPositive(remembered, boarding)
@@ -162,6 +167,9 @@ internal object SingleLegTracker {
             val summary = when {
                 operatingState != LineOperatingState.RUNNING ->
                     statusDescription.ifEmpty { operatingState.defaultLabel }
+                // 正在确认是否上了刚过站的车，先别报「车辆均已过站」，避免已上车前闪出误导文案（issue #67）
+                session.boardingCandidateBusId != null || session.recentDepartedBusId != null ->
+                    "车辆已过 ${session.targetStopName}，正在确认是否上车…"
                 buses.isNotEmpty() -> "车辆均已过站，等待下一班车调度"
                 else -> "暂无在途车辆运营数据"
             }
